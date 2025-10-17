@@ -6,7 +6,8 @@
 
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { resolve, isAbsolute } from 'path';
+import { resolve, isAbsolute, parse, format } from 'path';
+import { existsSync } from 'fs';
 
 const execAsync = promisify(exec);
 
@@ -129,8 +130,6 @@ export function createErrorResponse(message, details = '') {
  * @returns {Object} Validation result with error message if invalid
  */
 export function validateFilePath(filePath, fileDescription = 'File') {
-  const { existsSync } = await import('fs');
-
   if (!filePath) {
     return {
       valid: false,
@@ -156,7 +155,6 @@ export function validateFilePath(filePath, fileDescription = 'File') {
  * @returns {string} Output path with new extension
  */
 export function generateOutputPath(inputPath, newExtension) {
-  const { parse, format } = await import('path');
   const parsed = parse(inputPath);
 
   return format({
