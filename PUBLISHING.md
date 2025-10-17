@@ -34,7 +34,7 @@ npm config set //npm.pkg.github.com/:_authToken YOUR_TOKEN_HERE
 **Option B: Project-specific** (create `.npmrc` in project root)
 ```
 //npm.pkg.github.com/:_authToken=YOUR_TOKEN_HERE
-@dilon:registry=https://npm.pkg.github.com
+@dilontechnologies:registry=https://npm.pkg.github.com
 ```
 
 ⚠️ **Never commit `.npmrc` with tokens to git!** It's already in `.gitignore`.
@@ -119,13 +119,13 @@ git push --tags
 
 2. **Configure npm to use GitHub Packages**:
    ```bash
-   npm config set @dilon:registry https://npm.pkg.github.com
+   npm config set @dilontechnologies:registry https://npm.pkg.github.com
    npm config set //npm.pkg.github.com/:_authToken YOUR_TOKEN_HERE
    ```
 
 3. **Install the package**:
    ```bash
-   npm install -g @dilon/claude-tools
+   npm install -g @dilontechnologies/claude-tools
    ```
 
 The postinstall script will automatically:
@@ -138,19 +138,19 @@ The postinstall script will automatically:
 #### Updating to Latest Version
 
 ```bash
-npm update -g @dilon/claude-tools
+npm update -g @dilontechnologies/claude-tools
 ```
 
 ## Package Information
 
 View published package:
 ```bash
-npm view @dilon/claude-tools
+npm view @dilontechnologies/claude-tools
 ```
 
 View all versions:
 ```bash
-npm view @dilon/claude-tools versions
+npm view @dilontechnologies/claude-tools versions
 ```
 
 View on GitHub:
@@ -165,7 +165,7 @@ https://github.com/dilontechnologies/dilon-claude-tools/packages
 **Solution**: Ensure the package name in `package.json` matches your GitHub org:
 ```json
 {
-  "name": "@dilon/claude-tools",
+  "name": "@dilontechnologies/claude-tools",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   }

@@ -45,13 +45,13 @@ Dependencies (automatically installed by the package):
 
 2. **Configure npm to use GitHub Packages:**
    ```powershell
-   npm config set @dilon:registry https://npm.pkg.github.com
+   npm config set @dilontechnologies:registry https://npm.pkg.github.com
    npm config set //npm.pkg.github.com/:_authToken YOUR_TOKEN_HERE
    ```
 
 3. **Install the package globally:**
    ```powershell
-   npm install -g @dilon/claude-tools
+   npm install -g @dilontechnologies/claude-tools
    ```
 
    The postinstall script will automatically:
@@ -62,7 +62,7 @@ Dependencies (automatically installed by the package):
 
 4. **Install missing dependencies** (if prompted):
    ```powershell
-   npm explore @dilon/claude-tools -- npm run install-deps
+   npm explore @dilontechnologies/claude-tools -- npm run install-deps
    ```
 
    Or install manually using the dependency installer.
@@ -298,7 +298,7 @@ pip install --upgrade python-docx python-docx-template docxcompose pyyaml
 To update to the latest version:
 
 ```powershell
-npm update -g @dilon/claude-tools
+npm update -g @dilontechnologies/claude-tools
 ```
 
 Restart Claude Desktop after updating.
@@ -320,7 +320,7 @@ Restart Claude Desktop after updating.
 ### NPM Installation
 
 ```powershell
-npm uninstall -g @dilon/claude-tools
+npm uninstall -g @dilontechnologies/claude-tools
 ```
 
 The preuninstall script will automatically:
