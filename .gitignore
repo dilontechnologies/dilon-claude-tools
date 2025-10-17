@@ -4,6 +4,7 @@ package-lock.json
 
 # Configuration (user-specific paths)
 .dilon-tools-config.json
+.npmrc
 
 # Logs
 *.log
