@@ -397,6 +397,135 @@ if (-not (Test-Path $claudeConfigPath)) {
 }
 
 Write-Host ""
+Write-Host "Step 7: Installing PowerShell command (optional)..." -ForegroundColor Cyan
+Write-Host ""
+
+# Install Compile-DilonDoc PowerShell function
+$compilerScriptPath = Join-Path $RepoRoot "tools\Dilon_Document_Compiler\generate_dilon_doc.py"
+$signatureTemplatePath = Join-Path $RepoRoot "tools\Dilon_Document_Compiler\TEMPLATE_Word_Signature.docx"
+$contentTemplatePath = Join-Path $RepoRoot "tools\Dilon_Document_Compiler\TEMPLATE_Word_Content.docx"
+
+Write-Host "  → Adding Compile-DilonDoc command to PowerShell profile..." -ForegroundColor Gray
+
+$functionDefinition = @"
+function Compile-DilonDoc {
+    <#
+    .SYNOPSIS
+    Compiles a Markdown file to a formatted Dilon Word document.
+
+    .DESCRIPTION
+    Converts a Markdown file with YAML front matter to a properly formatted Word document
+    using the Dilon Document Compiler.
+
+    .PARAMETER InputMarkdown
+    Path to the input Markdown file (.md)
+
+    .PARAMETER OutputWord
+    Path to the output Word file (.docx). Optional - defaults to same name as input with .docx extension.
+
+    .PARAMETER SignatureTemplate
+    Path to custom signature template. Optional - uses default if not specified.
+
+    .PARAMETER ContentTemplate
+    Path to custom content template. Optional - uses default if not specified.
+
+    .EXAMPLE
+    Compile-DilonDoc -InputMarkdown "MyDocument.md"
+
+    .EXAMPLE
+    Compile-DilonDoc "MyDocument.md" "Output.docx"
+    #>
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=`$true, Position=0)]
+        [string]`$InputMarkdown,
+
+        [Parameter(Position=1)]
+        [string]`$OutputWord,
+
+        [Parameter()]
+        [string]`$SignatureTemplate,
+
+        [Parameter()]
+        [string]`$ContentTemplate
+    )
+
+    `$inputPath = Resolve-Path `$InputMarkdown -ErrorAction Stop
+
+    if (-not `$OutputWord) {
+        `$OutputWord = [System.IO.Path]::ChangeExtension(`$inputPath, ".docx")
+    }
+
+    `$pythonArgs = @(
+        "$compilerScriptPath",
+        "`$inputPath",
+        "`$OutputWord"
+    )
+
+    if (`$SignatureTemplate) {
+        `$pythonArgs += `$SignatureTemplate
+        if (`$ContentTemplate) {
+            `$pythonArgs += `$ContentTemplate
+        } else {
+            `$pythonArgs += "$contentTemplatePath"
+        }
+    } elseif (`$ContentTemplate) {
+        `$pythonArgs += "$signatureTemplatePath"
+        `$pythonArgs += `$ContentTemplate
+    }
+
+    Write-Host "Compiling document..." -ForegroundColor Cyan
+    & python `$pythonArgs
+
+    if (`$LASTEXITCODE -eq 0) {
+        Write-Host "✅ Document compiled successfully!" -ForegroundColor Green
+        Write-Host "Output: `$OutputWord" -ForegroundColor Green
+    } else {
+        Write-Error "❌ Document compilation failed!"
+    }
+}
+
+Set-Alias -Name dilonc -Value Compile-DilonDoc
+"@
+
+# Get PowerShell profile path
+$profilePath = $PROFILE.CurrentUserAllHosts
+
+# Create profile if it doesn't exist
+if (-not (Test-Path $profilePath)) {
+    $profileDir = Split-Path $profilePath -Parent
+    if (-not (Test-Path $profileDir)) {
+        New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+    }
+    New-Item -ItemType File -Path $profilePath -Force | Out-Null
+}
+
+# Read existing profile
+$profileContent = Get-Content $profilePath -Raw -ErrorAction SilentlyContinue
+
+# Check if function already exists
+if ($profileContent -match "function Compile-DilonDoc") {
+    # Remove old function
+    $profileContent = $profileContent -replace "(?s)function Compile-DilonDoc.*?^}", ""
+    $profileContent = $profileContent -replace "(?m)^Set-Alias -Name dilonc.*$", ""
+    $profileContent = $profileContent.Trim()
+}
+
+# Append function
+if ($profileContent) {
+    $newContent = $profileContent + "`n`n# Dilon Document Compiler`n" + $functionDefinition
+} else {
+    $newContent = "# Dilon Document Compiler`n" + $functionDefinition
+}
+
+Set-Content -Path $profilePath -Value $newContent
+
+Write-Host "  ✓ PowerShell command installed" -ForegroundColor Green
+Write-Host "    • Compile-DilonDoc <input.md> [output.docx]" -ForegroundColor Gray
+Write-Host "    • dilonc <input.md> [output.docx] (alias)" -ForegroundColor Gray
+
+Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "  ✓ Installation Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green

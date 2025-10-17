@@ -1,0 +1,37 @@
+# Development files
+.git/
+.gitignore
+*.log
+npm-debug.log*
+
+# Tests
+tests/
+*.test.js
+*.spec.js
+
+# Examples (users can reference from docs)
+examples/
+
+# Installation script (not needed after npm install)
+install.ps1
+
+# User config (will be created during postinstall)
+.dilon-tools-config.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+~$*
+
+# Documentation that's not needed in package
+CONTRIBUTING.md
+.github/

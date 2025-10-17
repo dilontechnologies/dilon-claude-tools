@@ -21,9 +21,11 @@ This repository provides a Model Context Protocol (MCP) server that exposes Dilo
 
 ## 📋 Prerequisites
 
-The installation script will automatically install missing dependencies, but you can also install them manually:
-
 - **Node.js** (>= 18.0.0) - Required for MCP server
+- **npm** - Node package manager (included with Node.js)
+- **GitHub Personal Access Token** (for installation from GitHub Packages)
+
+Dependencies (automatically installed by the package):
 - **Python** (>= 3.8) - Required for document compiler
 - **Pandoc** - Required for Markdown → Word conversion
 - **Java** - Required for PlantUML diagram generation
@@ -31,7 +33,50 @@ The installation script will automatically install missing dependencies, but you
 
 ## 🔧 Installation
 
-### Automatic Installation (Recommended)
+### NPM Installation (Recommended)
+
+**For Dilon Technologies team members:**
+
+1. **Create GitHub Personal Access Token** (one-time setup)
+   - Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+   - Click "Generate new token (classic)"
+   - Select scopes: `read:packages`
+   - Copy the token
+
+2. **Configure npm to use GitHub Packages:**
+   ```powershell
+   npm config set @dilon:registry https://npm.pkg.github.com
+   npm config set //npm.pkg.github.com/:_authToken YOUR_TOKEN_HERE
+   ```
+
+3. **Install the package globally:**
+   ```powershell
+   npm install -g @dilon/claude-tools
+   ```
+
+   The postinstall script will automatically:
+   - ✅ Register MCP server with Claude Desktop
+   - ✅ Create default configuration file
+   - ✅ Check for missing dependencies (Python, Pandoc, Java, PlantUML)
+   - ✅ Install Python packages (python-docx, pyyaml, etc.)
+
+4. **Install missing dependencies** (if prompted):
+   ```powershell
+   npm explore @dilon/claude-tools -- npm run install-deps
+   ```
+
+   Or install manually using the dependency installer.
+
+5. **Restart Claude Desktop** to load the new tools
+
+6. **Verify installation:**
+   ```powershell
+   dilon-tools info
+   ```
+
+### Manual Installation (Alternative)
+
+If you need to install from source or make local modifications:
 
 1. **Clone the repository:**
    ```powershell
@@ -51,32 +96,10 @@ The installation script will automatically install missing dependencies, but you
    - ✅ Install Python packages (python-docx, pyyaml, etc.)
    - ✅ Install Node.js packages (MCP SDK)
    - ✅ Create configuration file
-   - ✅ Register MCP server with Claude Code
+   - ✅ Register MCP server with Claude Desktop
+   - ✅ Install PowerShell commands (Compile-DilonDoc, dilonc)
 
-3. **Restart Claude Code** to load the new tools
-
-### Manual Installation
-
-If you prefer to install dependencies manually:
-
-```powershell
-# Install dependencies
-winget install Python.Python.3.11
-winget install JohnMacFarlane.Pandoc
-winget install EclipseAdoptium.Temurin.21.JRE
-
-# Install Python packages
-pip install python-docx python-docx-template docxcompose pyyaml
-
-# Install Node.js packages
-npm install
-
-# Create configuration
-copy .dilon-tools-config.example.json .dilon-tools-config.json
-# Edit .dilon-tools-config.json with your paths
-
-# Register with Claude Code manually (edit claude_desktop_config.json)
-```
+3. **Restart Claude Desktop** to load the new tools
 
 ## 📖 Usage
 
@@ -119,6 +142,30 @@ Claude: *uses dilon_plantuml tool*
 - SVG (vector graphics)
 - PDF (printable)
 
+## 🖥️ CLI Commands
+
+The `dilon-tools` CLI is installed globally and provides useful commands:
+
+```powershell
+# Show version
+dilon-tools version
+
+# Show package information and available tools
+dilon-tools info
+
+# Show installation directory
+dilon-tools path
+
+# Show MCP server path
+dilon-tools server-path
+
+# Show configuration file paths
+dilon-tools config
+
+# Show help
+dilon-tools help
+```
+
 ## 📚 Documentation
 
 ### Styling Guides
@@ -134,6 +181,10 @@ Claude: *uses dilon_plantuml tool*
 
 - **Dilon Document Compiler** - `tools/Dilon_Document_Compiler/README.md`
 - **PlantUML Integration** - See PlantUML Style Guide
+
+### Publishing
+
+- **[Publishing Guide](PUBLISHING.md)** - Instructions for package maintainers to publish updates to GitHub Packages
 
 ## 🏗️ Repository Structure
 
@@ -242,7 +293,19 @@ pip install --upgrade python-docx python-docx-template docxcompose pyyaml
 
 ## 🔄 Updating
 
+### NPM Installation
+
 To update to the latest version:
+
+```powershell
+npm update -g @dilon/claude-tools
+```
+
+Restart Claude Desktop after updating.
+
+### Manual Installation
+
+For manual installations:
 
 ```powershell
 cd C:\Users\YourUsername\Local_Documents\Local_Repos\dilon-claude-tools
@@ -250,7 +313,32 @@ git pull
 npm install
 ```
 
-Restart Claude Code after updating.
+Restart Claude Desktop after updating.
+
+## 🗑️ Uninstallation
+
+### NPM Installation
+
+```powershell
+npm uninstall -g @dilon/claude-tools
+```
+
+The preuninstall script will automatically:
+- ✅ Remove MCP server registration from Claude Desktop config
+- ✅ Clean up package files
+
+### Manual Installation
+
+1. Remove the MCP server entry from Claude Desktop config:
+   - Open `%APPDATA%\Claude\claude_desktop_config.json`
+   - Remove the `dilon-claude-tools` entry from `mcpServers`
+
+2. Delete the repository folder:
+   ```powershell
+   rm -r C:\Users\YourUsername\Local_Documents\Local_Repos\dilon-claude-tools
+   ```
+
+Restart Claude Desktop after uninstallation.
 
 ## 🤝 Contributing
 

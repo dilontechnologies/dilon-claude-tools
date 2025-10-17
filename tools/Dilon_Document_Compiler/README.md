@@ -2,13 +2,33 @@
 
 Python-based document generation system for creating regulatory-compliant Word documents from Markdown source files with YAML metadata.
 
+**Part of:** [Dilon Claude Tools MCP Server](../../README.md)
+
 ## Overview
 
-This tool generates properly formatted Word documents for Dilon Diagnostics by:
+This tool generates properly formatted Word documents for Dilon Technologies by:
 1. Parsing Markdown files with YAML front matter
 2. Rendering Word templates with Jinja2 variables
 3. Converting Markdown content to Word format via Pandoc
 4. Merging all components into a final document
+
+### Integration Options
+
+This compiler can be used in three ways:
+
+1. **Via Claude Code MCP Server** (Recommended)
+   - Automatically available as `dilon_compile_doc` tool in Claude Code
+   - No manual invocation needed - Claude handles it automatically
+   - See [main README](../../README.md) for setup
+
+2. **Via PowerShell Command**
+   - Use `Compile-DilonDoc` or `dilonc` commands from any directory
+   - Installed automatically by the MCP server installer
+   - See "PowerShell Usage" section below
+
+3. **Via Python Directly**
+   - Direct script invocation for custom workflows
+   - See "Python Usage" section below
 
 ## Features
 
@@ -33,6 +53,8 @@ This tool generates properly formatted Word documents for Dilon Diagnostics by:
 
 ## Requirements
 
+**Note:** If using the MCP server, all requirements are installed automatically by `install.ps1`. Manual installation is only needed for standalone use.
+
 ### Python Packages
 ```bash
 pip install python-docx python-docx-template docxcompose pyyaml
@@ -43,38 +65,54 @@ pip install python-docx python-docx-template docxcompose pyyaml
   - Download: https://pandoc.org/installing.html
   - Must be accessible in system PATH
 
-## Installation (PowerShell Command)
+## Installation
 
-To install a global PowerShell command for easy access from any directory:
+### Via MCP Server (Recommended)
 
-1. **Run the installer**:
+The Dilon Claude Tools MCP Server installer handles everything automatically:
+
+```powershell
+cd C:\Users\YourUsername\Local_Documents\Local_Repos\dilon-claude-tools
+.\install.ps1
+```
+
+This installs:
+- Python and required packages
+- Pandoc
+- MCP server integration
+- PowerShell commands (`Compile-DilonDoc`, `dilonc`)
+
+See [main README](../../README.md) for details.
+
+### Standalone Installation
+
+For standalone use without the MCP server:
+
+1. Install Python packages:
    ```powershell
-   cd Documentation\Scripts\Dilon_Document_Compiler
-   .\Install-DilonCompiler.ps1
+   pip install python-docx python-docx-template docxcompose pyyaml
    ```
 
-2. **Reload your PowerShell profile**:
-   ```powershell
-   . $PROFILE
-   ```
+2. Install Pandoc from https://pandoc.org/installing.html
 
-3. **You can now use the compiler from any directory**:
-   ```powershell
-   # Full command
-   Compile-DilonDoc MyDocument.md
-
-   # Short alias
-   dilonc MyDocument.md
-
-   # Specify output filename
-   dilonc MyDocument.md Output.docx
-   ```
-
-The installer adds the `Compile-DilonDoc` function and `dilonc` alias to your PowerShell profile.
+3. Use Python directly (see "Python Usage" below)
 
 ## Usage
 
-### Using PowerShell Command (Recommended)
+### Via Claude Code (MCP Server)
+
+Once the MCP server is installed, simply ask Claude in conversation:
+
+```
+User: "Compile Documentation/Requirements.md to a Word document"
+
+Claude: *automatically uses dilon_compile_doc tool*
+        ✅ Document compiled successfully!
+```
+
+No manual commands needed - Claude handles invocation automatically.
+
+### PowerShell Usage
 ```powershell
 # Auto-generate output filename (MyDocument.docx)
 Compile-DilonDoc MyDocument.md
@@ -86,7 +124,9 @@ Compile-DilonDoc MyDocument.md Output.docx
 dilonc MyDocument.md Output.docx
 ```
 
-### Using Python Directly
+The `Compile-DilonDoc` function and `dilonc` alias are installed automatically by the MCP server installer.
+
+### Python Usage (Direct)
 ```bash
 python generate_dilon_doc.py <input.md> <output.docx>
 ```
@@ -324,14 +364,19 @@ python generate_dilon_doc.py input.md output.docx custom_sig.docx custom_content
 
 ## File Structure
 
+**Within MCP Server Repository:**
+
 ```
-Dilon_Document_Compiler/
-├── generate_dilon_doc.py          # Main Python script
-├── Install-DilonCompiler.ps1      # PowerShell installer script
-├── TEMPLATE_Word_Signature.docx   # Part A template (signature page)
-├── TEMPLATE_Word_Content.docx     # Part C template (title page)
-├── TEMPLATE_Document.md           # Markdown template with YAML fields
-└── README.md                      # This file
+dilon-claude-tools/
+├── tools/Dilon_Document_Compiler/
+│   ├── generate_dilon_doc.py          # Main Python script
+│   ├── TEMPLATE_Word_Signature.docx   # Part A template (signature page)
+│   ├── TEMPLATE_Word_Content.docx     # Part C template (title page)
+│   └── README.md                      # This file
+├── docs/
+│   ├── TEMPLATE_Document.md           # Markdown template with YAML fields
+│   └── MARKDOWN_STYLING_GUIDE.md      # Styling reference
+└── install.ps1                        # Main installer (installs everything)
 ```
 
 ## Creating New Documents
@@ -340,7 +385,8 @@ Dilon_Document_Compiler/
 
 1. **Copy the markdown template**:
    ```bash
-   cp TEMPLATE_Document.md Your_Document_Name.md
+   # Template is now in docs/ directory
+   cp ../../docs/TEMPLATE_Document.md Your_Document_Name.md
    ```
 
 2. **Edit the YAML front matter**:
@@ -386,10 +432,20 @@ The `TEMPLATE_Document.md` includes all required YAML fields:
   - Markdown content conversion
   - Sequential document merging
 
+## Related Documentation
+
+- **[Main MCP Server README](../../README.md)** - Setup and usage of the complete MCP server
+- **[Markdown Styling Guide](../../docs/MARKDOWN_STYLING_GUIDE.md)** - Formatting reference
+- **[Document Template](../../docs/TEMPLATE_Document.md)** - Template for new documents
+- **[PlantUML Style Guide](../../docs/PlantUML_Style_Guide.md)** - Diagram standards
+
 ## License
 
-Internal use only - Dilon Diagnostics LLC
+Internal use only - Dilon Technologies LLC
 
 ## Support
 
-For questions or issues, contact the Engineering Department.
+For questions or issues:
+- Check the [main README troubleshooting section](../../README.md#troubleshooting)
+- Review the [Markdown Styling Guide](../../docs/MARKDOWN_STYLING_GUIDE.md)
+- Contact the Engineering Department
