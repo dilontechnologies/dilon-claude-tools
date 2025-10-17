@@ -1,6 +1,6 @@
 {
   "name": "@dilontechnologies/claude-tools",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server providing Dilon Technologies tools for Claude Code integration",
   "main": "server.js",
   "type": "module",
