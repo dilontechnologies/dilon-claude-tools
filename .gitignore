@@ -24,3 +24,6 @@ Thumbs.db
 *.tmp
 ~$*
 tests/test-output/
+
+# Local configuration files
+*.local.*
