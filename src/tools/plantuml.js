@@ -22,7 +22,7 @@ export const toolDefinition = {
   name: 'dilon_plantuml',
   description: 'Generates diagrams from PlantUML (.puml) files using Dilon styling conventions. ' +
                'Supports PNG, SVG, and PDF output formats. ' +
-               'See PlantUML_Style_Guide.md in Nav3 repo for styling standards.',
+               'IMPORTANT: Reference the dilon://styling/plantuml resource for detailed PlantUML styling guidelines before generating diagrams.',
   inputSchema: {
     type: 'object',
     properties: {

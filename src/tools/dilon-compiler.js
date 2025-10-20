@@ -22,7 +22,8 @@ export const toolDefinition = {
   name: 'dilon_compile_doc',
   description: 'Compiles a Markdown file with YAML front matter into a formatted Dilon Word document. ' +
                'Uses the Dilon Document Compiler to generate regulatory-compliant Word documents with ' +
-               'signature pages, revision tables, and table of contents.',
+               'signature pages, revision tables, and table of contents. ' +
+               'IMPORTANT: Reference the dilon://styling/markdown resource for detailed markdown styling guidelines before compiling documents.',
   inputSchema: {
     type: 'object',
     properties: {

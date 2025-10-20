@@ -5,6 +5,52 @@ All notable changes to the Dilon Claude Tools MCP Server will be documented in t
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2025-10-20
+
+### Added
+- **dilon_generate_stub** - New MCP tool for generating document stubs
+  - Creates markdown files from TEMPLATE_Document.md template
+  - Customizable YAML front matter (title, author, doc_number, department, etc.)
+  - All parameters optional except output_path
+  - Default values: revision "00", department/representatives "--"
+  - Automatic revision number synchronization with current_revision
+  - Validates against duplicate files
+- **MCP Resources** - Styling guides now available as MCP resources
+  - `dilon://styling/markdown` - Comprehensive markdown styling guide (30,033 chars)
+  - `dilon://styling/plantuml` - PlantUML style guide with xUML conventions (22,038 chars)
+  - Passively available for Claude to reference when needed
+- **Comprehensive Test Suite** - Automated testing infrastructure
+  - `tests/test-all-features.js` - 18 MCP integration tests
+  - `tests/validate-output.py` - 5 Python validation tests
+  - Tests all tools, resources, and output validation
+  - 100% test coverage for new features
+  - npm test script configured
+- **Test Documentation** - `tests/README.md` with complete testing guide
+
+### Changed
+- Updated TEMPLATE_Document.md
+  - Removed "Notes for Using This Template" section (info now in resources)
+  - Removed example sections 1.3, 2, 3, and 4
+  - Kept only essential Purpose and Scope sections
+  - Changed default revision from "1.0" to "00"
+  - Changed default department/representatives to "--"
+- Updated tool descriptions to reference styling guide resources
+  - `dilon_compile_doc` now reminds to reference markdown styling guide
+  - `dilon_plantuml` now reminds to reference PlantUML styling guide
+  - `dilon_generate_stub` references markdown styling guide
+- Updated MCP server capabilities
+  - Added `resources` capability alongside `tools`
+  - Registered 3 tools (was 2): dilon_compile_doc, dilon_plantuml, dilon_generate_stub
+  - Registered 2 resources: markdown and PlantUML styling guides
+- Updated CLAUDE.md with comprehensive documentation of new features
+
+### Technical Details
+- Server now implements both `ListResourcesRequestSchema` and `ReadResourceRequestSchema`
+- Resource content served directly from docs/ directory
+- Test suite uses actual MCP JSON-RPC protocol for integration testing
+- Python validation uses python-docx and pyyaml for structural verification
+- Added tests/test-output/ to .gitignore
+
 ## [1.0.1] - 2025-10-17
 
 ### Fixed
