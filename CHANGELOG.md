@@ -5,6 +5,13 @@ All notable changes to the Dilon Claude Tools MCP Server will be documented in t
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2025-11-24
+
+### Changed
+- Updated Word document templates with improved formatting
+  - TEMPLATE_Word_Content.docx - Enhanced content formatting
+  - TEMPLATE_Word_Signature.docx - Refined signature page layout
+
 ## [1.1.0] - 2025-10-20
 
 ### Added
