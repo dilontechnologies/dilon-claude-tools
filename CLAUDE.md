@@ -6,10 +6,16 @@ This is an **npm (Node.js) package** that implements a **Model Context Protocol 
 
 **Package Details:**
 - Name: `@dilontechnologies/claude-tools`
-- Version: 1.0.1
+- Version: 1.1.1
 - Published to: GitHub Packages (private registry)
 - License: UNLICENSED (internal use only)
 - Node.js: >= 18.0.0
+
+**Publishing Workflow:**
+- **Automatic Publishing:** Package is automatically published to GitHub Packages via GitHub Actions workflow
+- **Trigger:** Pushing a git tag matching `v*` pattern (e.g., `v1.1.1`) triggers the publish workflow
+- **Process:** Create version tag → push to origin → GitHub Actions automatically publishes
+- **Manual Publishing:** Can also be published manually via `npm publish` if needed
 
 ## Existing Tools/Features
 
