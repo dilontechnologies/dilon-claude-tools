@@ -5,6 +5,19 @@ All notable changes to the Dilon Claude Tools MCP Server will be documented in t
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-01-20
+
+### Fixed
+- Fixed Python 3.13 compatibility issue with PyYAML
+  - Updated install.ps1 to require PyYAML 6.0 or later
+  - Resolved `AttributeError: module 'collections' has no attribute 'Hashable'`
+  - PyYAML versions prior to 6.0 are incompatible with Python 3.13+
+
+### Technical Details
+- Python 3.13 removed the deprecated `collections.Hashable` (moved to `collections.abc.Hashable`)
+- PyYAML 6.0+ includes the fix for Python 3.10+ compatibility
+- Installation script now enforces minimum PyYAML version with `pyyaml>=6.0`
+
 ## [1.1.1] - 2025-11-24
 
 ### Changed

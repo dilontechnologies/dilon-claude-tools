@@ -302,7 +302,7 @@ Write-Host "Step 3: Installing Python dependencies..." -ForegroundColor Cyan
 Write-Host ""
 
 # Install Python packages required by Dilon Document Compiler
-$requiredPackages = @("python-docx", "python-docx-template", "docxcompose", "pyyaml")
+$requiredPackages = @("python-docx", "python-docx-template", "docxcompose", "pyyaml>=6.0")
 
 foreach ($package in $requiredPackages) {
     Write-Host "  → Installing $package..." -ForegroundColor Gray
