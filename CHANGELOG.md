@@ -5,6 +5,19 @@ All notable changes to the Dilon Claude Tools MCP Server will be documented in t
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-01-20
+
+### Security
+- **Upgraded @modelcontextprotocol/sdk from v0.5.0 to v1.25.3**
+  - Fixed DNS rebinding protection vulnerability (GHSA-w48q-cv73-mx4w)
+  - Fixed ReDoS (Regular Expression Denial of Service) vulnerability (GHSA-8r9q-7v3j-jr4g)
+  - No breaking changes - all tests pass (18 MCP tests + 5 validation tests)
+  - npm audit now shows 0 vulnerabilities
+
+### Changed
+- Updated package dependencies for security compliance
+- Verified all MCP server functionality after SDK upgrade
+
 ## [1.1.2] - 2026-01-20
 
 ### Fixed
