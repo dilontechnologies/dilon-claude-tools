@@ -1,0 +1,8 @@
+{
+  "name": "dilon-tools",
+  "version": "2.0.0",
+  "description": "Dilon Technologies document authoring and Word-compilation skills for regulatory-compliant technical documentation.",
+  "author": {
+    "name": "Dilon Technologies LLC"
+  }
+}

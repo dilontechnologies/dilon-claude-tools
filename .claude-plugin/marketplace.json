@@ -1,0 +1,14 @@
+{
+  "name": "dilon-claude-tools",
+  "owner": {
+    "name": "Dilon Technologies LLC"
+  },
+  "description": "Dilon Technologies internal Claude Code plugin marketplace.",
+  "plugins": [
+    {
+      "name": "dilon-tools",
+      "source": "./",
+      "description": "Dilon Technologies document authoring and Word-compilation skills for regulatory-compliant technical documentation."
+    }
+  ]
+}
