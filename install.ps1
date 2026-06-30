@@ -1,11 +1,11 @@
 # install.ps1
-# Installation script for Dilon Claude Tools MCP Server
+# Dependency setup for Dilon Claude Tools (Claude Code plugin)
 #
 # This script:
-# 1. Checks for required dependencies (Python, Pandoc, Java, PlantUML)
-# 2. Installs missing dependencies automatically
-# 3. Configures the MCP server
-# 4. Registers the server with Claude Code
+# 1. Checks for required dependencies (Python, Pandoc)
+# 2. Installs missing dependencies automatically via winget
+# 3. Installs required Python packages
+# 4. Installs the Compile-DilonDoc / dilonc PowerShell alias
 
 #Requires -RunAsAdministrator
 
@@ -17,14 +17,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Dilon Claude Tools MCP Server Setup  " -ForegroundColor Cyan
+Write-Host "  Dilon Claude Tools - Dependency Setup  " -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Get script and repo directories
 $RepoRoot = $PSScriptRoot
-$ConfigPath = Join-Path $RepoRoot ".dilon-tools-config.json"
-$ExampleConfigPath = Join-Path $RepoRoot ".dilon-tools-config.example.json"
 
 # ============================================
 # Dependency Detection Functions
@@ -43,7 +40,7 @@ function Test-CommandExists {
 function Get-PythonPath {
     if (Test-CommandExists "python") {
         $version = python --version 2>&1
-        Write-Host "  ✓ Python found: $version" -ForegroundColor Green
+        Write-Host "  [OK] Python found: $version" -ForegroundColor Green
         return "python"
     }
     return $null
@@ -52,38 +49,9 @@ function Get-PythonPath {
 function Get-PandocPath {
     if (Test-CommandExists "pandoc") {
         $version = pandoc --version 2>&1 | Select-Object -First 1
-        Write-Host "  ✓ Pandoc found: $version" -ForegroundColor Green
+        Write-Host "  [OK] Pandoc found: $version" -ForegroundColor Green
         return "pandoc"
     }
-    return $null
-}
-
-function Get-JavaPath {
-    if (Test-CommandExists "java") {
-        $version = java -version 2>&1 | Select-Object -First 1
-        Write-Host "  ✓ Java found: $version" -ForegroundColor Green
-        return "java"
-    }
-    return $null
-}
-
-function Get-PlantUMLPath {
-    # Check common installation locations
-    $commonPaths = @(
-        "C:\Program Files\PlantUML",
-        "C:\PlantUML",
-        "$env:LOCALAPPDATA\PlantUML",
-        "$env:ProgramFiles\PlantUML"
-    )
-
-    foreach ($path in $commonPaths) {
-        $jarPath = Join-Path $path "plantuml.jar"
-        if (Test-Path $jarPath) {
-            Write-Host "  ✓ PlantUML found: $path" -ForegroundColor Green
-            return $path
-        }
-    }
-
     return $null
 }
 
@@ -92,23 +60,23 @@ function Get-PlantUMLPath {
 # ============================================
 
 function Install-Winget {
-    Write-Host "  → Checking for winget..." -ForegroundColor Yellow
+    Write-Host "  -> Checking for winget..." -ForegroundColor Yellow
 
     if (Test-CommandExists "winget") {
-        Write-Host "  ✓ winget already installed" -ForegroundColor Green
+        Write-Host "  [OK] winget already installed" -ForegroundColor Green
         return $true
     }
 
-    Write-Host "  ⚠️  winget not found. Please install Windows App Installer from Microsoft Store." -ForegroundColor Yellow
+    Write-Host "  [WARN] winget not found. Please install Windows App Installer from Microsoft Store." -ForegroundColor Yellow
     Write-Host "     URL: https://aka.ms/getwinget" -ForegroundColor Yellow
     return $false
 }
 
 function Install-Python {
-    Write-Host "  → Installing Python..." -ForegroundColor Yellow
+    Write-Host "  -> Installing Python..." -ForegroundColor Yellow
 
     if (-not (Install-Winget)) {
-        Write-Host "  ❌ Cannot install Python without winget" -ForegroundColor Red
+        Write-Host "  [FAIL] Cannot install Python without winget" -ForegroundColor Red
         return $false
     }
 
@@ -119,23 +87,23 @@ function Install-Python {
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
         if (Test-CommandExists "python") {
-            Write-Host "  ✓ Python installed successfully" -ForegroundColor Green
+            Write-Host "  [OK] Python installed successfully" -ForegroundColor Green
             return $true
         } else {
-            Write-Host "  ⚠️  Python installed but not in PATH. You may need to restart your terminal." -ForegroundColor Yellow
+            Write-Host "  [WARN] Python installed but not in PATH. You may need to restart your terminal." -ForegroundColor Yellow
             return $true
         }
     } catch {
-        Write-Host "  ❌ Failed to install Python: $_" -ForegroundColor Red
+        Write-Host "  [FAIL] Failed to install Python: $_" -ForegroundColor Red
         return $false
     }
 }
 
 function Install-Pandoc {
-    Write-Host "  → Installing Pandoc..." -ForegroundColor Yellow
+    Write-Host "  -> Installing Pandoc..." -ForegroundColor Yellow
 
     if (-not (Install-Winget)) {
-        Write-Host "  ❌ Cannot install Pandoc without winget" -ForegroundColor Red
+        Write-Host "  [FAIL] Cannot install Pandoc without winget" -ForegroundColor Red
         return $false
     }
 
@@ -146,89 +114,15 @@ function Install-Pandoc {
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
         if (Test-CommandExists "pandoc") {
-            Write-Host "  ✓ Pandoc installed successfully" -ForegroundColor Green
+            Write-Host "  [OK] Pandoc installed successfully" -ForegroundColor Green
             return $true
         } else {
-            Write-Host "  ⚠️  Pandoc installed but not in PATH. You may need to restart your terminal." -ForegroundColor Yellow
+            Write-Host "  [WARN] Pandoc installed but not in PATH. You may need to restart your terminal." -ForegroundColor Yellow
             return $true
         }
     } catch {
-        Write-Host "  ❌ Failed to install Pandoc: $_" -ForegroundColor Red
+        Write-Host "  [FAIL] Failed to install Pandoc: $_" -ForegroundColor Red
         return $false
-    }
-}
-
-function Install-Java {
-    Write-Host "  → Installing Java..." -ForegroundColor Yellow
-
-    if (-not (Install-Winget)) {
-        Write-Host "  ❌ Cannot install Java without winget" -ForegroundColor Red
-        return $false
-    }
-
-    try {
-        winget install --id EclipseAdoptium.Temurin.21.JRE --silent --accept-package-agreements --accept-source-agreements
-
-        # Refresh PATH
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-
-        if (Test-CommandExists "java") {
-            Write-Host "  ✓ Java installed successfully" -ForegroundColor Green
-            return $true
-        } else {
-            Write-Host "  ⚠️  Java installed but not in PATH. You may need to restart your terminal." -ForegroundColor Yellow
-            return $true
-        }
-    } catch {
-        Write-Host "  ❌ Failed to install Java: $_" -ForegroundColor Red
-        return $false
-    }
-}
-
-function Install-PlantUML {
-    Write-Host "  → Installing PlantUML..." -ForegroundColor Yellow
-
-    $installPath = "C:\Program Files\PlantUML"
-    $jarPath = Join-Path $installPath "plantuml.jar"
-
-    # Create directory if it doesn't exist
-    if (-not (Test-Path $installPath)) {
-        New-Item -ItemType Directory -Path $installPath -Force | Out-Null
-    }
-
-    try {
-        # Download latest PlantUML jar
-        $downloadUrl = "https://github.com/plantuml/plantuml/releases/download/v1.2024.3/plantuml-1.2024.3.jar"
-        Write-Host "    Downloading PlantUML from GitHub..." -ForegroundColor Gray
-
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $jarPath -UseBasicParsing
-
-        if (Test-Path $jarPath) {
-            Write-Host "  ✓ PlantUML installed to: $installPath" -ForegroundColor Green
-
-            # Create a helper script for easy invocation
-            $helperScript = @"
-@echo off
-java -jar "$jarPath" %*
-"@
-            $helperPath = Join-Path $installPath "plantuml.bat"
-            Set-Content -Path $helperPath -Value $helperScript
-
-            # Add to PATH if not already there
-            $currentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
-            if ($currentPath -notlike "*$installPath*") {
-                [Environment]::SetEnvironmentVariable("Path", "$currentPath;$installPath", "Machine")
-                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            }
-
-            Write-Host "  ✓ PlantUML command added to PATH" -ForegroundColor Green
-            return $installPath
-        }
-
-        return $null
-    } catch {
-        Write-Host "  ❌ Failed to install PlantUML: $_" -ForegroundColor Red
-        return $null
     }
 }
 
@@ -241,8 +135,6 @@ Write-Host ""
 
 $pythonPath = Get-PythonPath
 $pandocPath = Get-PandocPath
-$javaPath = Get-JavaPath
-$plantUMLPath = Get-PlantUMLPath
 
 # Install missing dependencies
 if (-not $SkipDependencies) {
@@ -255,7 +147,7 @@ if (-not $SkipDependencies) {
             $pythonPath = "python"
         } else {
             Write-Host ""
-            Write-Host "❌ Python installation failed. Please install Python manually:" -ForegroundColor Red
+            Write-Host "[FAIL] Python installation failed. Please install Python manually:" -ForegroundColor Red
             Write-Host "   https://www.python.org/downloads/" -ForegroundColor Yellow
             exit 1
         }
@@ -266,146 +158,39 @@ if (-not $SkipDependencies) {
             $pandocPath = "pandoc"
         } else {
             Write-Host ""
-            Write-Host "❌ Pandoc installation failed. Please install Pandoc manually:" -ForegroundColor Red
+            Write-Host "[FAIL] Pandoc installation failed. Please install Pandoc manually:" -ForegroundColor Red
             Write-Host "   https://pandoc.org/installing.html" -ForegroundColor Yellow
             exit 1
         }
     }
-
-    if (-not $javaPath) {
-        if (Install-Java) {
-            $javaPath = "java"
-        } else {
-            Write-Host ""
-            Write-Host "❌ Java installation failed. Please install Java manually:" -ForegroundColor Red
-            Write-Host "   https://adoptium.net/" -ForegroundColor Yellow
-            exit 1
-        }
-    }
-
-    if (-not $plantUMLPath) {
-        $plantUMLPath = Install-PlantUML
-        if (-not $plantUMLPath) {
-            Write-Host ""
-            Write-Host "❌ PlantUML installation failed. Please install manually:" -ForegroundColor Red
-            Write-Host "   1. Download plantuml.jar from https://plantuml.com/download" -ForegroundColor Yellow
-            Write-Host "   2. Place it in C:\Program Files\PlantUML\" -ForegroundColor Yellow
-            exit 1
-        }
-    }
 } else {
-    Write-Host "  ⚠️  Skipping dependency installation (--SkipDependencies flag)" -ForegroundColor Yellow
+    Write-Host "  [WARN] Skipping dependency installation (--SkipDependencies flag)" -ForegroundColor Yellow
 }
 
 Write-Host ""
 Write-Host "Step 3: Installing Python dependencies..." -ForegroundColor Cyan
 Write-Host ""
 
-# Install Python packages required by Dilon Document Compiler
+# Install Python packages required by the dilon-document-compiler skill
 $requiredPackages = @("python-docx", "python-docx-template", "docxcompose", "pyyaml>=6.0")
 
 foreach ($package in $requiredPackages) {
-    Write-Host "  → Installing $package..." -ForegroundColor Gray
+    Write-Host "  -> Installing $package..." -ForegroundColor Gray
     & python -m pip install $package --quiet
 }
 
-Write-Host "  ✓ Python dependencies installed" -ForegroundColor Green
+Write-Host "  [OK] Python dependencies installed" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "Step 4: Installing Node.js dependencies..." -ForegroundColor Cyan
-Write-Host ""
-
-Push-Location $RepoRoot
-try {
-    npm install
-    Write-Host "  ✓ Node.js dependencies installed" -ForegroundColor Green
-} catch {
-    Write-Host "  ❌ Failed to install Node.js dependencies: $_" -ForegroundColor Red
-    exit 1
-} finally {
-    Pop-Location
-}
-
-Write-Host ""
-Write-Host "Step 5: Creating configuration file..." -ForegroundColor Cyan
-Write-Host ""
-
-# Create user config from example if it doesn't exist
-if ((Test-Path $ConfigPath) -and -not $Force) {
-    Write-Host "  ⚠️  Configuration file already exists: $ConfigPath" -ForegroundColor Yellow
-    $response = Read-Host "    Overwrite? (y/n)"
-    if ($response -ne 'y') {
-        Write-Host "  → Keeping existing configuration" -ForegroundColor Gray
-    } else {
-        Remove-Item $ConfigPath -Force
-    }
-}
-
-if (-not (Test-Path $ConfigPath)) {
-    $config = @{
-        pythonPath = if ($pythonPath) { $pythonPath } else { "python" }
-        plantUmlPath = if ($plantUMLPath) { $plantUMLPath } else { "C:\Program Files\PlantUML" }
-        pandocPath = if ($pandocPath) { $pandocPath } else { "pandoc" }
-    }
-
-    $config | ConvertTo-Json | Set-Content -Path $ConfigPath
-    Write-Host "  ✓ Configuration file created: $ConfigPath" -ForegroundColor Green
-}
-
-Write-Host ""
-Write-Host "Step 6: Registering MCP server with Claude Code..." -ForegroundColor Cyan
-Write-Host ""
-
-# Locate Claude Code config
-$claudeConfigPath = "$env:APPDATA\Claude\claude_desktop_config.json"
-
-if (-not (Test-Path $claudeConfigPath)) {
-    Write-Host "  ⚠️  Claude Code config not found at: $claudeConfigPath" -ForegroundColor Yellow
-    Write-Host "  → Creating new config file..." -ForegroundColor Gray
-
-    $claudeConfigDir = Split-Path $claudeConfigPath -Parent
-    if (-not (Test-Path $claudeConfigDir)) {
-        New-Item -ItemType Directory -Path $claudeConfigDir -Force | Out-Null
-    }
-
-    $claudeConfig = @{
-        mcpServers = @{
-            "dilon-claude-tools" = @{
-                command = "node"
-                args = @("$RepoRoot\server.js")
-            }
-        }
-    }
-
-    $claudeConfig | ConvertTo-Json -Depth 10 | Set-Content -Path $claudeConfigPath
-    Write-Host "  ✓ MCP server registered with Claude Code" -ForegroundColor Green
-} else {
-    # Update existing config
-    $claudeConfig = Get-Content $claudeConfigPath -Raw | ConvertFrom-Json
-
-    if (-not $claudeConfig.mcpServers) {
-        $claudeConfig | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue @{} -Force
-    }
-
-    $claudeConfig.mcpServers | Add-Member -NotePropertyName "dilon-claude-tools" -NotePropertyValue @{
-        command = "node"
-        args = @("$RepoRoot\server.js")
-    } -Force
-
-    $claudeConfig | ConvertTo-Json -Depth 10 | Set-Content -Path $claudeConfigPath
-    Write-Host "  ✓ MCP server registered with Claude Code" -ForegroundColor Green
-}
-
-Write-Host ""
-Write-Host "Step 7: Installing PowerShell command (optional)..." -ForegroundColor Cyan
+Write-Host "Step 4: Installing PowerShell command (optional)..." -ForegroundColor Cyan
 Write-Host ""
 
 # Install Compile-DilonDoc PowerShell function
-$compilerScriptPath = Join-Path $RepoRoot "tools\Dilon_Document_Compiler\generate_dilon_doc.py"
-$signatureTemplatePath = Join-Path $RepoRoot "tools\Dilon_Document_Compiler\TEMPLATE_Word_Signature.docx"
-$contentTemplatePath = Join-Path $RepoRoot "tools\Dilon_Document_Compiler\TEMPLATE_Word_Content.docx"
+$compilerScriptPath = Join-Path $RepoRoot "skills\dilon-document-compiler\scripts\generate_dilon_doc.py"
+$signatureTemplatePath = Join-Path $RepoRoot "skills\dilon-document-compiler\templates\TEMPLATE_Word_Signature.docx"
+$contentTemplatePath = Join-Path $RepoRoot "skills\dilon-document-compiler\templates\TEMPLATE_Word_Content.docx"
 
-Write-Host "  → Adding Compile-DilonDoc command to PowerShell profile..." -ForegroundColor Gray
+Write-Host "  -> Adding Compile-DilonDoc command to PowerShell profile..." -ForegroundColor Gray
 
 $functionDefinition = @"
 function Compile-DilonDoc {
@@ -457,32 +242,30 @@ function Compile-DilonDoc {
         `$OutputWord = [System.IO.Path]::ChangeExtension(`$inputPath, ".docx")
     }
 
+    if (-not `$SignatureTemplate) {
+        `$SignatureTemplate = "$signatureTemplatePath"
+    }
+
+    if (-not `$ContentTemplate) {
+        `$ContentTemplate = "$contentTemplatePath"
+    }
+
     `$pythonArgs = @(
         "$compilerScriptPath",
         "`$inputPath",
-        "`$OutputWord"
+        "`$OutputWord",
+        "`$SignatureTemplate",
+        "`$ContentTemplate"
     )
-
-    if (`$SignatureTemplate) {
-        `$pythonArgs += `$SignatureTemplate
-        if (`$ContentTemplate) {
-            `$pythonArgs += `$ContentTemplate
-        } else {
-            `$pythonArgs += "$contentTemplatePath"
-        }
-    } elseif (`$ContentTemplate) {
-        `$pythonArgs += "$signatureTemplatePath"
-        `$pythonArgs += `$ContentTemplate
-    }
 
     Write-Host "Compiling document..." -ForegroundColor Cyan
     & python `$pythonArgs
 
     if (`$LASTEXITCODE -eq 0) {
-        Write-Host "✅ Document compiled successfully!" -ForegroundColor Green
+        Write-Host "Document compiled successfully!" -ForegroundColor Green
         Write-Host "Output: `$OutputWord" -ForegroundColor Green
     } else {
-        Write-Error "❌ Document compilation failed!"
+        Write-Error "Document compilation failed!"
     }
 }
 
@@ -521,23 +304,20 @@ if ($profileContent) {
 
 Set-Content -Path $profilePath -Value $newContent
 
-Write-Host "  ✓ PowerShell command installed" -ForegroundColor Green
-Write-Host "    • Compile-DilonDoc <input.md> [output.docx]" -ForegroundColor Gray
-Write-Host "    • dilonc <input.md> [output.docx] (alias)" -ForegroundColor Gray
+Write-Host "  [OK] PowerShell command installed" -ForegroundColor Green
+Write-Host "    - Compile-DilonDoc <input.md> [output.docx]" -ForegroundColor Gray
+Write-Host "    - dilonc <input.md> [output.docx] (alias)" -ForegroundColor Gray
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "  ✓ Installation Complete!" -ForegroundColor Green
+Write-Host "  Setup Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
-Write-Host "  1. Restart Claude Code to load the MCP server" -ForegroundColor White
-Write-Host "  2. The following tools will be available:" -ForegroundColor White
-Write-Host "     • dilon_compile_doc - Compile Markdown to Word documents" -ForegroundColor Gray
-Write-Host "     • dilon_plantuml - Generate diagrams from PlantUML files" -ForegroundColor Gray
+Write-Host "  1. Install the plugin in Claude Code:" -ForegroundColor White
+Write-Host "     /plugin marketplace add dilontechnologies/dilon-claude-tools" -ForegroundColor Gray
+Write-Host "     /plugin install dilon-tools@dilon-claude-tools" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Documentation:" -ForegroundColor Cyan
-Write-Host "  • README.md - Setup and usage guide" -ForegroundColor White
-Write-Host "  • docs/MARKDOWN_STYLING_GUIDE.md - Markdown formatting reference" -ForegroundColor White
-Write-Host "  • docs/PlantUML_Style_Guide.md - PlantUML diagram standards" -ForegroundColor White
+Write-Host "  - README.md - Setup and usage guide" -ForegroundColor White
 Write-Host ""
