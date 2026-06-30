@@ -5,6 +5,30 @@ All notable changes to the Dilon Claude Tools MCP Server will be documented in t
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-06-30
+
+### Changed
+- **BREAKING:** Reworked from an MCP server into a Claude Code Plugin with two Skills
+  - `dilon-document-writer` - document stub creation and Dilon markdown styling guidance (replaces `dilon_generate_stub` and the `dilon://styling/markdown` resource)
+  - `dilon-document-compiler` - Word document compilation (replaces `dilon_compile_doc`)
+  - Distributed via a self-hosted Claude Code plugin marketplace (`.claude-plugin/marketplace.json`) instead of an npm package on GitHub Packages
+- Trimmed `install.ps1` to Python/Pandoc/pip-package setup only
+
+### Removed
+- **BREAKING:** PlantUML support (`dilon_plantuml` tool, PlantUML style guide, Java/PlantUML install steps)
+- The Node.js MCP server and all its scaffolding (`server.js`, `src/`, `bin/`, `scripts/postinstall.js`, `scripts/preuninstall.js`, `package.json`, the `@modelcontextprotocol/sdk` dependency)
+- npm packaging and the GitHub Packages publish workflow
+- `.dilon-tools-config.json` (no longer needed - skills read bundled files directly)
+
+### Added
+- `skills/dilon-document-compiler/scripts/check_deps.py` - preflight dependency check
+- `tests/run_tests.py` - direct-invocation test suite replacing the MCP-protocol-based `test-all-features.js`
+
+## [Unreleased]
+
+### Planned Features
+- Extended usage examples
+
 ## [1.1.3] - 2026-01-20
 
 ### Security
@@ -155,15 +179,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub remote configured: https://github.com/dilontechnologies/dilon-claude-tools.git
 - .gitignore configured for Node.js and user configs
 - Package.json with proper metadata
-
-## [Unreleased]
-
-### Planned Features
-- Additional MCP tools as needed
-- Extended usage examples
-- Automated testing framework
-- CI/CD pipeline for releases
-- Cross-platform support (macOS, Linux)
 
 ---
 
