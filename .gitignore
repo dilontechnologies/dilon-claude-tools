@@ -1,10 +1,5 @@
-# Dependencies
-node_modules/
-package-lock.json
-
 # Configuration (user-specific paths)
 .dilon-tools-config.json
-.npmrc
 
 # Logs
 *.log
@@ -27,3 +22,6 @@ tests/test-output/
 
 # Local configuration files
 *.local.*
+
+# Brainstorming specs (not committed)
+docs/superpowers/
