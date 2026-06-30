@@ -121,6 +121,8 @@ def test_compile_missing_input_error():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     check(result.returncode != 0, "compiler reports a non-zero exit code for a missing input file")
 
@@ -166,6 +168,8 @@ def test_compile_valid_document():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     check(result.returncode == 0, "compiler exits 0 for a valid document")
     if result.returncode != 0:
