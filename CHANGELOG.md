@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `@@@TABLE_COLUMNS:w1,w2,...@@@` marker for `dilon-document-compiler`, letting authors hardcode per-column table widths (inches), stackable with `@@@TABLE_STYLE@@@`. One entry may be `x` to flexibly absorb the page's remaining content width; invalid specs (entry-count mismatch, wrong `x` count, widths that don't fit the page) warn and fall back to Word's default auto-sized width rather than failing compilation.
+
 ### Fixed
 - `dilon-document-compiler`'s `generate_dilon_doc.py` resolved its default signature/content templates against its own `scripts/` directory instead of the sibling `templates/` directory, breaking any invocation with fewer than four explicit arguments
 - Removed the `#!/usr/bin/env python3` shebang from all repo Python scripts, since Windows' `py` launcher parses it and can re-dispatch to an unrelated, dependency-less `python3.exe` instead of the real interpreter
