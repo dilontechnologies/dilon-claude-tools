@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Preflight dependency check for the dilon-document-compiler skill."""
 
 import importlib

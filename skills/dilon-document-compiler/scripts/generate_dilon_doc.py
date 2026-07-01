@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Generate Document from Markdown using Jinja2 Word template in Dilon formatting.
@@ -449,12 +448,12 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     script_dir = Path(__file__).parent
 
     if signature_template_path is None:
-        signature_template_path = script_dir / "TEMPLATE_Word_Signature.docx"
+        signature_template_path = script_dir.parent / "templates" / "TEMPLATE_Word_Signature.docx"
     else:
         signature_template_path = Path(signature_template_path)
 
     if content_template_path is None:
-        content_template_path = script_dir / "TEMPLATE_Word_Content.docx"
+        content_template_path = script_dir.parent / "templates" / "TEMPLATE_Word_Content.docx"
     else:
         content_template_path = Path(content_template_path)
 

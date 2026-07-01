@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Test suite for Dilon Claude Tools skills.
 
@@ -20,8 +19,46 @@ WRITER_DIR = REPO_ROOT / "skills" / "dilon-document-writer"
 COMPILER_DIR = REPO_ROOT / "skills" / "dilon-document-compiler"
 TEMPLATE_PATH = WRITER_DIR / "TEMPLATE_Document.md"
 COMPILER_SCRIPT = COMPILER_DIR / "scripts" / "generate_dilon_doc.py"
+CHECK_DEPS_SCRIPT = COMPILER_DIR / "scripts" / "check_deps.py"
 SIGNATURE_TEMPLATE = COMPILER_DIR / "templates" / "TEMPLATE_Word_Signature.docx"
 CONTENT_TEMPLATE = COMPILER_DIR / "templates" / "TEMPLATE_Word_Content.docx"
+
+# Scripts that must not carry a `#!/usr/bin/env python3` shebang: Windows'
+# py launcher parses that line and can re-dispatch to a different,
+# dependency-less python3.exe (e.g. the Microsoft Store WindowsApps stub)
+# instead of the real interpreter. This project is Windows-only.
+SHEBANG_GUARDED_SCRIPTS = [
+    COMPILER_SCRIPT,
+    CHECK_DEPS_SCRIPT,
+    Path(__file__).parent / "run_tests.py",
+    Path(__file__).parent / "validate-output.py",
+]
+
+SAMPLE_MARKDOWN = (
+    '---\n'
+    'title: "Integration Test Document"\n'
+    'author: "Test Suite"\n'
+    'department: "Engineering"\n'
+    'doc_number: "DD_TST_99999"\n'
+    'current_revision: "00"\n'
+    'regulatory_rep: "Test Rep"\n'
+    'quality_rep: "Test QA"\n'
+    'department_head: "Test Head"\n'
+    'revisions:\n'
+    '  - number: "00"\n'
+    '    description: "Initial test"\n'
+    '    eco_number: "ECO-000"\n'
+    '    eco_date: "2025-01-01"\n'
+    '---\n'
+    '\n'
+    '## 1. Purpose and Scope\n'
+    '\n'
+    '### 1.1 Purpose\n'
+    'This document tests the compilation process.\n'
+    '\n'
+    '### 1.2 Scope\n'
+    'Comprehensive integration testing.\n'
+)
 
 passed = 0
 failed = 0
@@ -130,32 +167,7 @@ def test_compile_missing_input_error():
 def test_compile_valid_document():
     input_md = TEST_OUTPUT_DIR / "compile_test.md"
     output_docx = TEST_OUTPUT_DIR / "compile_test.docx"
-    input_md.write_text(
-        '---\n'
-        'title: "Integration Test Document"\n'
-        'author: "Test Suite"\n'
-        'department: "Engineering"\n'
-        'doc_number: "DD_TST_99999"\n'
-        'current_revision: "00"\n'
-        'regulatory_rep: "Test Rep"\n'
-        'quality_rep: "Test QA"\n'
-        'department_head: "Test Head"\n'
-        'revisions:\n'
-        '  - number: "00"\n'
-        '    description: "Initial test"\n'
-        '    eco_number: "ECO-000"\n'
-        '    eco_date: "2025-01-01"\n'
-        '---\n'
-        '\n'
-        '## 1. Purpose and Scope\n'
-        '\n'
-        '### 1.1 Purpose\n'
-        'This document tests the compilation process.\n'
-        '\n'
-        '### 1.2 Scope\n'
-        'Comprehensive integration testing.\n',
-        encoding="utf-8",
-    )
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
 
     result = subprocess.run(
         [
@@ -178,6 +190,43 @@ def test_compile_valid_document():
     check(output_docx.exists(), "compile_test.docx created on disk")
 
 
+def test_compile_with_default_templates():
+    """Regression test for a bug where the compiler's default template
+    lookup pointed at scripts/ instead of the sibling templates/ directory.
+    Invokes with only <input> <output> (no template args) so the script
+    must resolve its own defaults, rather than the explicit four-argument
+    form SKILL.md always uses."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_defaults.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_defaults.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 with only 2 args (default template lookup)")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(output_docx.exists(), "compile_test_defaults.docx created via default template lookup")
+
+
+def test_no_shebang_in_python_scripts():
+    offenders = [
+        str(p) for p in SHEBANG_GUARDED_SCRIPTS
+        if p.read_text(encoding="utf-8").splitlines()[0].startswith("#!")
+    ]
+    check(not offenders, f"no shebang lines in guarded scripts (offenders: {offenders})")
+
+
 def run_validator():
     result = subprocess.run(
         [sys.executable, "validate-output.py"],
@@ -196,6 +245,8 @@ def main():
     test_stub_duplicate_file_error()
     test_compile_missing_input_error()
     test_compile_valid_document()
+    test_compile_with_default_templates()
+    test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")
 
