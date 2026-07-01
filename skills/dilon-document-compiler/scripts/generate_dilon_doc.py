@@ -274,20 +274,38 @@ def extract_yaml_and_markdown(md_file):
     else:
         return {}, content
 
+_TABLE_MARKER_RUN = re.compile(
+    r'^(?:[ \t]*@@@TABLE_(?:STYLE:\w+|COLUMNS:[\w.,]+)@@@[ \t]*\n)+',
+    re.MULTILINE,
+)
+
+def _insert_blank_line_if_needed(match):
+    already_blank = match.string[match.end():match.end() + 1] == '\n'
+    return match.group(0) if already_blank else match.group(0) + '\n'
+
 def ensure_blank_line_after_table_markers(markdown_text):
     """
-    Ensure a blank line separates a @@@TABLE_STYLE:...@@@ marker from the
-    table that follows it.
+    Ensure a blank line separates a run of one or more stacked
+    @@@TABLE_STYLE:...@@@ / @@@TABLE_COLUMNS:...@@@ marker lines from the
+    table that follows them.
 
     MARKDOWN_STYLING_GUIDE.md documents "no blank lines between the marker
     and the table" as the convention, but Pandoc's pipe-table parser only
     recognizes a table when it is preceded by a blank line - without one,
-    the marker line and the entire table are merged into a single garbled
-    text paragraph and no table is produced at all. Normalizing here (before
-    Pandoc ever sees the markdown) keeps the documented authoring convention
-    working while still producing a real, styleable table.
+    the marker line(s) and the entire table are merged into a single
+    garbled text paragraph and no table is produced at all. Normalizing
+    here (before Pandoc ever sees the markdown) keeps the documented
+    authoring convention working while still producing a real, styleable,
+    width-settable table.
+
+    Uses a callback (rather than a trailing negative-lookahead assertion)
+    to decide whether a blank line already follows the marker run: a
+    lookahead combined with the `+` repetition over marker lines can
+    backtrack to a *partial* match when the full run is already followed
+    by a blank line, inserting a spurious blank line in the middle of a
+    stacked marker run instead of leaving it alone.
     """
-    return re.sub(r'(^[ \t]*@@@TABLE_STYLE:\w+@@@[ \t]*)\n(?!\n)', r'\1\n\n', markdown_text, flags=re.MULTILINE)
+    return _TABLE_MARKER_RUN.sub(_insert_blank_line_if_needed, markdown_text)
 
 def markdown_to_docx(markdown_text, output_file, reference_doc=None):
     """

@@ -15,6 +15,9 @@ from pathlib import Path
 
 from docx import Document
 
+sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "dilon-document-compiler" / "scripts"))
+import generate_dilon_doc as compiler
+
 REPO_ROOT = Path(__file__).parent.parent
 TEST_OUTPUT_DIR = Path(__file__).parent / "test-output"
 WRITER_DIR = REPO_ROOT / "skills" / "dilon-document-writer"
@@ -148,6 +151,37 @@ def test_stub_duplicate_file_error():
     except FileExistsError:
         raised = True
     check(raised, "generate_stub refuses to overwrite an existing file")
+
+
+def test_ensure_blank_line_single_marker():
+    result = compiler.ensure_blank_line_after_table_markers(
+        '@@@TABLE_STYLE:DilonTable_Chart@@@\n| a |\n'
+    )
+    check(result == '@@@TABLE_STYLE:DilonTable_Chart@@@\n\n| a |\n',
+          "single TABLE_STYLE marker gets a blank line inserted before the table")
+
+
+def test_ensure_blank_line_stacked_style_then_columns():
+    result = compiler.ensure_blank_line_after_table_markers(
+        '@@@TABLE_STYLE:DilonTable_Chart@@@\n@@@TABLE_COLUMNS:1,x@@@\n| a |\n'
+    )
+    check(result == '@@@TABLE_STYLE:DilonTable_Chart@@@\n@@@TABLE_COLUMNS:1,x@@@\n\n| a |\n',
+          "stacked STYLE+COLUMNS markers get exactly one blank line inserted after the last marker line")
+
+
+def test_ensure_blank_line_stacked_columns_then_style():
+    result = compiler.ensure_blank_line_after_table_markers(
+        '@@@TABLE_COLUMNS:1,x@@@\n@@@TABLE_STYLE:DilonTable_Chart@@@\n| a |\n'
+    )
+    check(result == '@@@TABLE_COLUMNS:1,x@@@\n@@@TABLE_STYLE:DilonTable_Chart@@@\n\n| a |\n',
+          "stacked COLUMNS+STYLE markers (reverse order) get exactly one blank line inserted after the last marker line")
+
+
+def test_ensure_blank_line_idempotent_when_already_blank():
+    already_blank = '@@@TABLE_STYLE:DilonTable_Chart@@@\n@@@TABLE_COLUMNS:1,x@@@\n\n| a |\n'
+    result = compiler.ensure_blank_line_after_table_markers(already_blank)
+    check(result == already_blank,
+          "already-blank-line marker stack is left unchanged (no extra blank line inserted between stacked markers)")
 
 
 def test_compile_missing_input_error():
@@ -345,6 +379,10 @@ def main():
     test_stub_custom_params()
     test_stub_default_params()
     test_stub_duplicate_file_error()
+    test_ensure_blank_line_single_marker()
+    test_ensure_blank_line_stacked_style_then_columns()
+    test_ensure_blank_line_stacked_columns_then_style()
+    test_ensure_blank_line_idempotent_when_already_blank()
     test_compile_missing_input_error()
     test_compile_valid_document()
     test_compile_bom_front_matter()
