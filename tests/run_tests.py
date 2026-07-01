@@ -220,10 +220,11 @@ def test_compile_with_default_templates():
 
 
 def test_no_shebang_in_python_scripts():
-    offenders = [
-        str(p) for p in SHEBANG_GUARDED_SCRIPTS
-        if p.read_text(encoding="utf-8").splitlines()[0].startswith("#!")
-    ]
+    def has_shebang(path):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return bool(lines) and lines[0].startswith("#!")
+
+    offenders = [str(p) for p in SHEBANG_GUARDED_SCRIPTS if has_shebang(p)]
     check(not offenders, f"no shebang lines in guarded scripts (offenders: {offenders})")
 
 

@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `dilon-document-compiler`'s `generate_dilon_doc.py` resolved its default signature/content templates against its own `scripts/` directory instead of the sibling `templates/` directory, breaking any invocation with fewer than four explicit arguments
+- Removed the `#!/usr/bin/env python3` shebang from all repo Python scripts, since Windows' `py` launcher parses it and can re-dispatch to an unrelated, dependency-less `python3.exe` instead of the real interpreter
+
 ### Planned Features
 - Extended usage examples
 
