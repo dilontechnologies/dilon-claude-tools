@@ -223,6 +223,23 @@ When creating custom table styles in the reference template:
 - **Note**: If no table follows the marker, the marker is removed but no style is applied
 - **Note**: Table Style Options are set programmatically, so you don't need to manually configure them in Word
 
+**Syntax for custom column widths:**
+```markdown
+@@@TABLE_STYLE:DilonTable_Chart@@@
+@@@TABLE_COLUMNS:1.5,x,1,1@@@
+| Register | Address | Bit 7 | Bit 6 |
+|----------|:-------:|:-----:|:-----:|
+| CTRL_REG1 | 0x20 | ODR3 | ODR2 |
+```
+
+**Rules:**
+- Place `@@@TABLE_COLUMNS:w1,w2,...@@@` on its own line immediately before the table, same as `@@@TABLE_STYLE@@@`
+- Can be stacked with `@@@TABLE_STYLE@@@` (either order, adjacent lines, no blank line between them or before the table - the compiler inserts one automatically)
+- One entry per table column, comma-separated, in inches (e.g. `1.5,2,1,1`)
+- At most one entry may be `x` (or `X`) instead of a number: the "flex" column, which automatically absorbs whatever width remains so the table exactly fills, but never exceeds, the page's available content width
+- All-numeric specs (no `x`) are also valid, as long as the total doesn't exceed the available content width
+- **Note**: If the entry count doesn't match the table's actual column count, there isn't exactly one `x`, or the widths don't fit the page, the compiler prints a warning and leaves that table at Word's default auto-sized width - it never fails the compilation
+
 **Multi-line Cells:**
 - Pipe tables support single-line cells only
 - **ISSUE**: `<br>` tags do NOT work in pipe table cells when converting to Word
@@ -954,6 +971,7 @@ Use grid tables when you need multi-paragraph cells or complex block elements:
 | Body text | Regular paragraph | Normal (paragraph) |
 | Table (default) | Pipe table | DilonTable_List (table) |
 | Table (custom) | `@@@TABLE_STYLE:DilonTable_Chart@@@` | DilonTable_Chart (table) |
+| Table column widths | `@@@TABLE_COLUMNS:1.5,x,1,1@@@` | Explicit column widths (table) |
 | Figure caption | `*Figure N: ...*` | Caption (paragraph) |
 | Code block | ` ```language ``` ` | SourceCode (paragraph) + Verbatim Char (character) |
 | Custom paragraph style | `@@@STYLE:Name@@@ ... @@@END_STYLE@@@` | User-defined (paragraph) |
