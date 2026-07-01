@@ -218,7 +218,7 @@ def apply_styles(docx_file):
             # a single paragraph)
             if text.startswith('@@@TABLE_STYLE:') or text.startswith('@@@TABLE_COLUMNS:'):
                 style_match = re.search(r'@@@TABLE_STYLE:(\w+)@@@', text)
-                columns_match = re.search(r'@@@TABLE_COLUMNS:([\w.,]+)@@@', text)
+                columns_match = re.search(r'@@@TABLE_COLUMNS:([\w.,\s]+)@@@', text)
 
                 if style_match or columns_match:
                     next_element = para._element.getnext()
@@ -372,7 +372,7 @@ def extract_yaml_and_markdown(md_file):
         return {}, content
 
 _TABLE_MARKER_RUN = re.compile(
-    r'^(?:[ \t]*@@@TABLE_(?:STYLE:\w+|COLUMNS:[\w.,]+)@@@[ \t]*\n)+',
+    r'^(?:[ \t]*@@@TABLE_(?:STYLE:\w+|COLUMNS:[\w.,\s]+)@@@[ \t]*\n)+',
     re.MULTILINE,
 )
 

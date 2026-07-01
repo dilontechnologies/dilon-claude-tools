@@ -233,6 +233,9 @@ def test_apply_table_column_widths_fixed_and_flex():
     widths = [round(col.width.inches, 2) for col in table.columns]
     check(widths == [1.5, 2.77, 1.0, 1.0],
           f"apply_table_column_widths sets fixed widths and computes the flex column (got {widths})")
+    cell_widths = [round(cell.width.inches, 2) for cell in table.rows[0].cells]
+    check(cell_widths == [1.5, 2.77, 1.0, 1.0],
+          f"apply_table_column_widths also sets per-cell width, not just column width (got {cell_widths})")
 
 
 def test_apply_table_column_widths_all_fixed():
@@ -241,6 +244,9 @@ def test_apply_table_column_widths_all_fixed():
     compiler.apply_table_column_widths(table, [2.0, 3.0], available_width=6.0)
     widths = [round(col.width.inches, 2) for col in table.columns]
     check(widths == [2.0, 3.0], f"apply_table_column_widths sets all-fixed widths as given (got {widths})")
+    cell_widths = [round(cell.width.inches, 2) for cell in table.rows[0].cells]
+    check(cell_widths == [2.0, 3.0],
+          f"apply_table_column_widths also sets per-cell width, not just column width (got {cell_widths})")
 
 
 def test_apply_table_column_widths_raises_when_flex_overflows():
@@ -428,6 +434,18 @@ COLUMN_WIDTH_MARKDOWN = SAMPLE_MARKDOWN + (
     '| Overflow | Table |\n'
     '|---|---|\n'
     '| A | B |\n'
+    '\n'
+    '@@@TABLE_STYLE:DilonTable_Chart@@@\n'
+    '@@@TABLE_COLUMNS:1.5, x, 1, 1@@@\n'
+    '| Spaced | Spec | Bit A | Bit B |\n'
+    '|---|---|---|---|\n'
+    '| SPACED_REG | 0x21 | ODR1 | ODR0 |\n'
+    '\n'
+    '@@@TABLE_COLUMNS:2,x@@@\n'
+    '@@@TABLE_STYLE:DilonTable_Chart@@@\n'
+    '| Order | Test |\n'
+    '|---|---|\n'
+    '| A | B |\n'
 )
 
 
@@ -505,6 +523,33 @@ def test_compile_table_column_widths():
     check(len(overflow_tables) == 1, "overflowing-width table still survives conversion as a real table")
     check("Could not apply column widths" in result.stdout,
           "overflowing column-width spec prints a warning instead of failing compilation")
+
+    # Table 5: stacked @@@TABLE_STYLE@@@ + @@@TABLE_COLUMNS:1.5, x, 1, 1@@@ (spaced spec)
+    spaced_tables = [t for t in doc.tables if header_row(t) == ['Spaced', 'Spec', 'Bit A', 'Bit B']]
+    check(len(spaced_tables) == 1, "spaced-spec table survives conversion as a real table")
+    if spaced_tables:
+        table = spaced_tables[0]
+        check(table.style is not None and table.style.name == 'DilonTable_Chart',
+              "spaced-spec table still receives its DilonTable_Chart style")
+        actual_widths = [round(col.width.inches, 2) for col in table.columns]
+        expected_flex = round(available_width - 1.5 - 1.0 - 1.0, 2)
+        expected_widths = [1.5, expected_flex, 1.0, 1.0]
+        check(actual_widths == expected_widths,
+              f"spaced @@@TABLE_COLUMNS:1.5, x, 1, 1@@@ spec renders with correct widths, not garbled "
+              f"(expected {expected_widths}, got {actual_widths})")
+
+    # Table 6: @@@TABLE_COLUMNS:2,x@@@ followed by @@@TABLE_STYLE@@@ (COLUMNS-then-STYLE order)
+    order_tables = [t for t in doc.tables if header_row(t) == ['Order', 'Test']]
+    check(len(order_tables) == 1, "COLUMNS-then-STYLE table survives conversion as a real table")
+    if order_tables:
+        table = order_tables[0]
+        check(table.style is not None and table.style.name == 'DilonTable_Chart',
+              "COLUMNS-then-STYLE table (reverse marker order) still receives its DilonTable_Chart style")
+        actual_widths = [round(col.width.inches, 2) for col in table.columns]
+        expected_flex = round(available_width - 2.0, 2)
+        expected_widths = [2.0, expected_flex]
+        check(actual_widths == expected_widths,
+              f"COLUMNS-then-STYLE table's rendered widths match the marker spec (expected {expected_widths}, got {actual_widths})")
 
 
 def test_compile_with_default_templates():
