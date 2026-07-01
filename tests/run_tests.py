@@ -9,11 +9,15 @@ then runs the existing output validator.
 
 import re
 import shutil
+import struct
 import subprocess
 import sys
+import zipfile
+import zlib
 from pathlib import Path
 
 from docx import Document
+from docx.oxml.ns import qn
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "dilon-document-compiler" / "scripts"))
 import generate_dilon_doc as compiler
@@ -581,6 +585,229 @@ def test_compile_with_default_templates():
     check(output_docx.exists(), "compile_test_defaults.docx created via default template lookup")
 
 
+HEADING_NUMBERING_MARKDOWN = (
+    '---\n'
+    'title: "Heading Numbering Test Document"\n'
+    'author: "Test Suite"\n'
+    'department: "Engineering"\n'
+    'doc_number: "DD_TST_88888"\n'
+    'current_revision: "00"\n'
+    'regulatory_rep: "Test Rep"\n'
+    'quality_rep: "Test QA"\n'
+    'department_head: "Test Head"\n'
+    'revisions:\n'
+    '  - number: "00"\n'
+    '    description: "Initial test"\n'
+    '    eco_number: "ECO-000"\n'
+    '    eco_date: "2025-01-01"\n'
+    '---\n'
+    '\n'
+    '## First Section\n'
+    '\n'
+    '### First Subsection\n'
+    'Content.\n'
+    '\n'
+    '#### First Nested Item\n'
+    'Content.\n'
+    '\n'
+    '## Second Section\n'
+    '\n'
+    '### Second Subsection\n'
+    'Content.\n'
+)
+
+
+def make_test_png():
+    """Build a minimal valid 1x1 PNG in-memory (no Pillow dependency)."""
+    def chunk(tag, data):
+        return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', zlib.crc32(tag + data))
+    ihdr = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)  # 1x1, 8-bit RGB
+    idat = zlib.compress(b'\x00\xff\x00\x00')  # filter byte + one red pixel
+    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', idat) + chunk(b'IEND', b'')
+
+
+IMAGE_PATH_MARKDOWN = SAMPLE_MARKDOWN + (
+    '\n## Image Test\n\n'
+    '![A tiny red test image.](images_subdir/test.png)\n'
+)
+
+
+def test_compile_resolves_relative_image_paths():
+    """Regression test: relative image paths in the markdown (documented
+    as 'relative to the markdown file' in MARKDOWN_STYLING_GUIDE.md) must
+    resolve against the INPUT MARKDOWN's directory, not whatever cwd the
+    compiler happens to be invoked from. Before the --resource-path fix,
+    running the compiler from a different cwd than the markdown file
+    silently dropped the image - Pandoc warns and substitutes a
+    placeholder, but still exits 0, so nothing failed loudly."""
+    images_dir = TEST_OUTPUT_DIR / "images_subdir"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    input_md = TEST_OUTPUT_DIR / "compile_test_images.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_images.docx"
+    input_md.write_text(IMAGE_PATH_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+            str(CONTENT_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(REPO_ROOT),  # deliberately NOT the markdown file's own directory
+    )
+    check(result.returncode == 0, "compiler exits 0 for a document with a relative image path")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "relative image path resolves and embeds (skipped: compile failed)")
+        return
+
+    with zipfile.ZipFile(output_docx) as z:
+        rels = z.read('word/_rels/document.xml.rels').decode('utf-8')
+        check('relationships/image' in rels,
+              "compiled document's body (not just the header) embeds an image relationship")
+
+
+def test_figure_auto_numbering():
+    """Render test: a figure caption written as
+    ![Description.](path.png){#fig:label} (per the updated
+    MARKDOWN_STYLING_GUIDE.md convention) must come out of Pandoc as a
+    distinct 'Image Caption'-styled paragraph (thanks to the
+    'Captioned Figure'/'Image Caption' styles added to
+    TEMPLATE_Word_Signature.docx), which apply_figure_captions() then
+    rewrites into a 'Caption'-styled paragraph carrying live
+    STYLEREF/SEQ fields - not static numbered text. Also verifies the
+    {#fig:label} bookmark and a [text](#fig:label) cross-reference
+    resolve to a real hyperlink, and that Word is told to recalculate
+    fields on open."""
+    images_dir = TEST_OUTPUT_DIR / "figure_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "labeled.png").write_bytes(make_test_png())
+    (images_dir / "unlabeled.png").write_bytes(make_test_png())
+
+    markdown = SAMPLE_MARKDOWN + (
+        '\n## First Section\n\n'
+        'See [the figure](#fig:test-figure) below.\n\n'
+        '![A labeled test figure.](figure_images/labeled.png){#fig:test-figure}\n\n'
+        '## Second Section\n\n'
+        '![An unlabeled test figure.](figure_images/unlabeled.png)\n'
+    )
+
+    input_md = TEST_OUTPUT_DIR / "compile_test_figures.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_figures.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+            str(CONTENT_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a document with figure captions")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "figure captions render as auto-numbered Word captions (skipped: compile failed)")
+        return
+
+    doc = Document(output_docx)
+    caption_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Caption']
+    check(len(caption_paragraphs) == 2, f"exactly 2 paragraphs end up styled 'Caption' (got {len(caption_paragraphs)})")
+
+    with zipfile.ZipFile(output_docx) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+        settings = z.read('word/settings.xml').decode('utf-8')
+
+    instrs = re.findall(r'w:instr="([^"]*)"', xml)
+    styleref_count = sum(1 for i in instrs if i.strip() == 'STYLEREF 2 \\s')
+    seq_count = sum(1 for i in instrs if i.strip() == 'SEQ Figure \\* ARABIC \\s 2')
+    check(styleref_count == 2, f"both captions get a 'STYLEREF 2 \\\\s' chapter-number field (got {styleref_count})")
+    check(seq_count == 2, f"both captions get a 'SEQ Figure \\\\* ARABIC \\\\s 2' running-count field (got {seq_count})")
+
+    check('w:name="fig:test-figure"' in xml, "the labeled figure gets a 'fig:test-figure' bookmark")
+    check('w:anchor="fig:test-figure"' in xml, "the [the figure](#fig:test-figure) link becomes a real hyperlink to that bookmark")
+
+    check('<w:updateFields w:val="true"/>' in settings, "document is set to recalculate fields (figure numbers) on open")
+
+
+def test_heading_auto_numbering():
+    """Render test: headings written WITHOUT manual numbers (per the
+    updated MARKDOWN_STYLING_GUIDE.md convention) must come out of Pandoc
+    styled as Heading 2/3/4, and those styles must be linked (via the
+    signature template's --reference-doc numbering) to a single shared
+    multilevel list so Word auto-numbers them as 1./1.1/1.1.1, etc.
+    A missing/broken link here is exactly the failure mode that produces
+    unnumbered or doubled section numbers in compiled documents."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_heading_numbering.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_heading_numbering.docx"
+    input_md.write_text(HEADING_NUMBERING_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+            str(CONTENT_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for unnumbered headings")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "Heading 2/3/4 styles share one auto-numbering list (skipped: compile failed)")
+        return
+
+    with zipfile.ZipFile(output_docx) as z:
+        check("word/numbering.xml" in z.namelist(),
+              "compiled document contains a word/numbering.xml part")
+
+    doc = Document(output_docx)
+
+    heading_text = [p.text for p in doc.paragraphs if p.style and p.style.name in ("Heading 2", "Heading 3", "Heading 4")]
+    check(heading_text == ["First Section", "First Subsection", "First Nested Item", "Second Section", "Second Subsection"],
+          f"heading paragraph text carries no manually-typed numbers (got {heading_text})")
+
+    num_ids = {}
+    for style_name, expected_ilvl in (("Heading 2", "0"), ("Heading 3", "1"), ("Heading 4", "2")):
+        style = doc.styles[style_name]
+        num_pr = style.element.find('.//' + qn('w:numPr'))
+        check(num_pr is not None, f"'{style_name}' style is linked to a numbering list")
+        if num_pr is None:
+            continue
+        num_id_el = num_pr.find(qn('w:numId'))
+        ilvl_el = num_pr.find(qn('w:ilvl'))
+        num_id = num_id_el.get(qn('w:val')) if num_id_el is not None else None
+        # w:ilvl is commonly omitted for level 0 - it's OOXML's implicit default.
+        ilvl = ilvl_el.get(qn('w:val')) if ilvl_el is not None else '0'
+        num_ids[style_name] = num_id
+        check(ilvl == expected_ilvl, f"'{style_name}' is linked at list level {expected_ilvl} (got {ilvl})")
+
+    check(len(set(num_ids.values())) == 1 and None not in num_ids.values(),
+          f"Heading 2/3/4 all link to the SAME numbering list, not separate ones (got {num_ids})")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -628,6 +855,9 @@ def main():
     test_compile_table_marker_no_blank_line()
     test_compile_table_column_widths()
     test_compile_with_default_templates()
+    test_compile_resolves_relative_image_paths()
+    test_heading_auto_numbering()
+    test_figure_auto_numbering()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")

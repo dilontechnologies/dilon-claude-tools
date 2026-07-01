@@ -14,12 +14,12 @@ revisions:
     eco_date: "YYYY-MM-DD"
 ---
 
-## 1. Purpose and Scope
+## Purpose and Scope
 
-### 1.1 Purpose
+### Purpose
 [Describe the purpose of this document]
 
-### 1.2 Scope
+### Scope
 [Describe the scope of this document]
 
-## 2. [Add additional sections as needed]
+## [Add additional sections as needed]

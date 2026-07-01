@@ -349,6 +349,99 @@ def apply_styles(docx_file):
 
     doc.save(docx_file)
 
+def _add_field_simple_run(paragraph, instr, cached_text):
+    """
+    Append a Word fldSimple field (e.g. STYLEREF/SEQ) to a paragraph, with
+    cached_text as the field's placeholder display value until Word
+    recalculates it (Word shows this cached result until the field is
+    updated - see set_update_fields_on_open()).
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    fld = OxmlElement('w:fldSimple')
+    fld.set(qn('w:instr'), instr)
+    run_el = OxmlElement('w:r')
+    r_pr = OxmlElement('w:rPr')
+    r_pr.append(OxmlElement('w:noProof'))
+    run_el.append(r_pr)
+    t_el = OxmlElement('w:t')
+    t_el.text = cached_text
+    run_el.append(t_el)
+    fld.append(run_el)
+    paragraph._p.append(fld)
+
+def apply_figure_captions(docx_file):
+    """
+    Turn Pandoc's implicit-figure caption paragraphs into Word-native,
+    auto-numbered figure captions.
+
+    MARKDOWN_STYLING_GUIDE.md documents the authoring convention:
+    `![Description.](path.png){#fig:label}` - the caption text lives in
+    the image's alt-text brackets, with no manually-typed figure number.
+    Because the "Captioned Figure" / "Image Caption" paragraph styles are
+    defined in the reference template (see TEMPLATE_Word_Signature.docx),
+    Pandoc routes an image-with-alt-text into a distinct "Image Caption"
+    paragraph - a reliable, unambiguous signal that this is a real figure
+    caption, not just a plain paragraph that happens to follow an
+    intentionally uncaptioned image (`![](path.png)`, no alt text, no
+    caption paragraph emitted at all).
+
+    For each match, this replaces the caption paragraph's content with:
+        Figure {STYLEREF 2 \\s}.{SEQ Figure \\* ARABIC \\s 2} - Description.
+    styled "Caption", so the chapter number is tied live to the nearest
+    Heading 2 and the running figure count resets at each Heading 2
+    boundary - both computed by Word itself, not this script. The exact
+    field-code syntax here was extracted from a caption Word's own
+    Insert Caption feature generated (see FIGURE_CAPTION_TEST.docx),
+    rather than hand-derived, since a subtly wrong field switch would
+    silently fail inside Word.
+    """
+    doc = Document(docx_file)
+
+    count = 0
+    for para in doc.paragraphs:
+        if para.style is None or para.style.name != 'Image Caption':
+            continue
+
+        description = para.text.strip()
+
+        for run in list(para.runs):
+            run._element.getparent().remove(run._element)
+
+        para.style = doc.styles['Caption']
+        para.add_run('Figure ')
+        _add_field_simple_run(para, ' STYLEREF 2 \\s ', '1')
+        para.add_run('.')
+        _add_field_simple_run(para, ' SEQ Figure \\* ARABIC \\s 2 ', '1')
+        if description:
+            para.add_run(f' - {description}')
+        count += 1
+
+    if count:
+        doc.save(docx_file)
+        print(f"  ✓ Converted {count} figure caption(s) to auto-numbered Word captions")
+
+    return count
+
+def set_update_fields_on_open(docx_file):
+    """
+    Force Word to recalculate all fields (STYLEREF/SEQ figure numbers, TOC
+    page numbers, etc.) the moment the document is opened, rather than
+    showing this script's cached placeholder values until the user
+    manually selects-all-and-presses-F9.
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    doc = Document(docx_file)
+    settings = doc.settings.element
+    if settings.find(qn('w:updateFields')) is None:
+        el = OxmlElement('w:updateFields')
+        el.set(qn('w:val'), 'true')
+        settings.insert(0, el)
+        doc.save(docx_file)
+
 def extract_yaml_and_markdown(md_file):
     """
     Extract YAML front matter and Markdown body from a Markdown file.
@@ -404,7 +497,7 @@ def ensure_blank_line_after_table_markers(markdown_text):
     """
     return _TABLE_MARKER_RUN.sub(_insert_blank_line_if_needed, markdown_text)
 
-def markdown_to_docx(markdown_text, output_file, reference_doc=None):
+def markdown_to_docx(markdown_text, output_file, reference_doc=None, resource_dir=None):
     """
     Convert Markdown to a Word document using Pandoc.
 
@@ -412,6 +505,14 @@ def markdown_to_docx(markdown_text, output_file, reference_doc=None):
         markdown_text: Markdown content as string
         output_file: Path to save the Word document
         reference_doc: Optional path to reference document for styles
+        resource_dir: Optional directory relative image paths in the
+            markdown are resolved against (MARKDOWN_STYLING_GUIDE.md
+            documents "image path is relative to the markdown file" - this
+            is what makes that true regardless of the caller's own cwd).
+            Without it, Pandoc resolves relative image paths against the
+            process's current working directory, silently embedding a
+            placeholder instead of the real image if that happens to
+            differ from the markdown file's own directory.
     """
     markdown_text = ensure_blank_line_after_table_markers(markdown_text)
 
@@ -436,12 +537,21 @@ def markdown_to_docx(markdown_text, output_file, reference_doc=None):
     if reference_doc:
         pandoc_cmd.extend(['--reference-doc', str(reference_doc)])
 
+    if resource_dir:
+        pandoc_cmd.extend(['--resource-path', str(resource_dir)])
+
     # Use Pandoc to convert Markdown to Word
     try:
-        subprocess.run(pandoc_cmd, check=True, capture_output=True, text=True)
+        result = subprocess.run(pandoc_cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
         print(f"Error running Pandoc: {e.stderr}")
         raise
+
+    # Pandoc can exit 0 while still warning about problems (e.g. an
+    # unresolved image path silently replaced with a placeholder) - surface
+    # those warnings even on success instead of only printing on failure.
+    if result.stderr:
+        print(f"  ⚠️  Pandoc warnings:\n{result.stderr}")
 
     # Clean up temp file
     temp_md.unlink()
@@ -653,11 +763,19 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     temp_part_d = Path(output_path).parent / "_temp_part_d.docx"
 
     # Use signature template as reference to ensure consistent formatting across entire document
-    markdown_to_docx(markdown_body, temp_part_d, reference_doc=signature_template_path)
+    markdown_to_docx(
+        markdown_body, temp_part_d,
+        reference_doc=signature_template_path,
+        resource_dir=Path(markdown_path).resolve().parent,
+    )
 
     # Apply all styles (tables and paragraphs) - scans Word document for @@@ markers, applies styles, removes markers
     print("🎨 Applying custom styles...")
     apply_styles(temp_part_d)
+
+    # Convert Pandoc's implicit-figure captions into auto-numbered Word captions
+    print("🔢 Applying figure caption numbering...")
+    apply_figure_captions(temp_part_d)
 
     print(f"✅ Part D converted")
 
@@ -668,6 +786,10 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     composer.append(Document(temp_part_c))
     composer.append(Document(temp_part_d))
     composer.save(output_path)
+
+    # Ensure figure numbers / TOC page numbers are correct the moment the
+    # document is opened, rather than showing cached placeholder text
+    set_update_fields_on_open(output_path)
 
     # Clean up temporary files
     temp_part_a.unlink()

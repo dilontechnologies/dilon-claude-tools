@@ -28,12 +28,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `@@@TABLE_COLUMNS:w1,w2,...@@@` marker for `dilon-document-compiler`, letting authors hardcode per-column table widths (inches), stackable with `@@@TABLE_STYLE@@@`. One entry may be `x` to flexibly absorb the page's remaining content width; invalid specs (entry-count mismatch, wrong `x` count, widths that don't fit the page) warn and fall back to Word's default auto-sized width rather than failing compilation.
+- Automatic, Word-native section numbering: `Heading 2/3/4` are linked to a shared multilevel list in `TEMPLATE_Word_Signature.docx`, so headings are written as `## Section Name` (no manual "N." prefix) and Word numbers them ("2.", "2.1", "2.1.1") itself.
+- Automatic, Word-native figure numbering: caption text now lives in the image's alt-text brackets - `![Description.](path.png){#fig:label}` - with no manually-typed number. `apply_figure_captions()` in `generate_dilon_doc.py` rewrites the resulting caption paragraph into a `Caption`-styled paragraph carrying live `STYLEREF`/`SEQ` fields, chapter-numbered off the nearest Heading 2 (`Figure 2.1 - Description.`). The optional `{#fig:label}` id supports `[text](#fig:label)` figure cross-references, reusing the existing internal-cross-reference link syntax.
+- `Captioned Figure` / `Image Caption` paragraph styles in `TEMPLATE_Word_Signature.docx` - detection-only styles that let Pandoc's implicit-figure captions be told apart from an ordinary paragraph that happens to follow a decorative, uncaptioned image (`![]()`), which produces identical paragraph structure otherwise
+- `set_update_fields_on_open()` in `generate_dilon_doc.py` - sets `updateFields` in the compiled document's settings so Word recalculates all fields (figure numbers, TOC page numbers) the moment the document opens, instead of showing stale cached values until a manual update
+- Test coverage in `tests/run_tests.py`: `test_heading_auto_numbering()`, `test_figure_auto_numbering()`, `test_compile_resolves_relative_image_paths()`
+
+### Changed
+- **BREAKING:** Section headings and figure captions must no longer include a manually-typed number - `TEMPLATE_Document.md`, `MARKDOWN_STYLING_GUIDE.md`, and `STYLING_TEST_TEMPLATE.md` are updated to the new convention. Existing documents with manually-numbered headings/captions will show doubled numbers once compiled against the updated template and need their manual numbers stripped
 
 ### Fixed
 - `dilon-document-compiler`'s `generate_dilon_doc.py` resolved its default signature/content templates against its own `scripts/` directory instead of the sibling `templates/` directory, breaking any invocation with fewer than four explicit arguments
 - Removed the `#!/usr/bin/env python3` shebang from all repo Python scripts, since Windows' `py` launcher parses it and can re-dispatch to an unrelated, dependency-less `python3.exe` instead of the real interpreter
 - `generate_dilon_doc.py` opened input markdown as `utf-8`, so a leading UTF-8 BOM (written by, e.g., PowerShell's `Set-Content -Encoding UTF8`) made the YAML front-matter regex silently fail to match, dropping all document metadata with no error; now opens with `utf-8-sig`
 - A `@@@TABLE_STYLE:...@@@` marker immediately followed by its table (the documented, no-blank-line convention) could get merged by Pandoc into a single garbled text paragraph, since Pandoc's pipe-table parser requires a preceding blank line; the destroyed table's marker text could then also mis-attribute its style to an unrelated adjacent table. `markdown_to_docx()` now inserts a blank line after table-style markers before handing the markdown to Pandoc
+- `markdown_to_docx()` resolved relative image paths (e.g. `diagrams/foo.png`) against the compiler's own current working directory instead of the input markdown file's directory, and silently swallowed Pandoc's resource-fetch warnings on success - so images could silently go missing from a compiled document depending on which directory the compiler was invoked from. Now passes `--resource-path` and always prints Pandoc's stderr
 
 ### Planned Features
 - Extended usage examples

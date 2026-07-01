@@ -73,9 +73,9 @@ Test outputs are created in `tests/test-output/`:
 - Each revision must have:
   - `number`, `description`, `eco_number`, `eco_date`
 - Must contain sections:
-  - `## 1. Purpose and Scope`
-  - `### 1.1 Purpose`
-  - `### 1.2 Scope`
+  - `## Purpose and Scope`
+  - `### Purpose`
+  - `### Scope`
 
 **Note:** The validation does NOT enforce that `current_revision` matches the revision numbers in the `revisions` list. It is the user's responsibility to keep these in sync.
 

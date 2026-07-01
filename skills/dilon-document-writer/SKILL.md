@@ -22,12 +22,12 @@ Helps create and maintain Dilon Technologies markdown documents in the company's
    - Initial revision entry: `revision_description` (default: "Initial release"), `eco_number` (default: "ECO-TBD"), `eco_date` (default: "YYYY-MM-DD")
 3. Substitute these into the template's YAML front matter. The first entry in `revisions` always mirrors `current_revision` for its `number` field.
 4. Before writing, check whether the destination file already exists — refuse and tell the user if it does.
-5. Write the new file with the substituted front matter and the template's `## 1. Purpose and Scope` / `### 1.1 Purpose` / `### 1.2 Scope` sections intact.
+5. Write the new file with the substituted front matter and the template's `## Purpose and Scope` / `### Purpose` / `### Scope` sections intact.
 
 ## Editing an existing Dilon document
 
 1. Read `MARKDOWN_STYLING_GUIDE.md` in this skill's directory before making edits, if it isn't already in context for this conversation. Keep it in context for the remainder of the editing session — don't re-derive formatting rules from memory once it falls out of context.
-2. Apply edits per the user's request, following the guide's conventions: heading numbering, pipe/grid table formatting, custom `@@@STYLE@@@`/`@@@TABLE_STYLE@@@` markers, figure/image handling, and YAML front-matter shape.
+2. Apply edits per the user's request, following the guide's conventions: heading structure (no manual section numbers — Word auto-numbers Heading 2/3/4), pipe/grid table formatting, custom `@@@STYLE@@@`/`@@@TABLE_STYLE@@@` markers, figure/image handling, and YAML front-matter shape.
 3. Major section headings must be H2 (`##`) — required for correct table-of-contents generation when the document is later compiled to Word by the `dilon-document-compiler` skill.
 
 ## Next step

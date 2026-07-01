@@ -18,13 +18,13 @@ revisions:
     eco_date: "2025-10-15"
 ---
 
-## 1. Purpose and Scope
+## Purpose and Scope
 
-### 1.1 Purpose
+### Purpose
 
 This document demonstrates **every styling element** defined in the Markdown Styling Guide (MARKDOWN_STYLING_GUIDE.md). It serves as a comprehensive test case for the Dilon Document Compiler and a reference for refining the styling guide itself.
 
-### 1.2 Scope
+### Scope
 
 This test document includes examples of:
 
@@ -40,37 +40,37 @@ This test document includes examples of:
 - Math equations and footnotes
 - Proper spacing and line breaks
 
-### 1.3 Medical Device Context
+### Medical Device Context
 
 - **Device Classification**: ISO 62304 Class B Medical Device
 - **Regulatory**: FDA submission requirements
 - **Safety-Critical**: Real-time gamma ray detection for surgical navigation
 
-## 2. Heading Level Examples
+## Heading Level Examples
 
 This section demonstrates all supported heading levels.
 
-### 2.1 Subsection Level (Heading 2)
+### Subsection Level (Heading 2)
 
 This is a subsection using three hashes (`###`). It represents the second level of hierarchy.
 
-#### 2.1.1 Sub-subsection Level (Heading 3)
+#### Sub-subsection Level (Heading 3)
 
 This is a sub-subsection using four hashes (`####`). It represents the third level of hierarchy.
 
-### 2.2 Nested Structure Example
+### Nested Structure Example
 
-#### 2.2.1 First Sub-subsection
+#### First Sub-subsection
 
 Content under first sub-subsection.
 
-#### 2.2.2 Second Sub-subsection
+#### Second Sub-subsection
 
 Content under second sub-subsection.
 
-## 3. Table Examples
+## Table Examples
 
-### 3.1 Pipe Table with Default Alignment (Left) - DilonTable_List Style
+### Pipe Table with Default Alignment (Left) - DilonTable_List Style
 
 This is a standard pipe table with left-aligned columns (default). This table uses **DilonTable_List** style with header row only:
 
@@ -81,7 +81,7 @@ This is a standard pipe table with left-aligned columns (default). This table us
 | 0x36 | MAX17263 | Fuel Gauge | High |
 | 0x50 | 24AA02E48 | EEPROM | Low |
 
-### 3.2 Pipe Table with Mixed Alignment - Explicit DilonTable_List
+### Pipe Table with Mixed Alignment - Explicit DilonTable_List
 
 This table demonstrates left, center, and right alignment. It explicitly uses **DilonTable_List** style (though this is the default):
 
@@ -93,7 +93,7 @@ This table demonstrates left, center, and right alignment. It explicitly uses **
 | 0x24 | NCD9830 | 3.3 | 8-channel 12-bit ADC |
 | 0x36 | MAX17263 | 3.3 | Fuel gauge with ModelGauge m5 |
 
-### 3.3 Multi-line Cells with `<br>` Tags
+### Multi-line Cells with `<br>` Tags
 
 This table attempts to show cells with line breaks using `<br>` tags:
 
@@ -105,7 +105,7 @@ This table attempts to show cells with line breaks using `<br>` tags:
 
 **ISSUE**: The `<br>` tags do not render as line breaks in Word output. Pandoc may not process HTML tags in pipe table cells. For multi-line content in cells, use grid tables instead (see Section 3.5).
 
-### 3.4 Complex Pipe Table - DilonTable_Chart Style
+### Complex Pipe Table - DilonTable_Chart Style
 
 This table is a matrix/cross-reference table where the first column represents register names (header column) and the top row represents bit positions (header row). This uses **DilonTable_Chart** style by placing a style marker before the table:
 
@@ -119,7 +119,7 @@ This table is a matrix/cross-reference table where the first column represents r
 
 **Note**: In DilonTable_Chart style, both the first row AND first column should have gray background with bold text. The style marker tells the compiler to apply the specified table style during post-processing.
 
-### 3.5 Grid Table (For Complex Content)
+### Grid Table (For Complex Content)
 
 Grid tables support multi-paragraph cells and complex block elements:
 
@@ -143,7 +143,7 @@ Grid tables support multi-paragraph cells and complex block elements:
 |               |               | DD:EE:FF           |
 +---------------+---------------+--------------------+
 
-### 3.6 Incorrect Table Style Tag
+### Incorrect Table Style Tag
 
 The following has a Table style tag, that is not followed by a table. 
 
@@ -151,9 +151,9 @@ The following has a Table style tag, that is not followed by a table.
 
 There should be a warning within the compilation step that says there is a floating style tag.
 
-## 4. List Examples
+## List Examples
 
-### 4.1 Unordered Lists
+### Unordered Lists
 
 Simple bulleted list:
 
@@ -170,7 +170,7 @@ Nested unordered list:
     - Deeply nested item
 - Top level item 3
 
-### 4.2 Ordered Lists
+### Ordered Lists
 
 Simple numbered list:
 
@@ -190,7 +190,7 @@ Ordered list with nested bullets:
    - Write control registers
    - Verify configuration
 
-### 4.3 Definition Lists
+### Definition Lists
 
 **Term 1**
 :   Definition of term 1. This is a glossary-style definition.
@@ -207,35 +207,30 @@ Ordered list with nested bullets:
 **Slave Device**
 :   A device that responds to requests from the master device.
 
-## 5. Figures and Images
+## Figures and Images
 
-### 5.1 Figure with Caption
+### Figure with Caption
 
-![](diagrams/placeholder_diagram.png)
+![Complete I2C Bus Topology showing nRF52832 master connected to all peripheral devices.](diagrams/placeholder_diagram.png){#fig:i2c-bus-topology}
 
-*Figure 5.1: Complete I2C Bus Topology showing nRF52832 master connected to all peripheral devices.*
+**Note**: The caption above is auto-numbered by the compiler - no number was typed in the markdown. See [the figure](#fig:i2c-bus-topology) for an example of a working figure cross-reference.
 
+### Second Figure Example
 
-**Note**: This is an example of a note following a figure caption. There are two blank lines before this note.
-
-### 5.2 Second Figure Example
-
-![](diagrams/cpld_interface_placeholder.png)
-
-*Figure 5.2: CPLD Interface Architecture via PCA9534 GPIO extenders.*
+![CPLD Interface Architecture via PCA9534 GPIO extenders.](diagrams/cpld_interface_placeholder.png){#fig:cpld-interface}
 
 
-## 6. Code and Technical Content
+## Code and Technical Content
 
-### 6.1 Inline Code Examples
+### Inline Code Examples
 
 The `i2c_write()` function sends data to the device at address `0x50`. Memory address `0x00-0x01` contains the CRC-16 checksum.
 
 Register `CTRL_REG1` (address `0x20`) controls power mode. Set bit `PD1:PD0` to `00` for normal operation.
 
-### 6.2 Code Blocks
+### Code Blocks
 
-#### 6.2.1 C Code Example
+#### C Code Example
 
 ```c
 uint8_t data[8];
@@ -247,7 +242,7 @@ void ee24aa02_read_buf(uint8_t address, uint8_t *buffer, size_t length) {
 }
 ```
 
-#### 6.2.2 Python Code Example
+#### Python Code Example
 
 ```python
 def calculate_checksum(data):
@@ -264,7 +259,7 @@ def calculate_checksum(data):
     return crc
 ```
 
-#### 6.2.3 Bash/Shell Commands
+#### Bash/Shell Commands
 
 ```bash
 # Generate PlantUML diagram
@@ -277,7 +272,7 @@ python generate_dilon_doc.py input.md output.docx
 Compile-DilonDoc input.md
 ```
 
-#### 6.2.4 VHDL Code Example
+#### VHDL Code Example
 
 ```vhdl
 library IEEE;
@@ -290,7 +285,7 @@ entity counter is
 end counter;
 ```
 
-#### 6.2.5 Plain Text Block (No Language Identifier)
+#### Plain Text Block (No Language Identifier)
 
 ```
 This is a plain text block with no syntax highlighting.
@@ -301,7 +296,7 @@ Line 2
 Line 3
 ```
 
-#### 6.2.6 Custom Styled Single Paragraph
+#### Custom Styled Single Paragraph
 
 This example demonstrates applying a custom paragraph style using special markers. This is useful for content that needs special formatting beyond standard Pandoc styles:
 
@@ -311,7 +306,7 @@ HARDWARE CONFIGURATION: Connect GPIO pin 14 to LED anode through 330Ω current-l
 
 **Note**: The `@@@STYLE:SourceCode@@@` and `@@@END_STYLE@@@` markers apply the SourceCode style to the paragraph between them. Both markers are automatically removed in the final Word document.
 
-#### 6.2.7 Custom Styled Multiple Paragraphs
+#### Custom Styled Multiple Paragraphs
 
 For applying custom styling to multiple consecutive paragraphs, use the `@@@END_STYLE@@@` marker:
 
@@ -331,7 +326,7 @@ Maximum retry attempts: 3
 
 **Note**: All paragraphs between `@@@STYLE:StyleName@@@` and `@@@END_STYLE@@@` receive the specified formatting. Both markers are automatically removed from the final document.
 
-#### 6.2.8 Same Paragraph - Both Markers on One Line
+#### Same Paragraph - Both Markers on One Line
 
 This demonstrates both START and END markers on the same line:
 
@@ -339,7 +334,7 @@ This demonstrates both START and END markers on the same line:
 
 **Note**: When both markers are on the same line, only that single paragraph receives the style.
 
-#### 6.2.9 Start Marker Alone in Paragraph
+#### Start Marker Alone in Paragraph
 
 This demonstrates the START marker as the only content in its paragraph:
 
@@ -351,7 +346,7 @@ TIMEOUT_CONFIG: Set watchdog timer to 500ms. Enable automatic reset on timeout c
 
 **Note**: The START marker paragraph contains only the marker (after Pandoc processing with blank lines).
 
-#### 6.2.10 End Marker Alone in Paragraph
+#### End Marker Alone in Paragraph
 
 This demonstrates the END marker as the only content in its paragraph:
 
@@ -362,7 +357,7 @@ INTERRUPT_HANDLER: Clear pending interrupt flags before exiting ISR. Save contex
 
 **Note**: The END marker paragraph contains only the marker (after Pandoc processing with blank lines).
 
-### 6.3 Register and Bit Field Notation
+### Register and Bit Field Notation
 
 Examples of technical notation:
 
@@ -373,9 +368,9 @@ Examples of technical notation:
 - I2C address range: `0x00-0x7F` (7-bit addressing)
 - Write sequence: `START`, `ADDRESS`, `WRITE`, `DATA`, `STOP`
 
-## 7. Text Emphasis and Formatting
+## Text Emphasis and Formatting
 
-### 7.1 Bold Text
+### Bold Text
 
 Use **bold** for important warnings and key terms:
 
@@ -385,15 +380,13 @@ Use **bold** for important warnings and key terms:
 
 **Key Term**: Bold the first mention of key technical terms.
 
-### 7.2 Italic Text
+### Italic Text
 
-Use *italic* for emphasis and figure captions:
-
-*Figure captions are italicized as shown in Section 5.*
+Use *italic* for emphasis:
 
 The device operates in *normal mode* by default but can be configured for *low-power mode*.
 
-### 7.3 Bold and Italic Combined
+### Bold and Italic Combined
 
 Use ***bold italic*** for critical warnings:
 
@@ -401,9 +394,9 @@ Use ***bold italic*** for critical warnings:
 
 ***CRITICAL***: This operation cannot be undone.
 
-## 8. Links and Cross-References
+## Links and Cross-References
 
-### 8.1 External Links
+### External Links
 
 For more information, see the [Pandoc User's Guide](https://pandoc.org/MANUAL.html).
 
@@ -411,7 +404,7 @@ Visit the [Dilon Diagnostics website](https://www.dilondiagnostics.com) for prod
 
 Refer to the [I2C specification](https://www.nxp.com/docs/en/user-guide/UM10204.pdf) for protocol details.
 
-### 8.2 Internal Cross-References
+### Internal Cross-References
 
 Internal cross-references use hyperlinks to navigate within the document:
 
@@ -423,9 +416,9 @@ The definition list format is explained in [Section 4.3](#definition-lists), sho
 
 Code examples demonstrating different language identifiers can be found in [Section 6.2](#code-blocks), including [C code](#c-code-example), [Python](#python-code-example), [Bash commands](#bashshell-commands), and [VHDL](#vhdl-code-example).
 
-Figure formatting with proper captions is demonstrated in [Section 5.1](#figure-with-caption) and [Section 5.2](#second-figure-example).
+Figure formatting with proper captions is demonstrated in [Section "Figure with Caption"](#figure-with-caption) and [Section "Second Figure Example"](#second-figure-example). Direct figure cross-references (not just section links) work too: see [Figure](#fig:i2c-bus-topology) and [Figure](#fig:cpld-interface).
 
-### 8.3 Code References
+### Code References
 
 Specific file and line number references:
 
@@ -437,15 +430,15 @@ Specific file and line number references:
 
 **Function Definition**: `main.c:315`
 
-## 9. Notes, Warnings, and Callouts
+## Notes, Warnings, and Callouts
 
-### 9.1 Simple Notes
+### Simple Notes
 
 **Note**: This is a simple informational note using bold text.
 
 **Note**: Always check device address before initiating communication.
 
-### 9.2 Important and Warning Callouts
+### Important and Warning Callouts
 
 **IMPORTANT**: Critical information that must be followed to ensure proper operation.
 
@@ -453,7 +446,7 @@ Specific file and line number references:
 
 **CAUTION**: Electrostatic discharge (ESD) sensitive components. Use proper grounding.
 
-### 9.3 Block Quotes
+### Block Quotes
 
 For longer notes or quoted text from specifications:
 
@@ -468,9 +461,9 @@ Another example:
 > (both SDA and SCL) after communication completes. A master device
 > must ensure proper timing to avoid bus contention.
 
-## 10. Spacing and Line Break Examples
+## Spacing and Line Break Examples
 
-### 10.1 Paragraph Spacing
+### Paragraph Spacing
 
 This is the first paragraph. It is followed by one blank line.
 
@@ -487,7 +480,7 @@ This paragraph demonstrates proper spacing before a list:
 
 And this paragraph follows the list with proper spacing.
 
-### 10.2 Section Break with Horizontal Rule
+### Section Break with Horizontal Rule
 
 The following horizontal rule can be used for section breaks:
 
@@ -497,9 +490,9 @@ Content after a horizontal rule. Pandoc may convert this to a page break in Word
 
 ---
 
-## 11. Special Pandoc Features
+## Special Pandoc Features
 
-### 11.1 Math Equations
+### Math Equations
 
 Inline math equation: $E = mc^2$
 
@@ -517,7 +510,7 @@ $$
 CRC = \sum_{i=0}^{n-1} data[i] \times x^i \mod polynomial
 $$
 
-### 11.2 Footnotes
+### Footnotes
 
 This is a sentence with a footnote reference. [^1]
 
@@ -531,43 +524,43 @@ Footnote in table or technical context: The MAX17263 uses ModelGauge m5 algorith
 
 [^3]: ModelGauge m5 is a patented algorithm by Maxim Integrated (now part of Analog Devices).
 
-## 12. Requirements Traceability Example
+## Requirements Traceability Example
 
-### 12.1 Functional Requirements
+### Functional Requirements
 
 - **REQ-001**: System SHALL initialize I2C bus at 400 kHz within 100ms of power-on
 - **REQ-002**: System SHALL detect all connected I2C devices during initialization
 - **REQ-003**: System SHALL log I2C communication errors to the error buffer
 - **REQ-004**: System SHALL retry failed I2C transactions up to 3 times before reporting failure
 
-### 12.2 Non-Functional Requirements
+### Non-Functional Requirements
 
 - **REQ-005**: I2C communication latency SHALL NOT exceed 10ms per transaction
 - **REQ-006**: System SHALL support hot-plugging of I2C devices (if hardware permits)
 - **REQ-007**: I2C driver SHALL be thread-safe for multi-threaded environments
 
-## 13. References and Documentation
+## References and Documentation
 
-### 13.1 Internal Documents
+### Internal Documents
 
 - **Navigator 3.0 System Architecture**: `Documentation/Navigator_3_System_Architecture.md`
 - **I2C Driver Implementation**: `dilon_counter/src/i2c_driver.c`
 - **Device Configuration Header**: `dilon_counter/include/device_config.h`
 
-### 13.2 External Datasheets and Standards
+### External Datasheets and Standards
 
 - **LIS331 Accelerometer**: STMicroelectronics, Doc ID 17116 Rev 2
 - **NCD9830 ADC**: ON Semiconductor, NCD9830 Datasheet Rev 2
 - **MAX17263 Fuel Gauge**: Maxim Integrated, MAX17263 Datasheet Rev 1
 - **I2C Specification**: NXP UM10204, I2C-bus specification and user manual Rev 7.0
 
-### 13.3 Regulatory Standards
+### Regulatory Standards
 
 - **ISO 62304**: Medical device software - Software life cycle processes
 - **IEC 60601-1**: Medical electrical equipment - Part 1: General requirements for basic safety and essential performance
 - **FDA 21 CFR Part 820**: Quality System Regulation
 
-## 14. Revision History Summary
+## Revision History Summary
 
 This document has undergone the following revisions:
 
@@ -576,7 +569,39 @@ This document has undergone the following revisions:
 | 1.0 | 2025-10-01 | Initial release | -- |
 | 1.1 | 2025-10-15 | Updated Section 3.5 with new calibration data | ECO-2025-042 |
 
-## 15. Conclusion
+## Automatic Section Numbering Verification
+
+None of the headings in this section have a number typed into their markdown text. The Word templates link the Heading 2/3/4 styles to an automatic multilevel list, so Word generates the "N." / "N.M" / "N.M.P" numbers itself, purely from each heading's position in the document. The expected number is called out after each heading below so it can be checked against what Word actually renders; if a number doesn't match (or is missing/doubled), the template's numbering setup has a problem.
+
+This is the 15th major (`##`) section in the document, so it should render as **15.**
+
+### First Subsection
+
+Expected Word auto-number: **15.1**
+
+#### First Nested Item
+
+Expected Word auto-number: **15.1.1**
+
+#### Second Nested Item
+
+Expected Word auto-number: **15.1.2** — proves the sub-subsection counter increments across siblings under the same subsection.
+
+### Second Subsection
+
+Expected Word auto-number: **15.2**
+
+#### First Nested Item
+
+Expected Word auto-number: **15.2.1** — reuses the heading title "First Nested Item" from the previous subsection on purpose: the counter must reset to 1 here rather than continuing as 15.1.3.
+
+### Third Subsection
+
+Expected Word auto-number: **15.3**
+
+This subsection has no `####` children, proving a subsection doesn't need nested headings for the numbering to stay correct going into the next major section.
+
+## Conclusion
 
 This test document demonstrates all styling elements defined in the Markdown Styling Guide (MARKDOWN_STYLING_GUIDE.md). It includes:
 
@@ -596,8 +621,10 @@ This test document demonstrates all styling elements defined in the Markdown Sty
 - ✅ Math equations (inline and display)
 - ✅ Footnotes
 - ✅ Proper spacing and line breaks
+- ✅ Automatic Word-native section numbering (no manually-typed heading numbers)
+- ✅ Automatic Word-native figure numbering and cross-references (no manually-typed figure numbers)
 
-### 15.1 Testing Instructions
+### Testing Instructions
 
 To test this document:
 
@@ -607,7 +634,7 @@ To test this document:
 4. Identify any formatting issues or inconsistencies
 5. Update the styling guide based on findings
 
-### 15.2 Expected Output Verification
+### Expected Output Verification
 
 Check the following in the generated Word document:
 
@@ -616,8 +643,10 @@ Check the following in the generated Word document:
 - [ ] Revision history table with all entries
 - [ ] Table of contents with correct page numbers
 - [ ] All headings styled correctly (Heading 1, 2, 3)
+- [ ] Headings show single, correctly-nested auto-numbers ("15.", "15.1", "15.1.1") in the "Automatic Section Numbering Verification" section — no missing or doubled numbers
 - [ ] Tables display correct column alignment (left, center, right)
-- [ ] Figures display correctly with italicized captions
+- [ ] Figures display correctly with italicized, centered "Figure N.M - Description" captions - no manually-typed numbers, no missing/doubled numbers
+- [ ] Ctrl+click on "the figure" in the "Figure with Caption" note jumps to that figure
 - [ ] Code blocks use "Source Code" style
 - [ ] Bold and italic text render correctly
 - [ ] Footnotes appear at bottom of pages

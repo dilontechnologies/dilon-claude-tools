@@ -119,13 +119,13 @@ def validate_markdown_stub(stub_path, expected_values=None):
                     )
 
     # Check markdown content structure
-    if '## 1. Purpose and Scope' not in markdown_content:
+    if '## Purpose and Scope' not in markdown_content:
         errors.append("Missing 'Purpose and Scope' section")
 
-    if '### 1.1 Purpose' not in markdown_content:
+    if '### Purpose' not in markdown_content:
         errors.append("Missing 'Purpose' subsection")
 
-    if '### 1.2 Scope' not in markdown_content:
+    if '### Scope' not in markdown_content:
         errors.append("Missing 'Scope' subsection")
 
     return len(errors) == 0, errors
