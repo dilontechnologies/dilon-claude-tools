@@ -406,6 +406,107 @@ def test_compile_table_marker_no_blank_line():
     check(not garbled, f"no leftover marker/pipe-table text in output (found: {garbled})")
 
 
+COLUMN_WIDTH_MARKDOWN = SAMPLE_MARKDOWN + (
+    '\n### 1.3 Column Width Test\n'
+    '@@@TABLE_STYLE:DilonTable_Chart@@@\n'
+    '@@@TABLE_COLUMNS:1.5,x,1,1@@@\n'
+    '| Register | Address | Bit 7 | Bit 6 |\n'
+    '|---|---|---|---|\n'
+    '| CTRL_REG1 | 0x20 | ODR3 | ODR2 |\n'
+    '\n'
+    '@@@TABLE_COLUMNS:2,3@@@\n'
+    '| Name | Value |\n'
+    '|---|---|\n'
+    '| A | B |\n'
+    '\n'
+    '@@@TABLE_COLUMNS:1,2@@@\n'
+    '| Mismatched | Columns | Table |\n'
+    '|---|---|---|\n'
+    '| A | B | C |\n'
+    '\n'
+    '@@@TABLE_COLUMNS:10,x@@@\n'
+    '| Overflow | Table |\n'
+    '|---|---|\n'
+    '| A | B |\n'
+)
+
+
+def test_compile_table_column_widths():
+    """Render test: compile a document with @@@TABLE_COLUMNS@@@-marked
+    tables (stacked with @@@TABLE_STYLE@@@, standalone, and two invalid
+    specs) and verify the ACTUAL rendered column widths in the output
+    docx match the marker's specified values - not just that
+    compilation succeeded."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_column_widths.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_column_widths.docx"
+    input_md.write_text(COLUMN_WIDTH_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+            str(CONTENT_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for column-width-marked tables")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "column-width tables render with correct widths (skipped: compile failed)")
+        return
+
+    doc = Document(output_docx)
+
+    def header_row(table):
+        return [c.text for c in table.rows[0].cells]
+
+    section = doc.sections[0]
+    available_width = section.page_width.inches - section.left_margin.inches - section.right_margin.inches
+
+    # Table 1: stacked @@@TABLE_STYLE@@@ + @@@TABLE_COLUMNS:1.5,x,1,1@@@
+    reg_tables = [t for t in doc.tables if header_row(t) == ['Register', 'Address', 'Bit 7', 'Bit 6']]
+    check(len(reg_tables) == 1, "stacked-marker table survives conversion as a real table")
+    if reg_tables:
+        table = reg_tables[0]
+        check(table.style is not None and table.style.name == 'DilonTable_Chart',
+              "stacked-marker table still receives its DilonTable_Chart style")
+        actual_widths = [round(col.width.inches, 2) for col in table.columns]
+        expected_flex = round(available_width - 1.5 - 1.0 - 1.0, 2)
+        expected_widths = [1.5, expected_flex, 1.0, 1.0]
+        check(actual_widths == expected_widths,
+              f"stacked-marker table's rendered widths match the marker spec (expected {expected_widths}, got {actual_widths})")
+
+    # Table 2: standalone @@@TABLE_COLUMNS:2,3@@@, no @@@TABLE_STYLE@@@
+    name_tables = [t for t in doc.tables if header_row(t) == ['Name', 'Value']]
+    check(len(name_tables) == 1, "standalone-column-width table survives conversion as a real table")
+    if name_tables:
+        table = name_tables[0]
+        actual_widths = [round(col.width.inches, 2) for col in table.columns]
+        check(actual_widths == [2.0, 3.0],
+              f"standalone all-numeric column widths render exactly as specified (got {actual_widths})")
+        check(table.style is not None and table.style.name == 'DilonTable_List',
+              "table with only a @@@TABLE_COLUMNS@@@ marker still gets the default DilonTable_List style")
+
+    # Table 3: @@@TABLE_COLUMNS:1,2@@@ on a 3-column table - entry count mismatch, must warn and skip
+    mismatched_tables = [t for t in doc.tables if header_row(t) == ['Mismatched', 'Columns', 'Table']]
+    check(len(mismatched_tables) == 1, "entry-count-mismatch table still survives conversion as a real table")
+    check("Invalid @@@TABLE_COLUMNS@@@ spec" in result.stdout,
+          "entry-count-mismatch spec prints a warning instead of failing compilation")
+
+    # Table 4: @@@TABLE_COLUMNS:10,x@@@ - fixed width alone exceeds available content width
+    overflow_tables = [t for t in doc.tables if header_row(t) == ['Overflow', 'Table']]
+    check(len(overflow_tables) == 1, "overflowing-width table still survives conversion as a real table")
+    check("Could not apply column widths" in result.stdout,
+          "overflowing column-width spec prints a warning instead of failing compilation")
+
+
 def test_compile_with_default_templates():
     """Regression test for a bug where the compiler's default template
     lookup pointed at scripts/ instead of the sibling templates/ directory.
@@ -480,6 +581,7 @@ def main():
     test_compile_valid_document()
     test_compile_bom_front_matter()
     test_compile_table_marker_no_blank_line()
+    test_compile_table_column_widths()
     test_compile_with_default_templates()
     test_no_shebang_in_python_scripts()
 

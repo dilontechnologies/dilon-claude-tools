@@ -193,6 +193,7 @@ def apply_styles(docx_file):
     # Operation collections
     table_operations = []  # List of (table_object, style_name)
     styled_table_elements = set()  # Set of XML elements for tables that received explicit styles
+    column_width_operations = []  # List of (table_object, columns_spec_text)
     paragraph_operations = []  # List of (start_idx, end_idx, style_name)
     paragraphs_to_trim = []  # List of (idx, cleaned_text)
 
@@ -211,26 +212,35 @@ def apply_styles(docx_file):
             if para.runs and para.runs[0].style and 'Verbatim' in para.runs[0].style.name:
                 continue
 
-            # Handle table style markers (must start the paragraph)
-            if text.startswith('@@@TABLE_STYLE:'):
+            # Handle table style / column-width markers (must start the
+            # paragraph; either marker may lead when both are stacked,
+            # since Pandoc merges adjacent no-blank-line marker lines into
+            # a single paragraph)
+            if text.startswith('@@@TABLE_STYLE:') or text.startswith('@@@TABLE_COLUMNS:'):
                 style_match = re.search(r'@@@TABLE_STYLE:(\w+)@@@', text)
-                if style_match:
-                    style_name = style_match.group(1)
+                columns_match = re.search(r'@@@TABLE_COLUMNS:([\w.,]+)@@@', text)
+
+                if style_match or columns_match:
                     next_element = para._element.getnext()
 
                     # Check if immediate next element is a table
-                    table_found = False
+                    table_obj = None
                     if next_element is not None and next_element.tag.endswith('tbl'):
                         # Find the Table object that wraps this XML element
                         for table in doc.tables:
                             if table._element == next_element:
-                                table_operations.append((table, style_name))
-                                styled_table_elements.add(table._element)
-                                table_found = True
+                                table_obj = table
                                 break
 
-                    if not table_found:
-                        print(f"  ⚠️  Table marker '{style_name}' at paragraph {i} not followed by table")
+                    if table_obj is not None:
+                        if style_match:
+                            style_name = style_match.group(1)
+                            table_operations.append((table_obj, style_name))
+                            styled_table_elements.add(table_obj._element)
+                        if columns_match:
+                            column_width_operations.append((table_obj, columns_match.group(1)))
+                    else:
+                        print(f"  ⚠️  Table marker '{text[:60]}' at paragraph {i} not followed by table")
 
                     # Mark marker paragraph for deletion
                     paragraphs_to_trim.append((i, ''))
@@ -294,6 +304,21 @@ def apply_styles(docx_file):
             apply_table_style_to_object(table, style_name)
         except Exception as e:
             print(f"  ⚠️  Could not apply style '{style_name}' to table: {e}")
+
+    # Apply column widths
+    if column_width_operations:
+        section = doc.sections[0]
+        available_width = section.page_width.inches - section.left_margin.inches - section.right_margin.inches
+
+        for table, spec_text in column_width_operations:
+            widths = parse_column_widths(spec_text, len(table.columns))
+            if widths is None:
+                print(f"  ⚠️  Invalid @@@TABLE_COLUMNS@@@ spec '{spec_text}' for a {len(table.columns)}-column table; leaving default widths")
+                continue
+            try:
+                apply_table_column_widths(table, widths, available_width)
+            except ValueError as e:
+                print(f"  ⚠️  Could not apply column widths '{spec_text}': {e}")
 
     # Apply paragraph styles
     for start_idx, end_idx, style_name in paragraph_operations:
