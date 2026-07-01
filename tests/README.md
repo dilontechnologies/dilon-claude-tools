@@ -1,23 +1,25 @@
 # Dilon Claude Tools - Test Suite
 
-This directory contains comprehensive tests for the Dilon Claude Tools MCP server.
+This directory contains tests for the Dilon Claude Tools Claude Code plugin (the `dilon-document-writer` and `dilon-document-compiler` skills).
 
 ## Test Files
 
-### `test-all-features.js`
-Comprehensive integration test suite that tests all MCP server functionality:
-- Server initialization
-- Tool registration (dilon_compile_doc, dilon_plantuml, dilon_generate_stub)
-- Resource registration (markdown and PlantUML styling guides)
-- Resource content retrieval
-- Tool execution and error handling
-- Output validation
+### `run_tests.py`
+Direct-invocation test suite (6 checks):
+- A Python port of the `dilon-document-writer` stub-generation logic (that skill has no script of its own - its behavior is plain instructions in `SKILL.md` for Claude to follow - so this test ports the same substitution logic to exercise it automatically):
+  1. Stub generation with custom parameters
+  2. Stub generation with default parameters
+  3. Refusal to overwrite an existing file
+- Direct subprocess calls to `skills/dilon-document-compiler/scripts/generate_dilon_doc.py`:
+  4. Non-zero exit code for a missing input file
+  5. Successful compilation (exit 0, output file created) for a valid document
+- It then invokes `validate-output.py` (its 5 checks below) and folds that result into the overall pass/fail.
 
 ### `validate-output.py`
 Python validation script that validates generated outputs:
 - Validates markdown stub structure and YAML front matter
 - Validates compiled Word documents
-- Checks STYLING_TEST_TEMPLATE files
+- Checks `STYLING_TEST_TEMPLATE` files
 - Verifies all required fields are present
 
 ### `STYLING_TEST_TEMPLATE.md` / `STYLING_TEST_TEMPLATE.docx`
@@ -25,29 +27,25 @@ Example template files used to test styling and compilation features.
 
 ## Running Tests
 
-### Quick Test
 Run all tests from the repository root:
 
 ```bash
-node tests/test-all-features.js
+py -3 tests/run_tests.py
 ```
+
+(On some Windows machines, bare `python`/`py` resolve through a shebang-re-resolution quirk to a package-less WindowsApps stub. `py -3` is the reliable invocation there.)
 
 ### What Gets Tested
 
-**MCP Server Tests (18 checks):**
-1. Server initialization
-2. Tool registration (3 tools)
-3. Resource registration (2 resources)
-4. Resource content retrieval (2 resources)
-5. Document stub generation (3 tests)
+**Direct-Invocation Checks (6 checks):**
+1. Document stub generation (3 tests)
    - Custom parameters
    - Default parameters
    - Error handling (duplicate file)
-6. Document compilation (2 tests)
+2. Document compilation (2 tests)
    - Error handling (missing file)
    - Valid compilation
-7. PlantUML tool (1 test)
-   - Error handling (missing file)
+3. Output validation (invokes `validate-output.py`, see below)
 
 **Output Validation (5 checks):**
 1. Custom stub validation
@@ -90,23 +88,23 @@ Test outputs are created in `tests/test-output/`:
 ## Expected Results
 
 All tests should pass with:
-- **MCP Tests:** 18/18 passed (100%)
-- **Validation Tests:** 5/5 passed (100%)
-- **Overall:** All tests passed! Package is ready for release.
+- **Direct-invocation checks:** 6/6 passed
+- **Validation checks:** 5/5 passed (100%)
+- **Overall:** All tests passed! Exit code 0.
 
 ## Troubleshooting
 
 ### Python Dependencies
-If validation fails, ensure Python dependencies are installed:
+If validation or compilation fails, ensure Python dependencies are installed:
 ```bash
-pip install python-docx pyyaml
+pip install python-docx python-docx-template docxcompose pyyaml
 ```
 
-### MCP Server Issues
-If the server fails to start:
-1. Check that `server.js` is in the repository root
-2. Verify Node.js version >= 18.0.0
-3. Run `npm install` to ensure dependencies are installed
+Or run the compiler skill's own dependency checker for a clearer report:
+```bash
+python skills/dilon-document-compiler/scripts/check_deps.py
+```
+Any `[FAIL]` line names the missing piece. `install.ps1` (repo root) can install Python/Pandoc/pip packages automatically.
 
 ### Unicode Errors
 The validation script uses ASCII-compatible output (`[PASS]`, `[FAIL]`, `[INFO]`) to avoid Windows console encoding issues.

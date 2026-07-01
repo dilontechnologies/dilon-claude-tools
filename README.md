@@ -74,6 +74,7 @@ Claude: *uses dilon-document-compiler skill*
 
 ```
 dilon-claude-tools/
+├── CLAUDE.md                     # project knowledge doc for Claude Code sessions
 ├── .claude-plugin/
 │   ├── plugin.json              # plugin manifest
 │   └── marketplace.json         # self-hosted marketplace listing this plugin
@@ -94,8 +95,10 @@ dilon-claude-tools/
 ├── tests/
 │   ├── run_tests.py
 │   ├── validate-output.py
+│   ├── README.md
 │   ├── STYLING_TEST_TEMPLATE.md
-│   └── STYLING_TEST_TEMPLATE.docx
+│   ├── STYLING_TEST_TEMPLATE.docx
+│   └── diagrams/                 # figures referenced by STYLING_TEST_TEMPLATE.md
 └── CHANGELOG.md
 ```
 

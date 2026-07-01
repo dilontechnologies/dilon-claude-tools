@@ -1,287 +1,113 @@
 # Dilon Claude Tools - Codebase Knowledge
 
-## Package Overview
+## Plugin Overview
 
-This is an **npm (Node.js) package** that implements a **Model Context Protocol (MCP) server** for Claude Code. It's designed for Windows environments and provides tools for regulatory-compliant technical documentation workflows at Dilon Technologies.
+This is a **self-hosted Claude Code plugin** for Windows environments, providing regulatory-compliant technical documentation workflows at Dilon Technologies. It bundles two Skills rather than exposing MCP tools/resources.
 
-**Package Details:**
-- Name: `@dilontechnologies/claude-tools`
-- Version: 1.1.1
-- Published to: GitHub Packages (private registry)
-- License: UNLICENSED (internal use only)
-- Node.js: >= 18.0.0
+**Plugin Details:**
+- Plugin name: `dilon-tools` (version 2.0.0), defined in `.claude-plugin/plugin.json`
+- Marketplace: `dilon-claude-tools`, defined in `.claude-plugin/marketplace.json` (this repo is its own marketplace; the plugin's `source` is `./`)
+- License: Internal use only (Dilon Technologies LLC)
 
-**Publishing Workflow:**
-- **Automatic Publishing:** Package is automatically published to GitHub Packages via GitHub Actions workflow
-- **Trigger:** Pushing a git tag matching `v*` pattern (e.g., `v1.1.1`) triggers the publish workflow
-- **Process:** Create version tag → push to origin → GitHub Actions automatically publishes
-- **Manual Publishing:** Can also be published manually via `npm publish` if needed
+**Distribution Workflow:**
+- No package registry, no publish step. Users install directly from this git repo via Claude Code's plugin marketplace commands:
+  - `/plugin marketplace add dilontechnologies/dilon-claude-tools`
+  - `/plugin install dilon-tools@dilon-claude-tools`
+- Updates: `/plugin marketplace update dilon-claude-tools` then `/plugin update dilon-tools@dilon-claude-tools`
+- Local testing before relying on the marketplace: `/plugin marketplace add ./dilon-claude-tools` (run from the parent directory of a clone)
+- See `README.md` for the full install/update/troubleshooting instructions.
 
-## Existing Tools/Features
+## Skills
 
-The MCP server currently provides **three main tools** to Claude Code:
+### Skill 1: `dilon-document-writer`
+**Location:** `skills/dilon-document-writer/` (`SKILL.md`, `MARKDOWN_STYLING_GUIDE.md`, `TEMPLATE_Document.md`)
 
-### Tool 1: `dilon_generate_stub`
-**Purpose:** Generates new Dilon document stubs from the template with customizable YAML front matter
+**Dependencies:** none - works without running `install.ps1`.
 
-**Capabilities:**
-- Creates markdown files from the TEMPLATE_Document.md template
-- Customizable YAML front matter (title, author, doc_number, etc.)
-- All parameters optional except output_path
-- Default values: revision "00", department/reps "--"
-- Includes Purpose and Scope sections ready for content
+**Capabilities (per `SKILL.md`):**
+- Creating a new document: reads `TEMPLATE_Document.md`, gathers YAML front-matter fields (title, author, department, doc_number, current_revision, regulatory_rep, quality_rep, department_head, plus an initial revision entry), refuses to overwrite an existing destination file, and writes the new file with the template's `## 1. Purpose and Scope` / `### 1.1 Purpose` / `### 1.2 Scope` sections intact.
+- Editing an existing Dilon document: reads `MARKDOWN_STYLING_GUIDE.md` before editing and keeps it in context for the session, then applies edits per the guide's conventions (heading numbering, pipe/grid tables, `@@@STYLE@@@`/`@@@TABLE_STYLE@@@` markers, figure/image handling, YAML front-matter shape). Major section headings must be H2 for correct TOC generation when later compiled.
+- Explicitly does not invoke Pandoc or the Python compiler - that's the `dilon-document-compiler` skill's job.
 
-**Implementation:** `src/tools/generate-stub.js`
+### Skill 2: `dilon-document-compiler`
+**Location:** `skills/dilon-document-compiler/` (`SKILL.md`, `scripts/generate_dilon_doc.py`, `scripts/check_deps.py`, `templates/TEMPLATE_Word_Signature.docx`, `templates/TEMPLATE_Word_Content.docx`)
 
-**Usage Example:**
-```javascript
-{
-  "output_path": "path/to/new_document.md",
-  "title": "Software Requirements Specification",
-  "author": "Engineering Team",
-  "doc_number": "DD_SWE_12345"
-}
-```
+**Dependencies:** Python (>= 3.8) with `python-docx`, `python-docx-template`, `docxcompose`, `pyyaml>=6.0`; Pandoc on PATH. Installed via `install.ps1`.
 
-### Tool 2: `dilon_compile_doc`
-**Purpose:** Compiles Markdown files with YAML front matter into formatted Word documents
+**Capabilities (per `SKILL.md`):**
+- Runs `scripts/check_deps.py` first; if it reports any `[FAIL]`, stops and tells the user which dependency is missing (pointing at `install.ps1`) rather than attempting a partial compile.
+- Invokes `scripts/generate_dilon_doc.py <input.md> <output.docx> <signature_template> <content_template>` with all four arguments always explicit (never relies on the script's own default template lookup).
+- Produces a regulatory-compliant Word document: signature page + revision history table + title page/content + table of contents, from a markdown file with Dilon YAML front matter.
+- Verifies the output file exists after the script runs; reports stdout/stderr to the user on failure, or the output path on success.
+- Points users lacking YAML front matter back to the `dilon-document-writer` skill.
 
-**Capabilities:**
-- Parses YAML metadata (title, author, revisions, approvers, etc.)
-- Generates signature pages automatically
-- Creates revision history tables dynamically
-- Converts Markdown to Word using Pandoc
-- Assembles multi-part documents (signature page + revision table + content + TOC)
-- Supports custom Word templates
-- Regulatory-compliant formatting (ISO 62304, FDA submission ready)
-
-**Implementation:** `src/tools/dilon-compiler.js`
-
-**Note:** Tool description references the `dilon://styling/markdown` resource for styling guidelines.
-
-### Tool 3: `dilon_plantuml`
-**Purpose:** Generates diagrams from PlantUML files using Dilon styling conventions
-
-**Capabilities:**
-- Supports multiple output formats (PNG, SVG, PDF)
-- Follows company PlantUML style guide standards
-- Handles both `plantuml` command and `java -jar` fallback
-- Provides style guide references
-
-**Implementation:** `src/tools/plantuml.js`
-
-**Note:** Tool description references the `dilon://styling/plantuml` resource for styling guidelines.
-
-## MCP Resources
-
-The MCP server provides **two resources** that expose styling guides:
-
-### Resource 1: `dilon://styling/markdown`
-**Purpose:** Comprehensive Dilon markdown styling guide
-
-**Content:** Complete reference from `docs/MARKDOWN_STYLING_GUIDE.md`
-
-**Covers:**
-- YAML front matter requirements
-- Heading conventions and numbering
-- Table formatting (pipe tables, grid tables, custom styles)
-- Figure and image handling
-- Lists, code blocks, links
-- Custom paragraph styles with `@@@STYLE@@@` markers
-- Regulatory compliance formatting
-
-**Usage:** Claude can reference this resource when working with markdown documents or using the `dilon_compile_doc` tool.
-
-### Resource 2: `dilon://styling/plantuml`
-**Purpose:** Dilon PlantUML style guide for diagram generation
-
-**Content:** Complete reference from `docs/PlantUML_Style_Guide.md`
-
-**Covers:**
-- xUML/Executable UML conventions
-- Class diagram standards
-- State machine diagrams
-- Identifier notation ({I}, {I2}, {R#})
-- Relationship types and verb phrases
-- Multiplicity notation
-- File naming conventions
-
-**Usage:** Claude can reference this resource when creating PlantUML diagrams or using the `dilon_plantuml` tool.
-
-## Project Structure
+## Repository Structure
 
 ```
 dilon-claude-tools/
-├── server.js                          # Main MCP server entry point
-├── package.json                       # Node package manifest
-├── .dilon-tools-config.example.json   # Configuration template
+├── CLAUDE.md                          # this file
+├── README.md                          # install/usage/troubleshooting guide
+├── CHANGELOG.md
+├── install.ps1                        # Python/Pandoc/pip dependency setup + Compile-DilonDoc alias
 │
-├── bin/
-│   └── dilon-tools.js                 # CLI utility (version, info, paths)
+├── .claude-plugin/
+│   ├── plugin.json                    # plugin manifest
+│   └── marketplace.json               # self-hosted marketplace listing this plugin
 │
-├── scripts/
-│   ├── postinstall.js                 # Auto-registers with Claude Desktop
-│   └── preuninstall.js                # Cleanup on uninstall
+├── skills/
+│   ├── dilon-document-writer/
+│   │   ├── SKILL.md
+│   │   ├── MARKDOWN_STYLING_GUIDE.md  # Complete markdown styling reference (995 lines)
+│   │   └── TEMPLATE_Document.md       # Starter document template
+│   └── dilon-document-compiler/
+│       ├── SKILL.md
+│       ├── scripts/
+│       │   ├── generate_dilon_doc.py  # Markdown -> Word compiler
+│       │   └── check_deps.py          # Preflight dependency checker
+│       └── templates/
+│           ├── TEMPLATE_Word_Signature.docx
+│           └── TEMPLATE_Word_Content.docx
 │
-├── src/
-│   ├── config.js                      # Config loader & path manager
-│   ├── utils.js                       # Execution helpers (Python, PowerShell)
-│   └── tools/
-│       ├── generate-stub.js           # Document stub generator tool handler
-│       ├── dilon-compiler.js          # Document compiler tool handler
-│       └── plantuml.js                # PlantUML tool handler
-│
-├── tools/
-│   └── Dilon_Document_Compiler/
-│       ├── generate_dilon_doc.py      # Python document generator
-│       ├── TEMPLATE_Word_Signature.docx
-│       ├── TEMPLATE_Word_Content.docx
-│       └── README.md
-│
-├── docs/
-│   ├── MARKDOWN_STYLING_GUIDE.md      # Complete markdown reference
-│   ├── PlantUML_Style_Guide.md        # Diagram standards
-│   └── TEMPLATE_Document.md           # Document template
-│
-├── tests/
-│   └── STYLING_TEST_TEMPLATE.md
-│
-└── examples/
+└── tests/
+    ├── run_tests.py                   # direct-invocation test suite
+    ├── validate-output.py             # output validation checks
+    ├── README.md
+    ├── STYLING_TEST_TEMPLATE.md / .docx
+    └── diagrams/                      # figures referenced by STYLING_TEST_TEMPLATE.md
 ```
 
-## Document Generation Features (Templates)
+## Document Generation (Word Compilation)
 
-The package includes a sophisticated multi-part document assembly system:
+The `dilon-document-compiler` skill assembles Word documents from several parts:
 
-### Template System Components
+- **Signature template** (`templates/TEMPLATE_Word_Signature.docx`): master document with style definitions, a Jinja2-templated signature approval table, and document properties (title, author, department, doc_number, current_revision, regulatory_rep, quality_rep, department_head).
+- **Revision table**: generated programmatically from the markdown's `revisions` YAML list (custom column widths, gray headers, centered text).
+- **Content template** (`templates/TEMPLATE_Word_Content.docx`): title page and content wrapper (author/revision info).
+- **Markdown content**: converted via Pandoc, with TOC generation from H2 section headings.
 
-**Part A: Signature Template** (`TEMPLATE_Word_Signature.docx`)
-- Master document with style definitions
-- Signature approval table with Jinja2 variables
-- Document properties section
-- Variables: title, author, department, doc_number, current_revision, regulatory_rep, quality_rep, department_head
+`TEMPLATE_Document.md` (in `dilon-document-writer`) provides the starter markdown with the full YAML front-matter shape and section templates for new documents.
 
-**Part B: Revision Table** (Generated programmatically)
-- Dynamic revision history table created from YAML metadata
-- Formatted with custom column widths, gray headers, centered text
+## Styling Guide
 
-**Part C: Content Template** (`TEMPLATE_Word_Content.docx`)
-- Title page and content wrapper
-- Author/revision information
+**File:** `skills/dilon-document-writer/MARKDOWN_STYLING_GUIDE.md` (995 lines)
 
-**Part D: Markdown Content** (Converted by Pandoc)
-- Full markdown to Word conversion with TOC generation
-
-### Markdown Template
-`docs/TEMPLATE_Document.md` provides a starter template with:
-- Complete YAML front matter structure
-- Section templates
-- Usage instructions
-
-## MCP Server Implementation
-
-**Fully implemented MCP server** using the official MCP SDK:
-
-**Architecture:**
-- Uses `@modelcontextprotocol/sdk` (version 0.5.0)
-- Implements stdio transport for Claude Desktop integration
-- Registers three tools (dilon_generate_stub, dilon_compile_doc, dilon_plantuml)
-- Exposes two resources (markdown and PlantUML styling guides)
-- Validates configuration and tool paths on startup
-
-**Key Files:**
-- `server.js` - Main MCP server with request handlers
-- `src/config.js` - Configuration management and validation
-- `src/utils.js` - Command execution utilities
-- Tool handlers in `src/tools/`
-
-**Installation Integration:**
-- `scripts/postinstall.js` - Automatically registers server with Claude Desktop config
-- `scripts/preuninstall.js` - Cleanup on package removal
-- Updates `%APPDATA%\Claude\claude_desktop_config.json` automatically
-
-## Styling Guides
-
-### Markdown Styling Guide
-**File:** `docs/MARKDOWN_STYLING_GUIDE.md` (995 lines)
-
-**Covers:**
-- YAML front matter requirements
-- Heading conventions and numbering
-- Table formatting (pipe tables and grid tables)
-- Custom table styles (DilonTable_List, DilonTable_Chart)
-- Figure and image handling
-- Lists (ordered, unordered, definition)
-- Code blocks and inline code
-- Links and cross-references
-- Notes and callouts
-- Custom paragraph styles with `@@@STYLE@@@` markers
-- Footnote formatting
-- Complete style reference table
-
-**Key Features:**
-- Pandoc-flavored Markdown
-- Word style inheritance system
-- Custom table style markers
-- Multi-line paragraph styling
-- Regulatory compliance focus
-
-### PlantUML Style Guide
-**File:** `docs/PlantUML_Style_Guide.md` (852 lines)
-
-**Covers:**
-- General conventions (theme, layout, formatting)
-- Class diagrams (xUML/Executable UML conventions)
-- State machine diagrams
-- Domain diagrams
-- Class identification and stereotypes
-- Attribute and operation formatting
-- Identifiers (class keys) and referential attributes
-- Relationship types with verb phrases
-- Multiplicity notation
-- Note placement and formatting
-- File naming conventions
-- Complete examples
-
-**Key Features:**
-- Executable UML (xUML) methodology
-- Class numbering and abbreviations
-- Identifier notation ({I}, {I2}, etc.)
-- Referential attribute notation ({R#})
-- Verb phrase relationships
-- State machine event naming
-- Layout management strategies
+Covers YAML front matter requirements, heading conventions/numbering, table formatting (pipe and grid tables, custom `DilonTable_List`/`DilonTable_Chart` styles), figure/image handling, lists, code blocks, links, notes/callouts, custom paragraph styles via `@@@STYLE@@@` markers, footnote formatting, and a complete style reference table. It also retains a PlantUML diagram-generation reference (section 4.3) for documents that hand-embed PlantUML diagrams, even though this repo no longer ships PlantUML tooling itself.
 
 ## Key Architectural Patterns
 
-1. **Tool Modularity:** Each tool is self-contained with its own definition and execute function
-2. **Configuration Management:** Centralized config with validation and path resolution
-3. **Utility Functions:** Reusable command execution (Python, PowerShell)
-4. **Path Resolution:** Handles both absolute and relative paths
-5. **Error Handling:** Comprehensive validation with user-friendly error messages
-6. **Template Inheritance:** Word styles cascade from master template
-7. **State Machine Processing:** Markdown markers processed via state machines
+1. **Skill Modularity:** Each skill is self-contained (`SKILL.md` + any scripts/templates/docs it needs) and independently installable in concept - `dilon-document-writer` has zero runtime dependencies, `dilon-document-compiler` depends on Python/Pandoc.
+2. **Preflight Validation:** The compiler skill checks dependencies (`check_deps.py`) before attempting work, rather than failing partway through.
+3. **Explicit Arguments:** The compiler script is always invoked with all four arguments spelled out (input, output, signature template, content template) rather than relying on internal defaults.
+4. **Template Inheritance:** Word styles cascade from the signature master template through to the assembled document.
+5. **Self-Hosted Distribution:** The repo is both the source and its own plugin marketplace - no external registry or publish pipeline.
 
 ## Dependencies
 
-**Runtime:**
-- Node.js >= 18.0.0
-- Python >= 3.8 (for document compiler)
-- Pandoc (for markdown conversion)
-- Java (for PlantUML)
-- PlantUML jar
+**For `dilon-document-writer`:** none.
 
-**Node Packages:**
-- @modelcontextprotocol/sdk (MCP integration)
+**For `dilon-document-compiler`:**
+- Python >= 3.8
+- Pandoc (on PATH)
+- Python packages: `python-docx`, `python-docx-template`, `docxcompose`, `pyyaml>=6.0`
 
-**Python Packages:**
-- python-docx, python-docx-template, docxcompose, pyyaml
-
-## Design Philosophy
-
-This is a production-ready MCP server designed specifically for regulatory-compliant technical documentation workflows. The package is:
-- Well-documented with comprehensive style guides
-- Modular with clear separation of concerns
-- Designed for maintainability and extensibility
-- Focused on consistency across documentation
-- Compliant with regulatory standards (ISO 62304, FDA)
+`install.ps1` (repo root, run as Administrator) installs Python/Pandoc via winget if missing, installs the pip packages above, and installs a `Compile-DilonDoc` / `dilonc` PowerShell alias for compiling documents outside of Claude Code.
