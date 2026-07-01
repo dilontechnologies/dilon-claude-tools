@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from docx import Document
+
 REPO_ROOT = Path(__file__).parent.parent
 TEST_OUTPUT_DIR = Path(__file__).parent / "test-output"
 WRITER_DIR = REPO_ROOT / "skills" / "dilon-document-writer"
@@ -190,6 +192,105 @@ def test_compile_valid_document():
     check(output_docx.exists(), "compile_test.docx created on disk")
 
 
+def test_compile_bom_front_matter():
+    """Regression test: a UTF-8 BOM at the start of the input markdown
+    (e.g. from PowerShell's Set-Content -Encoding UTF8) must not cause the
+    YAML front matter to be silently dropped."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_bom.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_bom.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8-sig")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+            str(CONTENT_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a BOM-prefixed input file")
+    check("Metadata extracted: []" not in result.stdout, "BOM-prefixed front matter is not silently dropped")
+
+    if output_docx.exists():
+        doc = Document(output_docx)
+        full_text = "\n".join(p.text for p in doc.paragraphs)
+        # "No revision history available" is the Part B fallback text used only
+        # when 'revisions' is missing from metadata - i.e. only when the YAML
+        # front matter failed to parse.
+        check("No revision history available" not in full_text, "revision table from BOM-prefixed file's metadata reaches the output document")
+    else:
+        check(False, "revision table from BOM-prefixed file's metadata reaches the output document")
+
+
+TABLE_MARKER_MARKDOWN = SAMPLE_MARKDOWN + (
+    '\n### 1.3 Table Test\n'
+    '@@@TABLE_STYLE:DilonTable_Chart@@@\n'
+    '| Thread | Zephyr Name | Priority |\n'
+    '|---|---|---|\n'
+    '| A | B | C |\n'
+    '\n'
+    '| Default | Table |\n'
+    '|---|---|\n'
+    '| X | Y |\n'
+)
+
+
+def test_compile_table_marker_no_blank_line():
+    """Regression test: a @@@TABLE_STYLE@@@ marker immediately followed by
+    a pipe table with no blank line (the documented convention) must
+    produce a real, styled table - not garbled literal text."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_table_marker.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_table_marker.docx"
+    input_md.write_text(TABLE_MARKER_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+            str(CONTENT_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a marker-adjacent table")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "marker-adjacent table renders as a real, styled table (skipped: compile failed)")
+        return
+
+    doc = Document(output_docx)
+
+    def header_row(table):
+        return [c.text for c in table.rows[0].cells]
+
+    marked_tables = [t for t in doc.tables if header_row(t) == ['Thread', 'Zephyr Name', 'Priority']]
+    check(len(marked_tables) == 1, "marker-adjacent table survives conversion as a real table")
+    if marked_tables:
+        check(marked_tables[0].style is not None and marked_tables[0].style.name == 'DilonTable_Chart',
+              "marker-adjacent table receives the DilonTable_Chart style")
+
+    default_tables = [t for t in doc.tables if header_row(t) == ['Default', 'Table']]
+    check(len(default_tables) == 1, "unmarked table survives conversion as a real table")
+    if default_tables:
+        check(default_tables[0].style is not None and default_tables[0].style.name == 'DilonTable_List',
+              "unmarked table still receives the default DilonTable_List style")
+
+    garbled = [p.text for p in doc.paragraphs if '@@@' in p.text or '|---' in p.text]
+    check(not garbled, f"no leftover marker/pipe-table text in output (found: {garbled})")
+
+
 def test_compile_with_default_templates():
     """Regression test for a bug where the compiler's default template
     lookup pointed at scripts/ instead of the sibling templates/ directory.
@@ -246,6 +347,8 @@ def main():
     test_stub_duplicate_file_error()
     test_compile_missing_input_error()
     test_compile_valid_document()
+    test_compile_bom_front_matter()
+    test_compile_table_marker_no_blank_line()
     test_compile_with_default_templates()
     test_no_shebang_in_python_scripts()
 

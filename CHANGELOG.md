@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - `dilon-document-compiler`'s `generate_dilon_doc.py` resolved its default signature/content templates against its own `scripts/` directory instead of the sibling `templates/` directory, breaking any invocation with fewer than four explicit arguments
 - Removed the `#!/usr/bin/env python3` shebang from all repo Python scripts, since Windows' `py` launcher parses it and can re-dispatch to an unrelated, dependency-less `python3.exe` instead of the real interpreter
+- `generate_dilon_doc.py` opened input markdown as `utf-8`, so a leading UTF-8 BOM (written by, e.g., PowerShell's `Set-Content -Encoding UTF8`) made the YAML front-matter regex silently fail to match, dropping all document metadata with no error; now opens with `utf-8-sig`
+- A `@@@TABLE_STYLE:...@@@` marker immediately followed by its table (the documented, no-blank-line convention) could get merged by Pandoc into a single garbled text paragraph, since Pandoc's pipe-table parser requires a preceding blank line; the destroyed table's marker text could then also mis-attribute its style to an unrelated adjacent table. `markdown_to_docx()` now inserts a blank line after table-style markers before handing the markdown to Pandoc
 
 ### Planned Features
 - Extended usage examples

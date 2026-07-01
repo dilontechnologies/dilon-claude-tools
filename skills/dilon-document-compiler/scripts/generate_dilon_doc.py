@@ -259,7 +259,7 @@ def extract_yaml_and_markdown(md_file):
     Returns:
         tuple: (yaml_data dict, markdown_body str)
     """
-    with open(md_file, 'r', encoding='utf-8') as f:
+    with open(md_file, 'r', encoding='utf-8-sig') as f:
         content = f.read()
 
     # Check for YAML front matter
@@ -274,6 +274,21 @@ def extract_yaml_and_markdown(md_file):
     else:
         return {}, content
 
+def ensure_blank_line_after_table_markers(markdown_text):
+    """
+    Ensure a blank line separates a @@@TABLE_STYLE:...@@@ marker from the
+    table that follows it.
+
+    MARKDOWN_STYLING_GUIDE.md documents "no blank lines between the marker
+    and the table" as the convention, but Pandoc's pipe-table parser only
+    recognizes a table when it is preceded by a blank line - without one,
+    the marker line and the entire table are merged into a single garbled
+    text paragraph and no table is produced at all. Normalizing here (before
+    Pandoc ever sees the markdown) keeps the documented authoring convention
+    working while still producing a real, styleable table.
+    """
+    return re.sub(r'(^[ \t]*@@@TABLE_STYLE:\w+@@@[ \t]*)\n(?!\n)', r'\1\n\n', markdown_text, flags=re.MULTILINE)
+
 def markdown_to_docx(markdown_text, output_file, reference_doc=None):
     """
     Convert Markdown to a Word document using Pandoc.
@@ -283,6 +298,8 @@ def markdown_to_docx(markdown_text, output_file, reference_doc=None):
         output_file: Path to save the Word document
         reference_doc: Optional path to reference document for styles
     """
+    markdown_text = ensure_blank_line_after_table_markers(markdown_text)
+
     # Create temporary markdown file
     temp_md = Path(output_file).parent / "_temp_content.md"
     with open(temp_md, 'w', encoding='utf-8') as f:
