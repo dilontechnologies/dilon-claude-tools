@@ -105,10 +105,10 @@ dilon-claude-tools/
 ## Running tests
 
 ```powershell
-python tests/run_tests.py
+py -3 tests/run_tests.py
 ```
 
-Requires the same Python/Pandoc prerequisites listed above.
+Requires the same Python/Pandoc prerequisites listed above. Use `py -3` explicitly rather than bare `python`/`py` — on some Windows setups those resolve through a shebang-re-resolution quirk to a package-less Microsoft Store stub instead of the real interpreter.
 
 ## Troubleshooting
 
