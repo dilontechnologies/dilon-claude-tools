@@ -226,6 +226,45 @@ def test_parse_column_widths_rejects_non_finite():
           "parse_column_widths rejects an Infinity width")
 
 
+def test_apply_table_column_widths_fixed_and_flex():
+    doc = Document()
+    table = doc.add_table(rows=1, cols=4)
+    compiler.apply_table_column_widths(table, [1.5, 'x', 1.0, 1.0], available_width=6.27)
+    widths = [round(col.width.inches, 2) for col in table.columns]
+    check(widths == [1.5, 2.77, 1.0, 1.0],
+          f"apply_table_column_widths sets fixed widths and computes the flex column (got {widths})")
+
+
+def test_apply_table_column_widths_all_fixed():
+    doc = Document()
+    table = doc.add_table(rows=1, cols=2)
+    compiler.apply_table_column_widths(table, [2.0, 3.0], available_width=6.0)
+    widths = [round(col.width.inches, 2) for col in table.columns]
+    check(widths == [2.0, 3.0], f"apply_table_column_widths sets all-fixed widths as given (got {widths})")
+
+
+def test_apply_table_column_widths_raises_when_flex_overflows():
+    doc = Document()
+    table = doc.add_table(rows=1, cols=2)
+    raised = False
+    try:
+        compiler.apply_table_column_widths(table, [5.0, 'x'], available_width=4.0)
+    except ValueError:
+        raised = True
+    check(raised, "apply_table_column_widths raises ValueError when fixed widths leave no room for the flex column")
+
+
+def test_apply_table_column_widths_raises_when_all_fixed_overflows():
+    doc = Document()
+    table = doc.add_table(rows=1, cols=2)
+    raised = False
+    try:
+        compiler.apply_table_column_widths(table, [4.0, 4.0], available_width=6.0)
+    except ValueError:
+        raised = True
+    check(raised, "apply_table_column_widths raises ValueError when all-fixed widths exceed the available width")
+
+
 def test_compile_missing_input_error():
     result = subprocess.run(
         [
@@ -433,6 +472,10 @@ def main():
     test_parse_column_widths_rejects_non_numeric()
     test_parse_column_widths_rejects_zero_or_negative()
     test_parse_column_widths_rejects_non_finite()
+    test_apply_table_column_widths_fixed_and_flex()
+    test_apply_table_column_widths_all_fixed()
+    test_apply_table_column_widths_raises_when_flex_overflows()
+    test_apply_table_column_widths_raises_when_all_fixed_overflows()
     test_compile_missing_input_error()
     test_compile_valid_document()
     test_compile_bom_front_matter()

@@ -125,6 +125,42 @@ def parse_column_widths(spec_text, num_columns):
 
     return parsed
 
+def apply_table_column_widths(table, widths, available_width):
+    """
+    Set explicit per-column widths (inches) on a table.
+
+    widths: list as returned by parse_column_widths() - one entry per
+    column, each a positive float (inches) or 'x' (flex column).
+    available_width: total content width in inches (page width minus
+    margins) the table's columns must not exceed.
+
+    Raises ValueError if the fixed widths leave no room for a flex
+    column, or if there's no flex column and the fixed widths alone
+    exceed available_width.
+    """
+    fixed_total = sum(width for width in widths if width != 'x')
+    has_flex = 'x' in widths
+
+    if has_flex:
+        flex_width = available_width - fixed_total
+        if flex_width <= 0:
+            raise ValueError(
+                f"fixed column widths ({fixed_total}in) leave no room for the "
+                f"flex column within the available width ({available_width}in)"
+            )
+    elif fixed_total > available_width:
+        raise ValueError(
+            f"column widths ({fixed_total}in) exceed the available width ({available_width}in)"
+        )
+
+    table.autofit = False
+    for idx, width in enumerate(widths):
+        value = flex_width if width == 'x' else width
+        emu_width = Inches(value)
+        table.columns[idx].width = emu_width
+        for cell in table.columns[idx].cells:
+            cell.width = emu_width
+
 def apply_styles(docx_file):
     """
     Apply custom styles to tables and paragraphs based on @@@ markers in the Word document.
