@@ -16,6 +16,7 @@ Example:
     python generate_dilon_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx
 """
 
+import math
 import re
 import sys
 import yaml
@@ -96,7 +97,7 @@ def parse_column_widths(spec_text, num_columns):
 
     Returns a list of length num_columns where each entry is a positive
     float (inches) or the string 'x' (flex column), or None if the spec
-    is invalid: wrong entry count, zero or 2+ 'x' entries, or an entry
+    is invalid: wrong entry count, 2+ 'x' entries, or an entry
     that isn't a positive number or 'x'/'X'.
     """
     entries = [entry.strip() for entry in spec_text.split(',')]
@@ -115,7 +116,7 @@ def parse_column_widths(spec_text, num_columns):
             value = float(entry)
         except ValueError:
             return None
-        if value <= 0:
+        if value <= 0 or not math.isfinite(value):
             return None
         parsed.append(value)
 

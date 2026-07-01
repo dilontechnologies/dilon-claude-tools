@@ -219,6 +219,13 @@ def test_parse_column_widths_rejects_zero_or_negative():
           "parse_column_widths rejects a zero-or-negative width")
 
 
+def test_parse_column_widths_rejects_non_finite():
+    check(compiler.parse_column_widths('1,nan', 2) is None,
+          "parse_column_widths rejects a NaN width")
+    check(compiler.parse_column_widths('1,inf', 2) is None,
+          "parse_column_widths rejects an Infinity width")
+
+
 def test_compile_missing_input_error():
     result = subprocess.run(
         [
@@ -425,6 +432,7 @@ def main():
     test_parse_column_widths_rejects_multiple_flex()
     test_parse_column_widths_rejects_non_numeric()
     test_parse_column_widths_rejects_zero_or_negative()
+    test_parse_column_widths_rejects_non_finite()
     test_compile_missing_input_error()
     test_compile_valid_document()
     test_compile_bom_front_matter()
