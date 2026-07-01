@@ -184,6 +184,41 @@ def test_ensure_blank_line_idempotent_when_already_blank():
           "already-blank-line marker stack is left unchanged (no extra blank line inserted between stacked markers)")
 
 
+def test_parse_column_widths_valid_with_flex():
+    check(compiler.parse_column_widths('1.5,x,1,1', 4) == [1.5, 'x', 1.0, 1.0],
+          "parse_column_widths accepts one 'x' entry among numeric widths")
+
+
+def test_parse_column_widths_valid_all_numeric():
+    check(compiler.parse_column_widths('1,2,3', 3) == [1.0, 2.0, 3.0],
+          "parse_column_widths accepts an all-numeric spec with no flex column")
+
+
+def test_parse_column_widths_case_insensitive_flex():
+    check(compiler.parse_column_widths('1,X', 2) == [1.0, 'x'],
+          "parse_column_widths treats 'X' the same as 'x'")
+
+
+def test_parse_column_widths_rejects_count_mismatch():
+    check(compiler.parse_column_widths('1,2', 3) is None,
+          "parse_column_widths rejects a spec with fewer entries than columns")
+
+
+def test_parse_column_widths_rejects_multiple_flex():
+    check(compiler.parse_column_widths('x,x,1', 3) is None,
+          "parse_column_widths rejects a spec with two 'x' entries")
+
+
+def test_parse_column_widths_rejects_non_numeric():
+    check(compiler.parse_column_widths('1,abc', 2) is None,
+          "parse_column_widths rejects a non-numeric, non-'x' entry")
+
+
+def test_parse_column_widths_rejects_zero_or_negative():
+    check(compiler.parse_column_widths('0,1', 2) is None,
+          "parse_column_widths rejects a zero-or-negative width")
+
+
 def test_compile_missing_input_error():
     result = subprocess.run(
         [
@@ -383,6 +418,13 @@ def main():
     test_ensure_blank_line_stacked_style_then_columns()
     test_ensure_blank_line_stacked_columns_then_style()
     test_ensure_blank_line_idempotent_when_already_blank()
+    test_parse_column_widths_valid_with_flex()
+    test_parse_column_widths_valid_all_numeric()
+    test_parse_column_widths_case_insensitive_flex()
+    test_parse_column_widths_rejects_count_mismatch()
+    test_parse_column_widths_rejects_multiple_flex()
+    test_parse_column_widths_rejects_non_numeric()
+    test_parse_column_widths_rejects_zero_or_negative()
     test_compile_missing_input_error()
     test_compile_valid_document()
     test_compile_bom_front_matter()

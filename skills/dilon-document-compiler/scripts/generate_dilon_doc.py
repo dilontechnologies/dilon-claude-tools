@@ -89,6 +89,41 @@ def apply_paragraph_style_to_objects(paragraphs, style_name):
     for para in paragraphs:
         para.style = style_name
 
+def parse_column_widths(spec_text, num_columns):
+    """
+    Parse a @@@TABLE_COLUMNS:...@@@ marker's contents into a per-column
+    width spec.
+
+    Returns a list of length num_columns where each entry is a positive
+    float (inches) or the string 'x' (flex column), or None if the spec
+    is invalid: wrong entry count, zero or 2+ 'x' entries, or an entry
+    that isn't a positive number or 'x'/'X'.
+    """
+    entries = [entry.strip() for entry in spec_text.split(',')]
+    if len(entries) != num_columns:
+        return None
+
+    parsed = []
+    flex_count = 0
+    for entry in entries:
+        if entry.lower() == 'x':
+            flex_count += 1
+            parsed.append('x')
+            continue
+
+        try:
+            value = float(entry)
+        except ValueError:
+            return None
+        if value <= 0:
+            return None
+        parsed.append(value)
+
+    if flex_count > 1:
+        return None
+
+    return parsed
+
 def apply_styles(docx_file):
     """
     Apply custom styles to tables and paragraphs based on @@@ markers in the Word document.
