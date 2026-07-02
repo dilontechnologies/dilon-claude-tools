@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `skills/dilon-document-compiler/scripts/check_deps.py` - preflight dependency check
 - `tests/run_tests.py` - direct-invocation test suite replacing the MCP-protocol-based `test-all-features.js`
 
-## [Unreleased]
+## [2.1.0] - 2026-07-02
 
 ### Added
 - `@@@TABLE_COLUMNS:w1,w2,...@@@` marker for `dilon-document-compiler`, letting authors hardcode per-column table widths (inches), stackable with `@@@TABLE_STYLE@@@`. One entry may be `x` to flexibly absorb the page's remaining content width; invalid specs (entry-count mismatch, wrong `x` count, widths that don't fit the page) warn and fall back to Word's default auto-sized width rather than failing compilation.
