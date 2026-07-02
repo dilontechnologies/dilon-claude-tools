@@ -339,10 +339,25 @@ def apply_styles(docx_file):
                 run._element.getparent().remove(run._element)
             para.add_run(cleaned_text)
         else:
-            # Delete paragraph entirely (marker only)
-            paragraphs_to_delete.append(idx)
             p_element = para._element
-            p_element.getparent().remove(p_element)
+            prev_element = p_element.getprevious()
+            next_element = p_element.getnext()
+            between_two_tables = (
+                prev_element is not None and prev_element.tag.endswith('tbl')
+                and next_element is not None and next_element.tag.endswith('tbl')
+            )
+
+            if between_two_tables:
+                # Deleting this paragraph would leave the two tables
+                # directly adjacent in the XML, which Word merges into a
+                # single visual table on open. Empty it instead so a
+                # blank paragraph keeps separating them.
+                for run in para.runs:
+                    run._element.getparent().remove(run._element)
+            else:
+                # Delete paragraph entirely (marker only)
+                paragraphs_to_delete.append(idx)
+                p_element.getparent().remove(p_element)
 
     if paragraphs_to_delete:
         print(f"  ✓ Removed {len(paragraphs_to_delete)} marker paragraph(s)")

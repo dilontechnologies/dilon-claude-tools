@@ -416,6 +416,77 @@ def test_compile_table_marker_no_blank_line():
     check(not garbled, f"no leftover marker/pipe-table text in output (found: {garbled})")
 
 
+ADJACENT_TABLES_MARKDOWN = SAMPLE_MARKDOWN + (
+    '\n### 1.3 Adjacent Tables Test\n'
+    '@@@TABLE_COLUMNS:1,1@@@\n'
+    '| First | Table |\n'
+    '|---|---|\n'
+    '| A | B |\n'
+    '\n'
+    '@@@TABLE_COLUMNS:1,1@@@\n'
+    '| Second | Table |\n'
+    '|---|---|\n'
+    '| C | D |\n'
+)
+
+
+def test_compile_adjacent_tables_no_merge():
+    """Regression test: two tables back-to-back with only a
+    @@@TABLE_COLUMNS@@@ marker (no other body text) between them must not
+    be merged by Word. Deleting the marker paragraph entirely would leave
+    the two <w:tbl> elements directly adjacent in document.xml, which Word
+    renders as a single merged table on open - so the marker paragraph
+    must be emptied, not removed, when it is the only separator."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_adjacent_tables.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_adjacent_tables.docx"
+    input_md.write_text(ADJACENT_TABLES_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+            str(CONTENT_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for back-to-back marker-separated tables")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "adjacent tables stay separate (skipped: compile failed)")
+        return
+
+    doc = Document(output_docx)
+
+    def header_row(table):
+        return [c.text for c in table.rows[0].cells]
+
+    first_tables = [t for t in doc.tables if header_row(t) == ['First', 'Table']]
+    second_tables = [t for t in doc.tables if header_row(t) == ['Second', 'Table']]
+    check(len(first_tables) == 1, "first table survives as its own distinct table")
+    check(len(second_tables) == 1, "second table survives as its own distinct table")
+
+    # Walk the raw body children and confirm no <w:tbl> is immediately
+    # followed by another <w:tbl> with zero paragraphs in between - that
+    # adjacency is exactly what Word merges into one visual table.
+    body_children = list(doc.element.body)
+    merged_pairs = [
+        i for i in range(len(body_children) - 1)
+        if body_children[i].tag.endswith('tbl') and body_children[i + 1].tag.endswith('tbl')
+    ]
+    check(not merged_pairs,
+          f"no <w:tbl> is directly adjacent to another <w:tbl> in document.xml (found {len(merged_pairs)} such pair(s))")
+
+    garbled = [p.text for p in doc.paragraphs if '@@@' in p.text or '|---' in p.text]
+    check(not garbled, f"no leftover marker/pipe-table text in output (found: {garbled})")
+
+
 COLUMN_WIDTH_MARKDOWN = SAMPLE_MARKDOWN + (
     '\n### 1.3 Column Width Test\n'
     '@@@TABLE_STYLE:DilonTable_Chart@@@\n'
@@ -853,6 +924,7 @@ def main():
     test_compile_valid_document()
     test_compile_bom_front_matter()
     test_compile_table_marker_no_blank_line()
+    test_compile_adjacent_tables_no_merge()
     test_compile_table_column_widths()
     test_compile_with_default_templates()
     test_compile_resolves_relative_image_paths()
