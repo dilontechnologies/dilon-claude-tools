@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `skills/dilon-document-compiler/scripts/check_deps.py` - preflight dependency check
 - `tests/run_tests.py` - direct-invocation test suite replacing the MCP-protocol-based `test-all-features.js`
 
+## [2.1.1] - 2026-07-02
+
+### Fixed
+- Two tables placed back-to-back in the source markdown, separated only by a `@@@TABLE_STYLE@@@`/`@@@TABLE_COLUMNS@@@` marker for the second table, were merged by Word into a single visual table on open - deleting the consumed marker paragraph left the two `<w:tbl>` elements directly adjacent in `document.xml` with no separating `<w:p>`. `generate_dilon_doc.py` now empties (rather than removes) a marker paragraph when both its XML neighbors are tables
+
 ## [2.1.0] - 2026-07-02
 
 ### Added
