@@ -56,3 +56,97 @@ def is_suspicious_heading_text(text):
     if text.endswith('.'):
         return True
     return len(text.split()) > SUSPICIOUS_WORD_COUNT_THRESHOLD
+
+
+ROLE_LABEL_HINTS = {
+    "regulatory_rep": ("regulat",),
+    "quality_rep": ("quality", "qa", "qc"),
+    "department_head": ("head", "director", "manager"),
+}
+# Position of each role's data row within the canonical 6-row signature
+# table shape (see TEMPLATE_Word_Signature.docx): row 1 is
+# department/author, rows 3-5 are regulatory/quality/department_head.
+SIGNATURE_ROLE_ROW_ORDER = ["regulatory_rep", "quality_rep", "department_head"]
+
+
+def classify_table(table):
+    """Return 'signature', 'revision', or 'content' for a python-docx
+    Table, based on its first two rows' text (case-insensitive)."""
+    header_text = " ".join(
+        cell.text.strip().lower()
+        for row in table.rows[:2]
+        for cell in row.cells
+    )
+    if "revision history" in header_text or ("rev #" in header_text and "eco #" in header_text):
+        return "revision"
+    if "signature" in header_text and ("preparer" in header_text or "name" in header_text):
+        return "signature"
+    return "content"
+
+
+def extract_signature_fields(table):
+    """table: a Table classified as 'signature'. Returns (fields, warnings).
+    fields may include 'author', 'department', 'regulatory_rep',
+    'quality_rep', 'department_head'. Matches TEMPLATE_Word_Signature.docx's
+    canonical 6-row shape by position, cross-checked against each row's
+    label text where recognizable - a warning (not a failure) is returned
+    for any row whose label doesn't match its expected canonical wording,
+    since real source documents (e.g. WI-00077) use inconsistent role
+    labels ("R&D / Eng", "Manufacturing") in these slots."""
+    fields = {}
+    warnings = []
+    rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+
+    if len(rows) < 6:
+        warnings.append(
+            f"signature table has {len(rows)} rows, expected 6 (canonical "
+            "Group/Preparer/Signature + Department/Name/Signature shape) "
+            "- extracted nothing, fill approvers in manually"
+        )
+        return fields, warnings
+
+    fields["department"] = rows[1][0]
+    fields["author"] = rows[1][1]
+
+    for row, expected_role in zip(rows[3:6], SIGNATURE_ROLE_ROW_ORDER):
+        label, value = row[0], row[1]
+        fields[expected_role] = value
+        hints = ROLE_LABEL_HINTS[expected_role]
+        # department_head rows are commonly labeled with the department
+        # name itself (e.g. "Engineering") rather than a role word.
+        label_matches_department = (
+            expected_role == "department_head"
+            and label.strip().lower() == fields["department"].strip().lower()
+        )
+        if not label_matches_department and not any(hint in label.lower() for hint in hints):
+            warnings.append(
+                f"row labeled '{label}' assigned to {expected_role} by "
+                "table position (label didn't match expected wording) - verify"
+            )
+
+    return fields, warnings
+
+
+def extract_revisions(table):
+    """table: a Table classified as 'revision'. Returns a list of dicts
+    with keys 'number', 'description', 'eco_number', 'eco_date', skipping
+    a leading merged 'REVISION HISTORY' title row and the column-header
+    row if present."""
+    rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+    idx = 0
+    if rows and rows[0][0].strip().upper() == "REVISION HISTORY":
+        idx = 1
+    if idx < len(rows) and rows[idx][:2] == ["REV #", "DESCRIPTION OF CHANGE"]:
+        idx += 1
+
+    revisions = []
+    for row in rows[idx:]:
+        if len(row) < 4 or not row[0].strip():
+            continue
+        revisions.append({
+            "number": row[0].strip(),
+            "description": row[1].strip(),
+            "eco_number": row[2].strip(),
+            "eco_date": row[3].strip(),
+        })
+    return revisions

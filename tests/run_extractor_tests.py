@@ -108,6 +108,97 @@ def test_is_suspicious_heading_text():
     check(not ex.is_suspicious_heading_text("Bonding"), "short title-case heading is not flagged")
 
 
+def _add_table(doc, rows):
+    """rows: list of list[str]. Returns the created docx.table.Table."""
+    table = doc.add_table(rows=len(rows), cols=len(rows[0]))
+    for r, row in enumerate(rows):
+        for c, text in enumerate(row):
+            table.rows[r].cells[c].text = text
+    return table
+
+
+def test_classify_table_signature():
+    import extract_docx as ex
+    doc = Document()
+    table = _add_table(doc, [
+        ["Group", "Preparer", "Signature"],
+        ["Engineering", "P. Gray", "Electronic"],
+        ["Department", "Name", "Signature"],
+        ["Regulatory", "Pedro Cruz", "Electronic"],
+        ["Quality", "Rebecca Miller", "Electronic"],
+        ["Engineering", "Kevin Lint", "Electronic"],
+    ])
+    check(ex.classify_table(table) == "signature", "canonical signature-approval table is classified as 'signature'")
+
+
+def test_classify_table_revision():
+    import extract_docx as ex
+    doc = Document()
+    table = _add_table(doc, [
+        ["REVISION HISTORY", "", "", ""],
+        ["REV #", "DESCRIPTION OF CHANGE", "ECO #", "DATE"],
+        ["00", "Initial release", "ECO-000046", "4 Mar 2025"],
+    ])
+    check(ex.classify_table(table) == "revision", "revision-history table is classified as 'revision'")
+
+
+def test_classify_table_content():
+    import extract_docx as ex
+    doc = Document()
+    table = _add_table(doc, [["Setting", "Value"], ["Pressure", "75 psi"]])
+    check(ex.classify_table(table) == "content", "an ordinary data table is classified as 'content'")
+
+
+def test_extract_signature_fields_clean_labels():
+    import extract_docx as ex
+    doc = Document()
+    table = _add_table(doc, [
+        ["Group", "Preparer", "Signature"],
+        ["Engineering", "P. Gray", "Electronic"],
+        ["Department", "Name", "Signature"],
+        ["Regulatory", "Pedro Cruz", "Electronic"],
+        ["Quality", "Rebecca Miller", "Electronic"],
+        ["Engineering", "Kevin Lint", "Electronic"],
+    ])
+    fields, warnings = ex.extract_signature_fields(table)
+    check(fields["author"] == "P. Gray", "author extracted from row 1")
+    check(fields["department"] == "Engineering", "department extracted from row 1")
+    check(fields["regulatory_rep"] == "Pedro Cruz", "regulatory_rep extracted by position")
+    check(fields["quality_rep"] == "Rebecca Miller", "quality_rep extracted by position")
+    check(fields["department_head"] == "Kevin Lint", "department_head extracted by position")
+    check(warnings == [], "no warnings when every row label matches its canonical role")
+
+
+def test_extract_signature_fields_mismatched_labels_warns():
+    import extract_docx as ex
+    doc = Document()
+    table = _add_table(doc, [
+        ["Group", "Preparer", "Signature"],
+        ["Engineering", "P. Gray", "Electronic"],
+        ["Department", "Name", "Signature"],
+        ["R&D / Eng", "K. Lint", "Electronic"],
+        ["Manufacturing", "J. Jones", "Electronic"],
+        ["Quality", "K. Mack", "Electronic"],
+    ])
+    fields, warnings = ex.extract_signature_fields(table)
+    check(fields["regulatory_rep"] == "K. Lint", "regulatory_rep still assigned by position despite label mismatch")
+    check(len(warnings) == 3, f"a warning is emitted for each of the 3 mismatched role labels, got {len(warnings)}")
+
+
+def test_extract_revisions():
+    import extract_docx as ex
+    doc = Document()
+    table = _add_table(doc, [
+        ["REVISION HISTORY", "", "", ""],
+        ["REV #", "DESCRIPTION OF CHANGE", "ECO #", "DATE"],
+        ["00", "Original product transfer to Dilon Manufacturing", "ECO-000046", "4 Mar 2025"],
+    ])
+    revisions = ex.extract_revisions(table)
+    check(len(revisions) == 1, "one revision row extracted")
+    check(revisions[0]["number"] == "00", "revision number extracted")
+    check(revisions[0]["eco_number"] == "ECO-000046", "eco_number extracted")
+
+
 def main():
     if TEST_OUTPUT_DIR.exists():
         import shutil
@@ -120,6 +211,12 @@ def main():
     test_compute_heading_shift_no_headings_defaults_to_two()
     test_markdown_heading_prefix()
     test_is_suspicious_heading_text()
+    test_classify_table_signature()
+    test_classify_table_revision()
+    test_classify_table_content()
+    test_extract_signature_fields_clean_labels()
+    test_extract_signature_fields_mismatched_labels_warns()
+    test_extract_revisions()
 
     print(f"\n{passed} passed, {failed} failed (dilon-document-extractor)")
     if failed == 0:
