@@ -7,7 +7,7 @@ This guide defines the markdown formatting standards for technical documents tha
 Documents are written in **Pandoc-flavored Markdown** and converted to Word (`.docx`) using:
 - **Pandoc** for markdown → Word conversion
 - **python-docx** for template rendering and document assembly
-- **Reference template** (`TEMPLATE_Word_Signature.docx`) for styling
+- **Reference template** (`TEMPLATE_Word_Base.docx`) for styling
 
 ---
 
@@ -47,13 +47,13 @@ If you see gray highlighted blocks in the generated Word document, there are two
 
 **Cause 1: Unresolved Jinja2 Variable**
 1. Check that all variables in the Word template (e.g., `{{variable_name}}`) have corresponding entries in the YAML front matter
-2. Open `TEMPLATE_Word_Signature.docx` and search for `{{` to find all template variables
+2. Open `TEMPLATE_Word_Base.docx` and search for `{{` to find all template variables
 3. Ensure every template variable has a value in your markdown's YAML front matter
 4. Common culprits: missing author, department, or approver names
 
 **Cause 2: Legacy Word Form Fields**
 If the gray block appears without any `{{variable}}` nearby, it's likely a Word form field:
-1. Open `TEMPLATE_Word_Signature.docx` in Word
+1. Open `TEMPLATE_Word_Base.docx` in Word
 2. Enable "Developer" tab: File → Options → Customize Ribbon → Check "Developer"
 3. Click "Design Mode" button in Developer tab to see form fields
 4. Click the gray form field and press Delete
@@ -146,7 +146,7 @@ Use **pipe tables** for all tabular data. This format is readable in markdown an
 ### 3.2 Table Formatting in Word Output
 
 **Grid Lines:**
-- Grid lines and borders are controlled by the **Word reference template** (`TEMPLATE_Word_Signature.docx`)
+- Grid lines and borders are controlled by the **Word reference template** (`TEMPLATE_Word_Base.docx`)
 - **IMPORTANT**: "Table Grid" is a reserved Word built-in style that cannot be modified
 - Two custom table styles are available:
   - **DilonTable_List**: For tables with a header row only (most common)
@@ -174,7 +174,7 @@ Use **pipe tables** for all tabular data. This format is readable in markdown an
 
 When creating custom table styles in the reference template:
 
-1. Open `TEMPLATE_Word_Signature.docx`
+1. Open `TEMPLATE_Word_Base.docx`
 2. Insert a sample table (3 columns × 3 rows)
 3. Right-click table → "Table Styles" → "New Table Style..."
 4. Name the style (e.g., "DilonTable_List" or "DilonTable_Chart")
@@ -701,7 +701,7 @@ Content paragraph 2
 5. Markers are automatically removed from the final document
 6. Empty paragraphs (containing only markers) are deleted
 7. Leading/trailing whitespace is stripped after marker removal
-8. The style name must exist in the reference template (`TEMPLATE_Word_Signature.docx`)
+8. The style name must exist in the reference template (`TEMPLATE_Word_Base.docx`)
 
 **Processing Steps:**
 1. Find START marker (`@@@STYLE:StyleName@@@`)
@@ -787,7 +787,7 @@ REQ-001: System SHALL initialize within 100ms of power-on
 
 To add a new custom style for use with `@@@STYLE@@@` markers:
 
-1. Open `TEMPLATE_Word_Signature.docx`
+1. Open `TEMPLATE_Word_Base.docx`
 2. Go to Home → Styles → Create a Style
 3. Set **Style type** to "Paragraph" (not Character)
 4. Name the style (e.g., "SourceCode", "NoteBox", "Requirement")
@@ -891,7 +891,7 @@ Compile-DilonDoc input.md
 5. **Code blocks** are styled with "Source Code" style
 6. **Images** are embedded at original size
 7. **Figure captions** are styled with "Caption" style
-8. **All styles** come from `TEMPLATE_Word_Signature.docx` reference document
+8. **All styles** come from `TEMPLATE_Word_Base.docx` reference document
 
 ---
 
@@ -980,7 +980,7 @@ Use grid tables when you need multi-paragraph cells or complex block elements:
 
 ## 18. Required Template Styles
 
-Ensure these styles are properly defined in `TEMPLATE_Word_Signature.docx`:
+Ensure these styles are properly defined in `TEMPLATE_Word_Base.docx`:
 
 ### Paragraph Styles:
 - **Heading 1-8** - Linked to a shared multilevel list (Heading 2/3/4 -> "N."/"N.M"/"N.M.P") so Word auto-numbers sections; see Section 2

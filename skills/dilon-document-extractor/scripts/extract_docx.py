@@ -128,8 +128,8 @@ ROLE_LABEL_HINTS = {
     "department_head": ("head", "director", "manager"),
 }
 # Position of each role's data row within the canonical 6-row signature
-# table shape (see TEMPLATE_Word_Signature.docx): row 1 is
-# department/author, rows 3-5 are regulatory/quality/department_head.
+# table shape (see dilon-document-compiler's create_signature_table()):
+# row 1 is department/author, rows 3-5 are regulatory/quality/department_head.
 SIGNATURE_ROLE_ROW_ORDER = ["regulatory_rep", "quality_rep", "department_head"]
 
 
@@ -151,7 +151,7 @@ def classify_table(table):
 def extract_signature_fields(table):
     """table: a Table classified as 'signature'. Returns (fields, warnings).
     fields may include 'author', 'department', 'regulatory_rep',
-    'quality_rep', 'department_head'. Matches TEMPLATE_Word_Signature.docx's
+    'quality_rep', 'department_head'. Matches create_signature_table()'s
     canonical 6-row shape by position, cross-checked against each row's
     label text where recognizable - a warning (not a failure) is returned
     for any row whose label doesn't match its expected canonical wording,

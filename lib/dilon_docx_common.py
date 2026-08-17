@@ -386,7 +386,7 @@ def apply_figure_captions(docx_file):
     `![Description.](path.png){#fig:label}` - the caption text lives in
     the image's alt-text brackets, with no manually-typed figure number.
     Because the "Captioned Figure" / "Image Caption" paragraph styles are
-    defined in the reference template (see TEMPLATE_Word_Signature.docx),
+    defined in the reference template (see TEMPLATE_Word_Base.docx),
     Pandoc routes an image-with-alt-text into a distinct "Image Caption"
     paragraph - a reliable, unambiguous signal that this is a real figure
     caption, not just a plain paragraph that happens to follow an

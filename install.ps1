@@ -188,7 +188,7 @@ Write-Host ""
 
 # Install Compile-DilonDoc PowerShell function
 $compilerScriptPath = Join-Path $RepoRoot "skills\dilon-document-compiler\scripts\generate_dilon_doc.py"
-$signatureTemplatePath = Join-Path $RepoRoot "skills\dilon-document-compiler\templates\TEMPLATE_Word_Signature.docx"
+$signatureTemplatePath = Join-Path $RepoRoot "skills\dilon-document-compiler\templates\TEMPLATE_Word_Base.docx"
 $contentTemplatePath = Join-Path $RepoRoot "skills\dilon-document-compiler\templates\TEMPLATE_Word_Content.docx"
 
 Write-Host "  -> Adding Compile-DilonDoc command to PowerShell profile..." -ForegroundColor Gray

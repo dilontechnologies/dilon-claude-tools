@@ -150,6 +150,106 @@ def create_revision_table(revisions):
     return table
 
 
+def create_signature_table(metadata):
+    """
+    Create a formatted signature-approval table as a Word table object.
+
+    Previously baked directly into TEMPLATE_Word_Base.docx as a
+    docxtpl-rendered table; built programmatically here instead so the
+    template itself can be reduced to header/footer + styles only
+    (matching dilon-document-form-compiler's TEMPLATE_Word_Form.docx).
+
+    Args:
+        metadata: front-matter dict with department, author,
+            regulatory_rep, quality_rep, department_head
+
+    Returns:
+        python-docx Table object
+    """
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    temp_doc = Document()
+    table = temp_doc.add_table(rows=6, cols=3)
+    table.style = 'Normal Table'
+
+    table.columns[0].width = Inches(1.5520833333333333)
+    table.columns[1].width = Inches(3.4375)
+    table.columns[2].width = Inches(1.6875)
+
+    def set_cell(row_idx, col_idx, text, bold=False, center=True, fill=None):
+        cell = table.rows[row_idx].cells[col_idx]
+        cell.text = text
+        paragraph = cell.paragraphs[0]
+        if center:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        if paragraph.runs:
+            paragraph.runs[0].font.bold = bold
+        if fill:
+            shading = OxmlElement('w:shd')
+            shading.set(qn('w:fill'), fill)
+            cell._element.get_or_add_tcPr().append(shading)
+
+    department = metadata.get('department', '')
+
+    set_cell(0, 0, 'Group', bold=True, center=True, fill='BFBFBF')
+    set_cell(0, 1, 'Preparer', bold=True, center=False, fill='BFBFBF')
+    set_cell(0, 2, 'Signature', bold=True, center=True, fill='BFBFBF')
+
+    set_cell(1, 0, department, center=True, fill='FFFFFF')
+    set_cell(1, 1, metadata.get('author', ''), center=False, fill='FFFFFF')
+    set_cell(1, 2, 'Electronic', center=True)
+
+    set_cell(2, 0, 'Department', bold=True, center=True, fill='C0C0C0')
+    set_cell(2, 1, 'Name', bold=True, center=False, fill='C0C0C0')
+    set_cell(2, 2, 'Signature', bold=True, center=True, fill='C0C0C0')
+
+    set_cell(3, 0, 'Regulatory', center=True)
+    set_cell(3, 1, metadata.get('regulatory_rep', ''), center=False)
+    set_cell(3, 2, 'Electronic', center=True)
+
+    set_cell(4, 0, 'Quality', center=True)
+    set_cell(4, 1, metadata.get('quality_rep', ''), center=False)
+    set_cell(4, 2, 'Electronic', center=True)
+
+    set_cell(5, 0, department, center=True)
+    set_cell(5, 1, metadata.get('department_head', ''), center=False)
+    set_cell(5, 2, 'Electronic', center=True)
+
+    return table
+
+
+def _insert_table_before_section_properties(document, table):
+    """
+    Insert `table` as the last body content of `document`, immediately
+    before its sectPr - the correct position for content that must belong
+    to the document's existing (only) section, as opposed to
+    Document.body.append() which would place it after sectPr and produce
+    an invalid section boundary.
+
+    Also inserts a blank separator paragraph directly after the table
+    (still before sectPr), so the table never ends up directly adjacent to
+    whatever content compose_documents() splices in right after Part A
+    (e.g. Part B's revision table) - Word silently merges two directly
+    adjacent <w:tbl> elements into one visual table on open, the same
+    hazard apply_styles()'s between-two-tables handling in
+    lib/dilon_docx_common.py guards against for marker-adjacent tables.
+    """
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    body = document._element.body
+    sect_pr = body.find(qn('w:sectPr'))
+    separator = OxmlElement('w:p')
+    if sect_pr is not None:
+        sect_pr.addprevious(table._element)
+        sect_pr.addprevious(separator)
+    else:
+        body.append(table._element)
+        body.append(separator)
+
+
 def generate_requirements_document(markdown_path, output_path, signature_template_path=None, content_template_path=None):
     """
     Generate final requirements Word document.
@@ -164,7 +264,7 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     script_dir = Path(__file__).parent
 
     if signature_template_path is None:
-        signature_template_path = _REPO_ROOT / "templates" / "TEMPLATE_Word_Signature.docx"
+        signature_template_path = _REPO_ROOT / "templates" / "TEMPLATE_Word_Base.docx"
     else:
         signature_template_path = Path(signature_template_path)
 
@@ -196,6 +296,19 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     print(f"Rendering signature page (Part A): {signature_template_path}")
     doc_a = DocxTemplate(signature_template_path)
     doc_a.render(metadata)
+
+    # Build the signature-approval table programmatically (same pattern as
+    # Part B's revision table) and insert it into Part A itself, rather
+    # than relying on Jinja fields baked into the template - see
+    # create_signature_table() for why.
+    #
+    # Use doc_a.docx directly, NOT doc_a.get_docx(): get_docx() calls
+    # init_docx(reload=True), which - because is_rendered is already True
+    # at this point - discards the just-rendered header/footer/body and
+    # reparses a fresh, unrendered copy of the template file instead.
+    signature_table = create_signature_table(metadata)
+    _insert_table_before_section_properties(doc_a.docx, signature_table)
+
     temp_part_a = Path(output_path).parent / "_temp_part_a.docx"
     doc_a.save(temp_part_a)
     print(f"Part A rendered")

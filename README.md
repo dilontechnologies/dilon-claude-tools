@@ -80,7 +80,7 @@ dilon-claude-tools/
 │   ├── plugin.json              # plugin manifest
 │   └── marketplace.json         # self-hosted marketplace listing this plugin
 ├── templates/                    # shared Word reference templates
-│   ├── TEMPLATE_Word_Signature.docx
+│   ├── TEMPLATE_Word_Base.docx
 │   └── TEMPLATE_Word_Content.docx
 ├── skills/
 │   ├── dilon-document-writer/

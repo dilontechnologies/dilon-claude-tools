@@ -29,7 +29,7 @@ COMPILER_DIR = REPO_ROOT / "skills" / "dilon-document-compiler"
 TEMPLATE_PATH = WRITER_DIR / "TEMPLATE_Document.md"
 COMPILER_SCRIPT = COMPILER_DIR / "scripts" / "generate_dilon_doc.py"
 CHECK_DEPS_SCRIPT = COMPILER_DIR / "scripts" / "check_deps.py"
-SIGNATURE_TEMPLATE = REPO_ROOT / "templates" / "TEMPLATE_Word_Signature.docx"
+SIGNATURE_TEMPLATE = REPO_ROOT / "templates" / "TEMPLATE_Word_Base.docx"
 CONTENT_TEMPLATE = REPO_ROOT / "templates" / "TEMPLATE_Word_Content.docx"
 
 # Scripts that must not carry a `#!/usr/bin/env python3` shebang: Windows'
@@ -315,6 +315,76 @@ def test_compile_valid_document():
         print(result.stdout)
         print(result.stderr)
     check(output_docx.exists(), "compile_test.docx created on disk")
+
+
+def test_create_signature_table_structure():
+    """create_signature_table() builds the signature-approval table
+    programmatically (it used to be baked into TEMPLATE_Word_Base.docx
+    as a docxtpl-rendered table)."""
+    metadata = {
+        "department": "Engineering",
+        "author": "Jane Author",
+        "regulatory_rep": "Reg Rep",
+        "quality_rep": "QA Rep",
+        "department_head": "Dept Head",
+    }
+    table = compiler.create_signature_table(metadata)
+
+    check(len(table.rows) == 6, f"signature table has 6 rows, got {len(table.rows)}")
+    check(len(table.columns) == 3, f"signature table has 3 columns, got {len(table.columns)}")
+
+    rows_text = [[c.text for c in row.cells] for row in table.rows]
+    check(rows_text[0] == ["Group", "Preparer", "Signature"], f"row 0 is the Group/Preparer/Signature header, got {rows_text[0]}")
+    check(rows_text[1] == ["Engineering", "Jane Author", "Electronic"], f"row 1 has the preparer's department/author, got {rows_text[1]}")
+    check(rows_text[2] == ["Department", "Name", "Signature"], f"row 2 is the Department/Name/Signature header, got {rows_text[2]}")
+    check(rows_text[3] == ["Regulatory", "Reg Rep", "Electronic"], f"row 3 has the regulatory rep, got {rows_text[3]}")
+    check(rows_text[4] == ["Quality", "QA Rep", "Electronic"], f"row 4 has the quality rep, got {rows_text[4]}")
+    check(rows_text[5] == ["Engineering", "Dept Head", "Electronic"], f"row 5 has the department head, got {rows_text[5]}")
+
+    check(table.rows[0].cells[0].paragraphs[0].runs[0].font.bold is True, "header row 0 is bold")
+    check(table.rows[1].cells[0].paragraphs[0].runs[0].font.bold is not True, "data row 1 is not bold")
+
+
+def test_compile_signature_table_generated_programmatically():
+    """The signature-approval table is now built by create_signature_table()
+    and inserted into Part A directly, instead of being pre-baked into
+    TEMPLATE_Word_Base.docx as Jinja fields."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_signature.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_signature.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+            str(CONTENT_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a document with a signature table")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+
+    doc = Document(output_docx)
+
+    def header_row(table):
+        return [c.text for c in table.rows[0].cells]
+
+    generated_tables = [t for t in doc.tables if header_row(t) == ["Group", "Preparer", "Signature"]]
+    check(len(generated_tables) == 1, f"exactly one Group/Preparer/Signature table is present in the output, found {len(generated_tables)}")
+
+    rows_text = [[c.text for c in row.cells] for t in generated_tables for row in t.rows]
+    check(["Engineering", "Test Suite", "Electronic"] in rows_text, "preparer row (department/author) rendered from front matter")
+    check(["Regulatory", "Test Rep", "Electronic"] in rows_text, "regulatory rep row rendered from front matter")
+    check(["Quality", "Test QA", "Electronic"] in rows_text, "quality rep row rendered from front matter")
+    check(["Engineering", "Test Head", "Electronic"] in rows_text, "department head row rendered from front matter")
 
 
 def test_compile_bom_front_matter():
@@ -754,7 +824,7 @@ def test_figure_auto_numbering():
     MARKDOWN_STYLING_GUIDE.md convention) must come out of Pandoc as a
     distinct 'Image Caption'-styled paragraph (thanks to the
     'Captioned Figure'/'Image Caption' styles added to
-    TEMPLATE_Word_Signature.docx), which apply_figure_captions() then
+    TEMPLATE_Word_Base.docx), which apply_figure_captions() then
     rewrites into a 'Caption'-styled paragraph carrying live
     STYLEREF/SEQ fields - not static numbered text. Also verifies the
     {#fig:label} bookmark and a [text](#fig:label) cross-reference
@@ -923,6 +993,8 @@ def main():
     test_apply_table_column_widths_raises_when_all_fixed_overflows()
     test_compile_missing_input_error()
     test_compile_valid_document()
+    test_create_signature_table_structure()
+    test_compile_signature_table_generated_programmatically()
     test_compile_bom_front_matter()
     test_compile_table_marker_no_blank_line()
     test_compile_adjacent_tables_no_merge()

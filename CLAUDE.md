@@ -30,7 +30,7 @@ This is a **self-hosted Claude Code plugin** for Windows environments, providing
 - Explicitly does not invoke Pandoc or the Python compiler - that's the `dilon-document-compiler` skill's job.
 
 ### Skill 2: `dilon-document-compiler`
-**Location:** `skills/dilon-document-compiler/` (`SKILL.md`, `scripts/generate_dilon_doc.py`, `scripts/check_deps.py`); reference templates (`templates/TEMPLATE_Word_Signature.docx`, `templates/TEMPLATE_Word_Content.docx`) live at the repo root, shared with `dilon-document-extractor`.
+**Location:** `skills/dilon-document-compiler/` (`SKILL.md`, `scripts/generate_dilon_doc.py`, `scripts/check_deps.py`); reference templates (`templates/TEMPLATE_Word_Base.docx`, `templates/TEMPLATE_Word_Content.docx`) live at the repo root, shared with `dilon-document-extractor`.
 
 **Dependencies:** Python (>= 3.8) with `python-docx`, `python-docx-template`, `docxcompose`, `pyyaml>=6.0`; Pandoc on PATH. Installed via `install.ps1`.
 
@@ -48,7 +48,7 @@ This is a **self-hosted Claude Code plugin** for Windows environments, providing
 
 **Capabilities (per `SKILL.md`):**
 - Runs `scripts/check_deps.py` first; if it reports any `[FAIL]`, stops and tells the user which dependency is missing rather than attempting a partial extraction.
-- `.docx` path (`scripts/extract_docx.py`): reads Word paragraph styles, table structure, and header/footer to bootstrap a Dilon markdown draft - auto-detects heading levels, classifies signature-approval/revision-history tables by position against the canonical `TEMPLATE_Word_Signature.docx` shape, and pairs inline images with adjacent `Caption` paragraphs.
+- `.docx` path (`scripts/extract_docx.py`): reads Word paragraph styles, table structure, and header/footer to bootstrap a Dilon markdown draft - auto-detects heading levels, classifies signature-approval/revision-history tables by position against the canonical shape `create_signature_table()` (in `generate_dilon_doc.py`) generates, and pairs inline images with adjacent `Caption` paragraphs.
 - `.pdf` path (`scripts/extract_pdf.py`): lower-fidelity - untagged PDFs carry no reliable style metadata, so no heading-level inference is attempted; emits body text and embedded images with a banner comment.
 - Never hard-fails on ambiguous input: every uncertain classification degrades to an inline `<!-- EXTRACTOR: ... -->` comment instead of raising.
 - Output always requires a cleanup pass: resolve every `EXTRACTOR` comment, sanity-check headings/tables against the source, then hand off to `dilon-document-writer` for remaining prose/structure cleanup.
@@ -67,7 +67,7 @@ dilon-claude-tools/
 │   └── marketplace.json               # self-hosted marketplace listing this plugin
 │
 ├── templates/                          # Shared Word reference templates
-│   ├── TEMPLATE_Word_Signature.docx
+│   ├── TEMPLATE_Word_Base.docx
 │   └── TEMPLATE_Word_Content.docx
 │
 ├── skills/
@@ -100,7 +100,8 @@ dilon-claude-tools/
 
 The `dilon-document-compiler` skill assembles Word documents from several parts:
 
-- **Signature template** (repo-root `templates/TEMPLATE_Word_Signature.docx`): master document with style definitions, a Jinja2-templated signature approval table, and document properties (title, author, department, doc_number, current_revision, regulatory_rep, quality_rep, department_head). Also the canonical shape `dilon-document-extractor` classifies signature/revision tables against.
+- **Base template** (repo-root `templates/TEMPLATE_Word_Base.docx`): master document with style definitions, running header/footer (Jinja2 fields for title/doc_number/current_revision), and document properties - no body content of its own.
+- **Signature table**: generated programmatically (`create_signature_table()`) from front-matter fields (author, department, regulatory_rep, quality_rep, department_head) and inserted into Part A - also the canonical shape `dilon-document-extractor` classifies signature tables against.
 - **Revision table**: generated programmatically from the markdown's `revisions` YAML list (custom column widths, gray headers, centered text).
 - **Content template** (repo-root `templates/TEMPLATE_Word_Content.docx`): title page and content wrapper (author/revision info).
 - **Markdown content**: converted via Pandoc, with TOC generation from H2 section headings.
