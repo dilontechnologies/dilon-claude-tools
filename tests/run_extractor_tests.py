@@ -112,6 +112,73 @@ def test_is_suspicious_heading_text():
     check(not ex.is_suspicious_heading_text("Bonding"), "short title-case heading is not flagged")
 
 
+def test_heading_is_empty_leaf():
+    import extract_docx as ex
+    doc = Document()
+    doc.add_paragraph("Next Step", style="Heading 2")
+    doc.add_paragraph("Detector Head Testing following FTP-00001", style="Heading 3")
+    blocks = list(ex.iter_block_items(doc))
+
+    check(
+        ex.heading_is_empty_leaf(blocks, 0, 2) is False,
+        "a heading followed by a deeper child heading is not an empty leaf",
+    )
+    check(
+        ex.heading_is_empty_leaf(blocks, 1, 3) is True,
+        "sole child heading with no content, followed by end of document, is an empty leaf",
+    )
+
+    doc2 = Document()
+    doc2.add_paragraph("Next Step", style="Heading 2")
+    doc2.add_paragraph("Detector Head Testing following FTP-00001", style="Heading 3")
+    doc2.add_paragraph("See the referenced procedure for full test steps.", style="Normal")
+    blocks2 = list(ex.iter_block_items(doc2))
+    check(
+        ex.heading_is_empty_leaf(blocks2, 1, 3) is False,
+        "a child heading followed by real body content is not an empty leaf",
+    )
+
+    doc3 = Document()
+    doc3.add_paragraph("Section A", style="Heading 2")
+    doc3.add_paragraph("Section B", style="Heading 2")
+    blocks3 = list(ex.iter_block_items(doc3))
+    check(
+        ex.heading_is_empty_leaf(blocks3, 0, 2) is False,
+        "a sibling heading (same level, not a parent/child pair) does not trigger the empty-leaf rule",
+    )
+
+    doc4 = Document()
+    doc4.add_paragraph("Next Step", style="Heading 2")
+    doc4.add_paragraph("Detector Head Testing following FTP-00001", style="Heading 3")
+    image_path = TEST_OUTPUT_DIR / "_leaf_fixture_image.png"
+    image_path.write_bytes(bytes.fromhex(
+        "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753"
+        "de0000000c49444154789c63f8ffff3f0005fe02fe0def46b8000000004945"
+        "4e44ae426082"
+    ))
+    doc4.add_picture(str(image_path))
+    blocks4 = list(ex.iter_block_items(doc4))
+    check(
+        ex.heading_is_empty_leaf(blocks4, 1, 3) is False,
+        "a heading whose only content is an embedded image (no caption text) is not an empty leaf",
+    )
+
+
+def test_build_markdown_body_empty_leaf_heading_becomes_bullet():
+    import extract_docx as ex
+    doc = Document()
+    doc.add_paragraph("Next Step", style="Heading 2")
+    doc.add_paragraph("Detector Head Testing following FTP-00001", style="Heading 3")
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check("### Next Step" in body, "genuine parent heading with a child is left as a heading")
+    check("#### Detector Head Testing" not in body, "childless leaf heading is not rendered as a markdown heading")
+    check("- Detector Head Testing following FTP-00001" in body, "childless leaf heading rendered as a bullet instead")
+
+
 def test_titlecase_heading():
     import extract_docx as ex
     check(ex.titlecase_heading("RESPONSIBILITIES") == "Responsibilities", "all-caps heading title-cased")
@@ -616,6 +683,8 @@ def main():
     test_compute_heading_shift_no_headings_defaults_to_two()
     test_markdown_heading_prefix()
     test_is_suspicious_heading_text()
+    test_heading_is_empty_leaf()
+    test_build_markdown_body_empty_leaf_heading_becomes_bullet()
     test_titlecase_heading()
     test_classify_table_signature()
     test_classify_table_revision()

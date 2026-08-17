@@ -326,6 +326,62 @@ def iter_block_items(doc):
             yield Table(child, doc)
 
 
+def _is_blank_block(block):
+    """True if a block contributes no visible content to the extracted
+    body - a text-less paragraph with no embedded image, or a table-of-
+    contents artifact. Tables, images, captions, and heading paragraphs
+    always count as real content."""
+    from docx.table import Table
+    if isinstance(block, Table):
+        return False
+    style_name = block.style.name if block.style else None
+    text = block.text.strip()
+    if is_toc_paragraph(style_name, text):
+        return True
+    if text:
+        return False
+    return not paragraph_image_rids(block)
+
+
+def _nearest_real_block(blocks, index, step):
+    """Scan from `index` in direction `step` (+1 or -1), skipping blank
+    blocks (see _is_blank_block), and return the nearest non-blank block,
+    or None if the scan runs off either end."""
+    j = index + step
+    while 0 <= j < len(blocks):
+        if not _is_blank_block(blocks[j]):
+            return blocks[j]
+        j += step
+    return None
+
+
+def heading_is_empty_leaf(blocks, index, level):
+    """True if the heading-styled paragraph at blocks[index] (Word heading
+    `level`) is a content-less leaf being used to label a single fact
+    rather than introduce a real subsection: it is the sole child of a
+    parent heading exactly one level shallower (immediately before it,
+    skipping blanks), AND has no body/list/table/image content of its own
+    before the next heading of equal-or-shallower level or the end of the
+    document. A heading followed by a *deeper* heading (a real parent) or
+    by any real content is never an empty leaf."""
+    from docx.text.paragraph import Paragraph
+
+    prev = _nearest_real_block(blocks, index, -1)
+    if not isinstance(prev, Paragraph):
+        return False
+    prev_level = word_heading_level(prev.style.name if prev.style else None)
+    if prev_level != level - 1:
+        return False
+
+    nxt = _nearest_real_block(blocks, index, 1)
+    if nxt is None:
+        return True
+    if not isinstance(nxt, Paragraph):
+        return False
+    nxt_level = word_heading_level(nxt.style.name if nxt.style else None)
+    return nxt_level is not None and nxt_level <= level
+
+
 def cell_has_multiple_paragraphs(cell):
     return len(cell.paragraphs) > 1 and any(p.text.strip() for p in cell.paragraphs[1:])
 
@@ -444,11 +500,21 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
 
         level = word_heading_level(style_name)
         if level is not None:
-            if is_suspicious_heading_text(text):
-                warnings.append(
-                    "heading-styled paragraph reads like body text, rendered "
-                    f"as a nested list item instead of a heading: {text!r}"
-                )
+            suspicious = is_suspicious_heading_text(text)
+            empty_leaf = not suspicious and heading_is_empty_leaf(blocks, i, level)
+            if suspicious or empty_leaf:
+                if empty_leaf:
+                    warnings.append(
+                        "heading-styled paragraph has no content of its own "
+                        "(sole child heading immediately followed by another "
+                        "heading or end of document), rendered as a list "
+                        f"item instead of a heading: {text!r}"
+                    )
+                else:
+                    warnings.append(
+                        "heading-styled paragraph reads like body text, rendered "
+                        f"as a nested list item instead of a heading: {text!r}"
+                    )
                 nest = last_list_ilvl + 1 if in_list else 0
                 if not in_list:
                     lines.append("")
