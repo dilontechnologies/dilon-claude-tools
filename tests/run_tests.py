@@ -29,8 +29,8 @@ COMPILER_DIR = REPO_ROOT / "skills" / "dilon-document-compiler"
 TEMPLATE_PATH = WRITER_DIR / "TEMPLATE_Document.md"
 COMPILER_SCRIPT = COMPILER_DIR / "scripts" / "generate_dilon_doc.py"
 CHECK_DEPS_SCRIPT = COMPILER_DIR / "scripts" / "check_deps.py"
-SIGNATURE_TEMPLATE = COMPILER_DIR / "templates" / "TEMPLATE_Word_Signature.docx"
-CONTENT_TEMPLATE = COMPILER_DIR / "templates" / "TEMPLATE_Word_Content.docx"
+SIGNATURE_TEMPLATE = REPO_ROOT / "templates" / "TEMPLATE_Word_Signature.docx"
+CONTENT_TEMPLATE = REPO_ROOT / "templates" / "TEMPLATE_Word_Content.docx"
 
 # Scripts that must not carry a `#!/usr/bin/env python3` shebang: Windows'
 # py launcher parses that line and can re-dispatch to a different,
@@ -629,8 +629,9 @@ def test_compile_table_column_widths():
 
 def test_compile_with_default_templates():
     """Regression test for a bug where the compiler's default template
-    lookup pointed at scripts/ instead of the sibling templates/ directory.
-    Invokes with only <input> <output> (no template args) so the script
+    lookup pointed at the wrong directory instead of the repo-root
+    templates/ directory. Invokes with only <input> <output> (no template
+    args) so the script
     must resolve its own defaults, rather than the explicit four-argument
     form SKILL.md always uses."""
     input_md = TEST_OUTPUT_DIR / "compile_test_defaults.md"

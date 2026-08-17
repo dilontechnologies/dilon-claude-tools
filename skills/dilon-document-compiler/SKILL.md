@@ -29,8 +29,8 @@ python scripts/generate_dilon_doc.py <input.md> <output.docx> <signature_templat
 
 - `<input.md>`: the markdown file to compile (must have YAML front matter — if it doesn't, point the user at the `dilon-document-writer` skill first).
 - `<output.docx>`: defaults to the same name as the input with a `.docx` extension if the user doesn't specify one.
-- `<signature_template>`: defaults to `templates/TEMPLATE_Word_Signature.docx` in this skill's directory, unless the user supplies a custom one.
-- `<content_template>`: defaults to `templates/TEMPLATE_Word_Content.docx` in this skill's directory, unless the user supplies a custom one.
+- `<signature_template>`: defaults to `templates/TEMPLATE_Word_Signature.docx` at the repo root, unless the user supplies a custom one.
+- `<content_template>`: defaults to `templates/TEMPLATE_Word_Content.docx` at the repo root, unless the user supplies a custom one.
 
 After the script exits, verify the output file now exists. Report the script's stdout/stderr to the user on failure; report the output path on success.
 

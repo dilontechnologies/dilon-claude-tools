@@ -704,13 +704,15 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     # Default template locations
     script_dir = Path(__file__).parent
 
+    repo_root = script_dir.parent.parent.parent
+
     if signature_template_path is None:
-        signature_template_path = script_dir.parent / "templates" / "TEMPLATE_Word_Signature.docx"
+        signature_template_path = repo_root / "templates" / "TEMPLATE_Word_Signature.docx"
     else:
         signature_template_path = Path(signature_template_path)
 
     if content_template_path is None:
-        content_template_path = script_dir.parent / "templates" / "TEMPLATE_Word_Content.docx"
+        content_template_path = repo_root / "templates" / "TEMPLATE_Word_Content.docx"
     else:
         content_template_path = Path(content_template_path)
 
