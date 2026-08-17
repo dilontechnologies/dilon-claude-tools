@@ -123,6 +123,61 @@ def test_generate_form_document():
     )
 
 
+def test_underscore_until_end_of_line_body_paragraph():
+    import form_fields as ff
+    doc = Document()
+    p = doc.add_paragraph("Work Order:")
+    ff.underscore_until_end_of_line(p)
+
+    check(p.text == "Work Order:\t", "label kept, followed by a tab character")
+    tab_stops = p.paragraph_format.tab_stops
+    check(len(tab_stops) == 1, f"exactly one tab stop added, found {len(tab_stops)}")
+    if len(tab_stops) == 1:
+        from docx.enum.text import WD_TAB_ALIGNMENT
+        check(tab_stops[0].alignment == WD_TAB_ALIGNMENT.RIGHT, "tab stop is right-aligned")
+        section = doc.sections[0]
+        available_width = section.page_width.inches - section.left_margin.inches - section.right_margin.inches
+        check(
+            abs(tab_stops[0].position.inches - available_width) < 0.01,
+            f"tab stop positioned at the page's available content width ({available_width}in), got {tab_stops[0].position.inches}in",
+        )
+
+
+def test_underscore_until_end_of_line_in_table_cell():
+    import form_fields as ff
+    doc = Document()
+    table = doc.add_table(rows=1, cols=1)
+    table.columns[0].width = Inches(2.0)
+    cell = table.rows[0].cells[0]
+    cell.width = Inches(2.0)
+    p = cell.paragraphs[0]
+    p.text = "Technician:"
+    ff.underscore_until_end_of_line(p)
+
+    tab_stops = p.paragraph_format.tab_stops
+    check(len(tab_stops) == 1, f"exactly one tab stop added inside a table cell, found {len(tab_stops)}")
+    if len(tab_stops) == 1:
+        check(
+            abs(tab_stops[0].position.inches - 2.0) < 0.05,
+            f"tab stop positioned at the enclosing cell's width (2.0in), got {tab_stops[0].position.inches}in",
+        )
+
+
+def test_apply_form_fields_marker():
+    import form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_FIELD:FillLine@@@Work Order:@@@END_FORM_FIELD@@@")
+    temp_path = TEST_OUTPUT_DIR / "form_fields_marker.docx"
+    doc.save(temp_path)
+
+    ff.apply_form_fields(temp_path)
+
+    result_doc = Document(temp_path)
+    check(len(result_doc.paragraphs) == 1, "marker paragraph is reused (not duplicated)")
+    check(result_doc.paragraphs[0].text == "Work Order:\t", f"marker replaced with label + tab, got {result_doc.paragraphs[0].text!r}")
+    check("@@@" not in result_doc.paragraphs[0].text, "no marker text remains")
+
+
 def test_check_deps_runs_and_reports():
     result = subprocess.run(
         [sys.executable, str(CHECK_DEPS_SCRIPT)],
@@ -143,6 +198,9 @@ def main():
     TEST_OUTPUT_DIR.mkdir(parents=True)
 
     test_generate_form_document()
+    test_underscore_until_end_of_line_body_paragraph()
+    test_underscore_until_end_of_line_in_table_cell()
+    test_apply_form_fields_marker()
     test_check_deps_runs_and_reports()
 
     print(f"\n{passed} passed, {failed} failed (dilon-document-form-compiler)")
