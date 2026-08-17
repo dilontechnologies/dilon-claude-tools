@@ -47,6 +47,7 @@ from dilon_docx_common import (  # noqa: E402
     ensure_blank_line_after_table_markers,
     parse_column_widths,
     apply_table_column_widths,
+    render_jinja,
 )
 
 
@@ -289,6 +290,7 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
 
     # Extract YAML metadata and Markdown body
     metadata, markdown_body = extract_yaml_and_markdown(markdown_path)
+    markdown_body = render_jinja(markdown_body, metadata)
 
     print(f"Metadata extracted: {list(metadata.keys())}")
 

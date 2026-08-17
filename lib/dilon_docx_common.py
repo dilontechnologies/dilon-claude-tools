@@ -16,6 +16,20 @@ from pathlib import Path
 from docx import Document
 from docx.shared import Inches
 from docxcompose.composer import Composer
+from jinja2 import Environment
+
+# Pandoc's own {#id}/{#fig:label} attribute syntax (documented in
+# MARKDOWN_STYLING_GUIDE.md for figure labels and heading ids) collides
+# with Jinja2's default {# ... #} comment syntax - {#fig:label} alone (no
+# closing #}) raises TemplateSyntaxError: Missing end of comment tag.
+# Body rendering only ever needs {{field}} substitution and
+# {% raw %}...{% endraw %} escaping, never comments, so the comment
+# delimiter is disabled outright (set to a string that can't occur in
+# authored markdown) rather than worked around per-document.
+_JINJA_ENV = Environment(
+    comment_start_string='\x00JINJA_COMMENT_DISABLED_START\x00',
+    comment_end_string='\x00JINJA_COMMENT_DISABLED_END\x00',
+)
 
 
 def apply_table_style_to_object(table, style_name):
@@ -511,7 +525,20 @@ def ensure_blank_line_after_table_markers(markdown_text):
     return _TABLE_MARKER_RUN.sub(_insert_blank_line_if_needed, markdown_text)
 
 
-def markdown_to_docx(markdown_text, output_file, reference_doc=None, resource_dir=None):
+def render_jinja(markdown_text, metadata):
+    """
+    Pre-render a markdown body's {{field}} references against the same
+    front-matter dict used for the header/footer/signature page, before
+    Pandoc ever sees the text - so a document's body can reference e.g.
+    {{doc_number}}/{{title}} and have it resolve from the one YAML source
+    of truth instead of being hand-duplicated. A body with no {{...}} in
+    it is returned unchanged. Escape literal {{ }} with Jinja2's own
+    {% raw %}...{% endraw %} if a document must discuss the syntax itself.
+    """
+    return _JINJA_ENV.from_string(markdown_text).render(**metadata)
+
+
+def markdown_to_docx(markdown_text, output_file, reference_doc=None, resource_dir=None, include_toc=True):
     """
     Convert Markdown to a Word document using Pandoc.
 
@@ -527,6 +554,9 @@ def markdown_to_docx(markdown_text, output_file, reference_doc=None, resource_di
             process's current working directory, silently embedding a
             placeholder instead of the real image if that happens to
             differ from the markdown file's own directory.
+        include_toc: Whether to generate a table of contents (--toc). A
+            form document has no heading structure to build a TOC from -
+            the form compiler passes False.
     """
     markdown_text = ensure_blank_line_after_table_markers(markdown_text)
 
@@ -541,11 +571,11 @@ def markdown_to_docx(markdown_text, output_file, reference_doc=None, resource_di
         str(temp_md),
         '-o', str(output_file),
         '--standalone',
-        '--toc',
-        '--toc-depth=6',
         '--from=markdown+smart+backtick_code_blocks+fenced_code_attributes+raw_html',
         '--wrap=preserve'
     ]
+    if include_toc:
+        pandoc_cmd.extend(['--toc', '--toc-depth=6'])
 
     # Add reference document if provided
     if reference_doc:

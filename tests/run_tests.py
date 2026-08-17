@@ -818,6 +818,61 @@ def test_compile_resolves_relative_image_paths():
               "compiled document's body (not just the header) embeds an image relationship")
 
 
+def test_render_jinja_substitutes_body_fields():
+    text = compiler.render_jinja("This document is {{doc_number}}, rev {{current_revision}}.", {
+        "doc_number": "WI-00077",
+        "current_revision": "01",
+    })
+    check(text == "This document is WI-00077, rev 01.", f"body Jinja2 fields resolved, got {text!r}")
+
+
+def test_render_jinja_raw_block_escapes_literal_braces():
+    text = compiler.render_jinja(
+        "Use {% raw %}{{doc_number}}{% endraw %} to reference the doc number.",
+        {"doc_number": "WI-00077"},
+    )
+    check(
+        text == "Use {{doc_number}} to reference the doc number.",
+        f"raw block preserves literal braces, got {text!r}",
+    )
+
+
+def test_render_jinja_noop_without_braces():
+    text = compiler.render_jinja("Plain text with no template fields.", {"doc_number": "WI-00077"})
+    check(text == "Plain text with no template fields.", "body with no {{...}} is returned unchanged")
+
+
+def test_compile_body_jinja_substitution():
+    input_md = TEST_OUTPUT_DIR / "compile_test_jinja.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_jinja.docx"
+    markdown = SAMPLE_MARKDOWN.replace(
+        "This document tests the compilation process.",
+        "This document, {{doc_number}}, tests the compilation process.",
+    )
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+            str(CONTENT_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a document with body-level {{doc_number}}")
+
+    doc = Document(output_docx)
+    body_text = "\n".join(p.text for p in doc.paragraphs)
+    check("DD_TST_99999" in body_text, "body {{doc_number}} resolved to the front-matter value in the compiled output")
+    check("{{doc_number}}" not in body_text, "no literal Jinja2 braces remain in the compiled output")
+
+
 def test_figure_auto_numbering():
     """Render test: a figure caption written as
     ![Description.](path.png){#fig:label} (per the updated
@@ -1001,6 +1056,10 @@ def main():
     test_compile_table_column_widths()
     test_compile_with_default_templates()
     test_compile_resolves_relative_image_paths()
+    test_render_jinja_substitutes_body_fields()
+    test_render_jinja_raw_block_escapes_literal_braces()
+    test_render_jinja_noop_without_braces()
+    test_compile_body_jinja_substitution()
     test_heading_auto_numbering()
     test_figure_auto_numbering()
     test_no_shebang_in_python_scripts()
