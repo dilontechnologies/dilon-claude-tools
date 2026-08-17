@@ -428,3 +428,18 @@ def extract(docx_path, output_dir):
     md_path.write_text("".join(parts), encoding="utf-8")
 
     return {"markdown_path": md_path, "images_dir": images_dir, "warnings": warnings}
+
+
+def main():
+    if len(sys.argv) != 3:
+        print("Usage: python extract_docx.py <input.docx> <output_dir>")
+        return 1
+    result = extract(sys.argv[1], sys.argv[2])
+    print(f"Wrote {result['markdown_path']}")
+    for w in result["warnings"]:
+        print(f"[WARN] {w}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

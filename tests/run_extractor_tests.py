@@ -357,6 +357,34 @@ def test_extract_pdf_banner_and_text():
     check(any("PDF source" in w for w in result["warnings"]), "the banner warning is also reported in the returned warnings list")
 
 
+def test_extract_docx_cli_smoke():
+    fixture_path = TEST_OUTPUT_DIR / "cli-fixture.docx"
+    output_dir = TEST_OUTPUT_DIR / "cli-extracted"
+    _build_fixture_docx(fixture_path)
+
+    result = subprocess.run(
+        [sys.executable, str(EXTRACT_DOCX_SCRIPT), str(fixture_path), str(output_dir)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "extract_docx.py CLI exits 0 for a valid input")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(any(output_dir.glob("*.md")), "extract_docx.py CLI writes a markdown file to the output directory")
+
+
+def test_no_shebang_in_extractor_scripts():
+    def has_shebang(path):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return bool(lines) and lines[0].startswith("#!")
+
+    offenders = [str(p) for p in SHEBANG_GUARDED_SCRIPTS if has_shebang(p)]
+    check(not offenders, f"no shebang lines in guarded extractor scripts (offenders: {offenders})")
+
+
 def main():
     if TEST_OUTPUT_DIR.exists():
         import shutil
@@ -381,6 +409,8 @@ def main():
     test_extract_full_fixture()
     test_table_to_markdown_pipe()
     test_extract_pdf_banner_and_text()
+    test_extract_docx_cli_smoke()
+    test_no_shebang_in_extractor_scripts()
 
     print(f"\n{passed} passed, {failed} failed (dilon-document-extractor)")
     if failed == 0:

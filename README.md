@@ -2,14 +2,15 @@
 
 **Claude Code plugin for Dilon Technologies document authoring tools**
 
-This repository is a [Claude Code plugin](https://code.claude.com/docs/en/plugins) that bundles two Skills for working with Dilon Technologies' regulatory-compliant technical documentation:
+This repository is a [Claude Code plugin](https://code.claude.com/docs/en/plugins) that bundles three Skills for working with Dilon Technologies' regulatory-compliant technical documentation:
 
 - **`dilon-document-writer`** - create a new Dilon document from the standard template, and apply Dilon markdown styling conventions while editing existing Dilon documents.
 - **`dilon-document-compiler`** - compile a Dilon-formatted markdown file into a regulatory-compliant Word document (signature page, revision history table, table of contents).
+- **`dilon-document-extractor`** - bootstrap a Dilon markdown draft from an existing Word or PDF document.
 
 ## Prerequisites
 
-- **Python** (>= 3.8) and the following pip packages: `python-docx`, `python-docx-template`, `docxcompose`, `pyyaml>=6.0`
+- **Python** (>= 3.8) and the following pip packages: `python-docx`, `python-docx-template`, `docxcompose`, `pyyaml>=6.0`, `pymupdf`
 - **Pandoc** (for Markdown to Word conversion), on PATH
 
 Run `install.ps1` (as Administrator) from the repo root to auto-install these via winget and pip:
@@ -21,7 +22,7 @@ cd C:\Users\YourUsername\Local_Documents\Local_Repos\dilon-claude-tools
 
 This also installs the `Compile-DilonDoc` / `dilonc` PowerShell alias for compiling documents outside of Claude Code.
 
-The `dilon-document-writer` skill has no external dependencies - it works without running `install.ps1`.
+The `dilon-document-writer` skill has no external dependencies - it works without running `install.ps1`. The `dilon-document-extractor` skill's PDF path needs `pymupdf`, also installed by `install.ps1`.
 
 ## Installing the plugin
 
@@ -78,22 +79,29 @@ dilon-claude-tools/
 ├── .claude-plugin/
 │   ├── plugin.json              # plugin manifest
 │   └── marketplace.json         # self-hosted marketplace listing this plugin
+├── templates/                    # shared Word reference templates
+│   ├── TEMPLATE_Word_Signature.docx
+│   └── TEMPLATE_Word_Content.docx
 ├── skills/
 │   ├── dilon-document-writer/
 │   │   ├── SKILL.md
 │   │   ├── MARKDOWN_STYLING_GUIDE.md
 │   │   └── TEMPLATE_Document.md
-│   └── dilon-document-compiler/
+│   ├── dilon-document-compiler/
+│   │   ├── SKILL.md
+│   │   └── scripts/
+│   │       ├── generate_dilon_doc.py
+│   │       └── check_deps.py
+│   └── dilon-document-extractor/
 │       ├── SKILL.md
-│       ├── scripts/
-│       │   ├── generate_dilon_doc.py
-│       │   └── check_deps.py
-│       └── templates/
-│           ├── TEMPLATE_Word_Signature.docx
-│           └── TEMPLATE_Word_Content.docx
+│       └── scripts/
+│           ├── extract_docx.py
+│           ├── extract_pdf.py
+│           └── check_deps.py
 ├── install.ps1                   # dependency setup (Python, Pandoc, pip packages)
 ├── tests/
 │   ├── run_tests.py
+│   ├── run_extractor_tests.py
 │   ├── validate-output.py
 │   ├── README.md
 │   ├── STYLING_TEST_TEMPLATE.md
@@ -106,6 +114,7 @@ dilon-claude-tools/
 
 ```powershell
 py -3 tests/run_tests.py
+py -3 tests/run_extractor_tests.py
 ```
 
 Requires the same Python/Pandoc prerequisites listed above. Use `py -3` explicitly rather than bare `python`/`py` — on some Windows setups those resolve through a shebang-re-resolution quirk to a package-less Microsoft Store stub instead of the real interpreter.
@@ -118,12 +127,13 @@ Requires the same Python/Pandoc prerequisites listed above. Use `py -3` explicit
 2. Run `claude plugin validate .` from the repo root to check for manifest/skill errors.
 3. Run `claude --debug` to see plugin loading details.
 
-### Compilation fails with a missing-dependency error
+### Compilation or extraction fails with a missing-dependency error
 
-Run the dependency checker directly:
+Run the relevant dependency checker directly:
 
 ```powershell
 python skills/dilon-document-compiler/scripts/check_deps.py
+python skills/dilon-document-extractor/scripts/check_deps.py
 ```
 
 Any `[FAIL]` line names the missing piece. Re-run `install.ps1` to fix Python/Pandoc/pip packages.

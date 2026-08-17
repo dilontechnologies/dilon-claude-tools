@@ -19,6 +19,11 @@ Thumbs.db
 *.tmp
 ~$*
 tests/test-output/
+tests/extractor-test-output/
+
+# Python
+__pycache__/
+*.pyc
 
 # Local configuration files
 *.local.*
