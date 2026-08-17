@@ -60,6 +60,68 @@ def is_suspicious_heading_text(text):
     return len(text.split()) > SUSPICIOUS_WORD_COUNT_THRESHOLD
 
 
+TITLECASE_WORD_RE = re.compile(r"[A-Za-z']+")
+
+
+def titlecase_heading(text):
+    """Title-case heading text: capitalize the first letter of every word
+    and lowercase the rest, regardless of the source document's own
+    capitalization (real Dilon headings are inconsistently ALL CAPS /
+    Sentence case / Mixed case)."""
+    return TITLECASE_WORD_RE.sub(lambda m: m.group(0)[:1].upper() + m.group(0)[1:].lower(), text)
+
+
+TOC_STYLE_RE = re.compile(r'(?i)^toc\s*\d+$')
+
+
+def is_toc_paragraph(style_name, text):
+    """True for a Word-generated table-of-contents entry ('toc 1'/'toc 2'/
+    etc. paragraph styles, or the 'TOC Heading' style) or the literal
+    'TABLE OF CONTENTS' heading text that precedes them. The compiler
+    regenerates its own TOC from headings, so the source document's baked-
+    in TOC would just be redundant, stale noise in the body."""
+    if style_name and (TOC_STYLE_RE.match(style_name) or style_name.strip().lower() == 'toc heading'):
+        return True
+    return text.strip().lower() == 'table of contents'
+
+
+def paragraph_is_list_item(paragraph):
+    """True if paragraph is part of a numbered/bulleted list - either via
+    the 'List Paragraph' style, or via direct w:numPr list formatting on a
+    paragraph using a different style. Real Dilon documents mix both: a
+    single-item "list" is sometimes left styled 'Normal' with manual list
+    formatting rather than switched to the 'List Paragraph' style."""
+    from docx.oxml.ns import qn
+    style_name = paragraph.style.name if paragraph.style else None
+    if style_name == "List Paragraph":
+        return True
+    pPr = paragraph._p.find(qn('w:pPr'))
+    if pPr is None:
+        return False
+    return pPr.find(qn('w:numPr')) is not None
+
+
+def paragraph_list_ilvl(paragraph):
+    """Return the 0-based numbering indent level for a list-item
+    paragraph's w:numPr formatting, or 0 if absent/unspecified. Used to
+    preserve nested-list structure (e.g. Word's ilvl-1 sub-bullets) as
+    2-space-indented markdown nesting (MARKDOWN_STYLING_GUIDE.md SS5.1)."""
+    from docx.oxml.ns import qn
+    pPr = paragraph._p.find(qn('w:pPr'))
+    if pPr is None:
+        return 0
+    numPr = pPr.find(qn('w:numPr'))
+    if numPr is None:
+        return 0
+    ilvl_el = numPr.find(qn('w:ilvl'))
+    if ilvl_el is None:
+        return 0
+    try:
+        return int(ilvl_el.get(qn('w:val')))
+    except (TypeError, ValueError):
+        return 0
+
+
 ROLE_LABEL_HINTS = {
     "regulatory_rep": ("regulat",),
     "quality_rep": ("quality", "qa", "qc"),
@@ -160,6 +222,9 @@ FOOTER_LINE_RE = re.compile(
     r'([A-Za-z]{2,}-\d+)\s+Rev\s+(\d+)\s+(ECO-\d+)\s+Revision Date:\s*([\d/]+)'
 )
 FIGURE_PREFIX_RE = re.compile(r'^Figure\s+[\d.]+\s*[:\-]\s*', re.IGNORECASE)
+HEADER_LABEL_VALUE_RE = re.compile(r'^([A-Za-z][A-Za-z \-]{0,20}):\s*(.*)$', re.DOTALL)
+HEADER_TITLE_SKIP_LABELS = {'number', 'page'}
+HEADER_TITLE_TRAILING_REV_RE = re.compile(r'\s*Rev\s+\d+.*$', re.DOTALL)
 
 
 def extract_header_footer_metadata(doc):
@@ -173,13 +238,25 @@ def extract_header_footer_metadata(doc):
 
     for table in section.header.tables:
         for row in table.rows:
-            joined = " ".join(cell.text.strip() for cell in row.cells)
+            cell_texts = [c.text.strip() for c in row.cells if c.text.strip()]
+            joined = " ".join(cell_texts)
             m = DOC_NUMBER_RE.search(joined)
             if m:
                 fields["doc_number"] = m.group(1)
             m = REV_RE.search(joined)
             if m:
                 fields["current_revision"] = m.group(1)
+
+            if cell_texts and "title" not in fields:
+                label_match = HEADER_LABEL_VALUE_RE.match(cell_texts[0])
+                if label_match and label_match.group(1).strip().lower() not in HEADER_TITLE_SKIP_LABELS:
+                    value = label_match.group(2).strip()
+                    if not value and len(cell_texts) > 1:
+                        value = cell_texts[1]
+                    value = HEADER_TITLE_TRAILING_REV_RE.sub('', value).strip()
+                    value = re.sub(r'\s+', ' ', value)
+                    if value:
+                        fields["title"] = value
 
     footer_text = "\n".join(p.text for p in section.footer.paragraphs if p.text.strip())
     m = FOOTER_LINE_RE.search(footer_text)
@@ -298,6 +375,7 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
     warnings = []
     lines = []
     in_list = False
+    last_list_ilvl = 0
     existing_slugs = set()
     image_index = 1
 
@@ -325,6 +403,9 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
         # block is a Paragraph
         style_name = block.style.name if block.style else None
         text = block.text.strip()
+
+        if is_toc_paragraph(style_name, text):
+            continue
 
         rids = paragraph_image_rids(block)
         if rids:
@@ -363,18 +444,28 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
 
         level = word_heading_level(style_name)
         if level is not None:
-            flush_list()
             if is_suspicious_heading_text(text):
-                warnings.append(f"heading-styled paragraph reads like body text: {text!r}")
-            lines.append(f"{markdown_heading_prefix(level, shift)} {text}")
+                warnings.append(
+                    "heading-styled paragraph reads like body text, rendered "
+                    f"as a nested list item instead of a heading: {text!r}"
+                )
+                nest = last_list_ilvl + 1 if in_list else 0
+                if not in_list:
+                    lines.append("")
+                    in_list = True
+                lines.append(f"{'  ' * nest}- {text}")
+                continue
+            flush_list()
+            lines.append(f"{markdown_heading_prefix(level, shift)} {titlecase_heading(text)}")
             lines.append("")
             continue
 
-        if style_name == "List Paragraph":
+        if paragraph_is_list_item(block):
             if not in_list:
                 lines.append("")
                 in_list = True
-            lines.append(f"- {text}")
+            last_list_ilvl = paragraph_list_ilvl(block)
+            lines.append(f"{'  ' * last_list_ilvl}- {text}")
             continue
 
         flush_list()
@@ -414,6 +505,34 @@ def extract(docx_path, output_dir):
     shift = compute_heading_shift(doc)
     blocks = list(iter_block_items(doc))
     body_text, warnings = build_markdown_body(doc, blocks, shift, images_dir, front_matter)
+
+    footer_eco_number = front_matter.pop("footer_eco_number", None)
+    footer_eco_date = front_matter.pop("footer_eco_date", None)
+    if footer_eco_number or footer_eco_date:
+        revisions = front_matter.get("revisions") or []
+        if not revisions:
+            warnings.append(
+                f"header/footer shows ECO {footer_eco_number!r} dated "
+                f"{footer_eco_date!r} but no revision-history table was "
+                "found to compare against"
+            )
+        else:
+            latest = revisions[-1]
+            mismatches = []
+            if footer_eco_number and footer_eco_number != latest.get("eco_number"):
+                mismatches.append(
+                    f"ECO number: header/footer says {footer_eco_number!r}, "
+                    f"revision table says {latest.get('eco_number')!r}"
+                )
+            if footer_eco_date and footer_eco_date != latest.get("eco_date"):
+                mismatches.append(
+                    f"ECO date: header/footer says {footer_eco_date!r}, "
+                    f"revision table says {latest.get('eco_date')!r}"
+                )
+            if mismatches:
+                warnings.append(
+                    "header/footer vs. revision table disagreement - " + "; ".join(mismatches)
+                )
 
     slug = slugify(docx_path.stem)
     md_path = output_dir / f"{slug}.md"

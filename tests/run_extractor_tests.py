@@ -12,6 +12,8 @@ from pathlib import Path
 
 import yaml
 from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
+from docx.oxml.ns import qn
 from docx.shared import Inches
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -108,6 +110,20 @@ def test_is_suspicious_heading_text():
         "long sentence ending in a period is flagged as a suspicious heading",
     )
     check(not ex.is_suspicious_heading_text("Bonding"), "short title-case heading is not flagged")
+
+
+def test_titlecase_heading():
+    import extract_docx as ex
+    check(ex.titlecase_heading("RESPONSIBILITIES") == "Responsibilities", "all-caps heading title-cased")
+    check(
+        ex.titlecase_heading("carrier board assembly PROCEDURE") == "Carrier Board Assembly Procedure",
+        "mixed-case heading title-cased",
+    )
+    check(
+        ex.titlecase_heading("EQUIPMENT and SUPPLIES") == "Equipment And Supplies",
+        "every word's first letter is capitalized, including short words",
+    )
+    check(ex.titlecase_heading("PN 820-00006") == "Pn 820-00006", "digits/hyphens left untouched")
 
 
 def _add_table(doc, rows):
@@ -214,6 +230,34 @@ def test_extract_header_footer_metadata():
     fields = ex.extract_header_footer_metadata(doc)
     check(fields.get("doc_number") == "WI-00077", f"doc_number parsed from header/footer, got {fields.get('doc_number')!r}")
     check(fields.get("current_revision") == "00", f"current_revision parsed, got {fields.get('current_revision')!r}")
+    check(
+        fields.get("title") == "Nav 3, Detector Head Assembly",
+        f"title parsed from combined label+value header cell, got {fields.get('title')!r}",
+    )
+    check(fields.get("footer_eco_number") == "ECO-000046", f"footer_eco_number parsed, got {fields.get('footer_eco_number')!r}")
+    check(fields.get("footer_eco_date") == "03/4/2025", f"footer_eco_date parsed, got {fields.get('footer_eco_date')!r}")
+
+
+def test_extract_header_footer_metadata_split_cells():
+    """Real Dilon documents (e.g. WI-00077) split each header row's label
+    and value into separate table cells rather than combining them with a
+    newline in one cell."""
+    import extract_docx as ex
+    doc = Document()
+    section = doc.sections[0]
+    header_table = section.header.add_table(rows=2, cols=4, width=Inches(6))
+    header_table.rows[0].cells[1].text = "WI:"
+    header_table.rows[0].cells[2].text = "Nav 3, Detector Head Assembly\n PN 820-00006"
+    header_table.rows[0].cells[3].text = "Rev 00"
+    header_table.rows[1].cells[1].text = "Number:"
+    header_table.rows[1].cells[2].text = "WI-00077"
+
+    fields = ex.extract_header_footer_metadata(doc)
+    check(
+        fields.get("title") == "Nav 3, Detector Head Assembly PN 820-00006",
+        f"title parsed across split label/value cells, got {fields.get('title')!r}",
+    )
+    check(fields.get("doc_number") == "WI-00077", f"doc_number still parsed when split across cells, got {fields.get('doc_number')!r}")
 
 
 def test_strip_figure_prefix():
@@ -227,6 +271,181 @@ def test_strip_figure_prefix():
         "dash-style figure prefix with a decimal number stripped",
     )
     check(ex.strip_figure_prefix("Just a caption") == "Just a caption", "text with no prefix is unchanged")
+
+
+def _add_direct_numpr(paragraph, ilvl=0):
+    """Attach direct (non-style-based) w:numPr list formatting to a
+    paragraph, mirroring real Dilon documents where some list items are
+    left 'Normal'-styled with manual list formatting instead of the 'List
+    Paragraph' style."""
+    pPr = paragraph._p.get_or_add_pPr()
+    numPr = pPr.makeelement(qn('w:numPr'), {})
+    ilvl_el = numPr.makeelement(qn('w:ilvl'), {})
+    ilvl_el.set(qn('w:val'), str(ilvl))
+    numId = numPr.makeelement(qn('w:numId'), {})
+    numId.set(qn('w:val'), '1')
+    numPr.append(ilvl_el)
+    numPr.append(numId)
+    pPr.append(numPr)
+
+
+def test_paragraph_is_list_item_direct_numpr():
+    import extract_docx as ex
+    doc = Document()
+    p1 = doc.add_paragraph("Styled as List Paragraph")
+    p1.style = doc.styles["List Paragraph"]
+    p2 = doc.add_paragraph("Normal style but has direct numPr")
+    _add_direct_numpr(p2)
+    p3 = doc.add_paragraph("Plain Normal paragraph")
+
+    check(ex.paragraph_is_list_item(p1) is True, "'List Paragraph'-styled paragraph detected as a list item")
+    check(ex.paragraph_is_list_item(p2) is True, "Normal-styled paragraph with direct numPr formatting detected as a list item")
+    check(ex.paragraph_is_list_item(p3) is False, "plain Normal paragraph is not a list item")
+
+
+def test_paragraph_list_ilvl():
+    import extract_docx as ex
+    doc = Document()
+    p0 = doc.add_paragraph("Top-level item")
+    p0.style = doc.styles["List Paragraph"]
+    _add_direct_numpr(p0, ilvl=0)
+    p1 = doc.add_paragraph("Nested item")
+    p1.style = doc.styles["List Paragraph"]
+    _add_direct_numpr(p1, ilvl=1)
+    p2 = doc.add_paragraph("No list formatting at all")
+
+    check(ex.paragraph_list_ilvl(p0) == 0, "top-level list item has ilvl 0")
+    check(ex.paragraph_list_ilvl(p1) == 1, "nested list item has ilvl 1")
+    check(ex.paragraph_list_ilvl(p2) == 0, "non-list paragraph defaults to ilvl 0")
+
+
+def test_build_markdown_body_nested_list_indentation():
+    import extract_docx as ex
+    doc = Document()
+    doc.add_paragraph("Mixing Epoxy", style="Heading 2")
+    top = doc.add_paragraph("The epoxy is purchased in a pre-measured packet.")
+    top.style = doc.styles["List Paragraph"]
+    _add_direct_numpr(top, ilvl=0)
+    nested = doc.add_paragraph("Read the outer package to confirm the expiration date.")
+    nested.style = doc.styles["List Paragraph"]
+    _add_direct_numpr(nested, ilvl=1)
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check("- The epoxy is purchased in a pre-measured packet." in body, "top-level (ilvl 0) list item rendered with no indent")
+    check(
+        "  - Read the outer package to confirm the expiration date." in body,
+        "nested (ilvl 1) list item rendered with a 2-space indent",
+    )
+
+
+def test_is_toc_paragraph():
+    import extract_docx as ex
+    check(ex.is_toc_paragraph("toc 1", "1.\tIntroduction\t3"), "'toc 1'-styled paragraph is a TOC entry")
+    check(ex.is_toc_paragraph("toc 2", "1.1\tScope\t3"), "'toc 2'-styled paragraph is a TOC entry")
+    check(ex.is_toc_paragraph("Normal", "TABLE OF CONTENTS"), "literal 'TABLE OF CONTENTS' text is a TOC heading")
+    check(not ex.is_toc_paragraph("Normal", "Regular body text."), "ordinary body text is not a TOC paragraph")
+    check(not ex.is_toc_paragraph("Heading 1", "Introduction"), "a real heading is not a TOC paragraph")
+
+
+def test_build_markdown_body_skips_toc_and_converts_direct_numpr_list():
+    import extract_docx as ex
+    doc = Document()
+    doc.styles.add_style("toc 1", WD_STYLE_TYPE.PARAGRAPH)
+    doc.add_paragraph("TABLE OF CONTENTS", style="Normal")
+    doc.add_paragraph("1.\tIntroduction\t3", style="toc 1")
+    doc.add_paragraph("Introduction", style="Heading 1")
+    p = doc.add_paragraph("Providing support as necessary.", style="Normal")
+    _add_direct_numpr(p)
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check("TABLE OF CONTENTS" not in body, "literal TOC heading text excluded from body")
+    check("Introduction\t3" not in body, "toc-styled entry paragraph excluded from body")
+    check("## Introduction" in body, "real heading still present after TOC removal")
+    check("- Providing support as necessary." in body, "Normal-styled paragraph with direct numPr rendered as a markdown bullet")
+
+
+def test_extract_flags_footer_revision_eco_mismatch():
+    import extract_docx as ex
+    doc = Document()
+    section = doc.sections[0]
+    header_table = section.header.add_table(rows=2, cols=4, width=Inches(6))
+    header_table.rows[0].cells[1].text = "WI:\nMismatch Fixture"
+    header_table.rows[0].cells[2].text = "Rev 00"
+    header_table.rows[1].cells[1].text = "Number:\nWI-88888"
+    section.footer.paragraphs[0].text = "WI-88888 Rev 00\tECO-000123\tRevision Date: 5/5/2025"
+
+    _add_table(doc, [
+        ["REVISION HISTORY", "", "", ""],
+        ["REV #", "DESCRIPTION OF CHANGE", "ECO #", "DATE"],
+        ["00", "Initial release", "ECO-000999", "5 May 2025"],
+    ])
+
+    fixture_path = TEST_OUTPUT_DIR / "footer-mismatch-fixture.docx"
+    output_dir = TEST_OUTPUT_DIR / "footer-mismatch-extracted"
+    doc.save(str(fixture_path))
+
+    result = ex.extract(fixture_path, output_dir)
+    content = result["markdown_path"].read_text(encoding="utf-8")
+    front_matter = yaml.safe_load(content.split("---\n")[1])
+
+    check("footer_eco_number" not in front_matter, "footer_eco_number not leaked into final front matter")
+    check("footer_eco_date" not in front_matter, "footer_eco_date not leaked into final front matter")
+    check(
+        any("disagreement" in w.lower() for w in result["warnings"]),
+        "ECO mismatch between footer and revision table produces a disagreement warning",
+    )
+
+
+def test_extract_no_warning_when_footer_matches_revision():
+    import extract_docx as ex
+    doc = Document()
+    section = doc.sections[0]
+    header_table = section.header.add_table(rows=2, cols=4, width=Inches(6))
+    header_table.rows[0].cells[1].text = "WI:\nMatch Fixture"
+    header_table.rows[0].cells[2].text = "Rev 00"
+    header_table.rows[1].cells[1].text = "Number:\nWI-77777"
+    section.footer.paragraphs[0].text = "WI-77777 Rev 00\tECO-000555\tRevision Date: 6/6/2025"
+
+    _add_table(doc, [
+        ["REVISION HISTORY", "", "", ""],
+        ["REV #", "DESCRIPTION OF CHANGE", "ECO #", "DATE"],
+        ["00", "Initial release", "ECO-000555", "6/6/2025"],
+    ])
+
+    fixture_path = TEST_OUTPUT_DIR / "footer-match-fixture.docx"
+    output_dir = TEST_OUTPUT_DIR / "footer-match-extracted"
+    doc.save(str(fixture_path))
+
+    result = ex.extract(fixture_path, output_dir)
+    check(
+        not any("disagreement" in w.lower() for w in result["warnings"]),
+        "matching footer/revision-table ECO data produces no disagreement warning",
+    )
+
+
+def test_build_markdown_body_suspicious_heading_becomes_nested_list_item():
+    import extract_docx as ex
+    doc = Document()
+    doc.add_paragraph("Preparation", style="Heading 1")
+    doc.add_paragraph("Simple dirt can be blown away.", style="List Paragraph")
+    doc.add_paragraph("Strong pressure on the Photomultiplier should be avoided.", style="Heading 4")
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check("##### Strong pressure" not in body, "suspicious heading-styled paragraph not rendered as a markdown heading")
+    check(
+        "  - Strong pressure on the Photomultiplier should be avoided." in body,
+        "suspicious heading-styled paragraph rendered as a nested list item instead",
+    )
+    check(any("rendered as a nested list item" in w for w in warnings), "conversion from heading to list item is flagged for review")
 
 
 def test_slugify_dedup():
@@ -397,6 +616,7 @@ def main():
     test_compute_heading_shift_no_headings_defaults_to_two()
     test_markdown_heading_prefix()
     test_is_suspicious_heading_text()
+    test_titlecase_heading()
     test_classify_table_signature()
     test_classify_table_revision()
     test_classify_table_content()
@@ -404,7 +624,16 @@ def main():
     test_extract_signature_fields_mismatched_labels_warns()
     test_extract_revisions()
     test_extract_header_footer_metadata()
+    test_extract_header_footer_metadata_split_cells()
     test_strip_figure_prefix()
+    test_paragraph_is_list_item_direct_numpr()
+    test_paragraph_list_ilvl()
+    test_build_markdown_body_nested_list_indentation()
+    test_is_toc_paragraph()
+    test_build_markdown_body_skips_toc_and_converts_direct_numpr_list()
+    test_build_markdown_body_suspicious_heading_becomes_nested_list_item()
+    test_extract_flags_footer_revision_eco_mismatch()
+    test_extract_no_warning_when_footer_matches_revision()
     test_slugify_dedup()
     test_extract_full_fixture()
     test_table_to_markdown_pipe()

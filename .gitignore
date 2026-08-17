@@ -20,6 +20,7 @@ Thumbs.db
 ~$*
 tests/test-output/
 tests/extractor-test-output/
+tests/manual-fixtures/
 
 # Python
 __pycache__/
