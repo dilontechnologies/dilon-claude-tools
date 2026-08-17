@@ -8,6 +8,8 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 WORD_HEADING_RE = re.compile(r'^Heading (\d)$')
 SUSPICIOUS_WORD_COUNT_THRESHOLD = 12
 
@@ -231,3 +233,198 @@ def save_image(doc, rid, images_dir, index):
     filename = f"image{index:02d}.{ext}"
     (Path(images_dir) / filename).write_bytes(part.blob)
     return filename
+
+
+def iter_block_items(doc):
+    """Yield each top-level child of the document body as a
+    docx.text.paragraph.Paragraph or docx.table.Table, in document order -
+    doc.paragraphs/doc.tables lose that relative order."""
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+    for child in doc.element.body.iterchildren():
+        if child.tag == qn('w:p'):
+            yield Paragraph(child, doc)
+        elif child.tag == qn('w:tbl'):
+            yield Table(child, doc)
+
+
+def cell_has_multiple_paragraphs(cell):
+    return len(cell.paragraphs) > 1 and any(p.text.strip() for p in cell.paragraphs[1:])
+
+
+def table_to_grid_markdown(table):
+    """Renders a table with any multi-paragraph cell as a Pandoc grid
+    table (MARKDOWN_STYLING_GUIDE.md SS14). Each cell's paragraphs are
+    collapsed to one line (space-joined) - faithful multi-line box
+    rendering is out of scope for a mechanical draft; a human reviewing
+    the extracted draft restores paragraph breaks where they matter."""
+    rows = [[cell.text.strip().replace('\n', ' ') for cell in row.cells] for row in table.rows]
+    widths = [max(len(rows[r][c]) for r in range(len(rows))) for c in range(len(rows[0]))]
+
+    def border(char):
+        return "+" + "+".join(char * (w + 2) for w in widths) + "+"
+
+    def row_line(row):
+        return "|" + "|".join(f" {cell.ljust(w)} " for cell, w in zip(row, widths)) + "|"
+
+    lines = [border("-"), row_line(rows[0]), border("=")]
+    for row in rows[1:]:
+        lines.append(row_line(row))
+        lines.append(border("-"))
+    return "\n".join(lines)
+
+
+def table_to_markdown(table):
+    """Renders a 'content'-classified table as a pipe table, or a grid
+    table if any cell has multiple paragraphs of text."""
+    if any(cell_has_multiple_paragraphs(cell) for row in table.rows for cell in row.cells):
+        return table_to_grid_markdown(table)
+
+    rows = [[cell.text.strip().replace('\n', ' ') for cell in row.cells] for row in table.rows]
+    lines = ["| " + " | ".join(rows[0]) + " |", "|" + "|".join(["---"] * len(rows[0])) + "|"]
+    for row in rows[1:]:
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
+
+
+def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
+    """Walks `blocks` (from iter_block_items) in order, appending markdown
+    lines and mutating `front_matter` in place with any signature/revision
+    table data encountered. Returns (body_text, warnings)."""
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    warnings = []
+    lines = []
+    in_list = False
+    existing_slugs = set()
+    image_index = 1
+
+    def flush_list():
+        nonlocal in_list
+        if in_list:
+            lines.append("")
+            in_list = False
+
+    for i, block in enumerate(blocks):
+        if isinstance(block, Table):
+            flush_list()
+            kind = classify_table(block)
+            if kind == "signature":
+                fields, sig_warnings = extract_signature_fields(block)
+                front_matter.update(fields)
+                warnings.extend(sig_warnings)
+            elif kind == "revision":
+                front_matter["revisions"] = extract_revisions(block)
+            else:
+                lines.append(table_to_markdown(block))
+                lines.append("")
+            continue
+
+        # block is a Paragraph
+        style_name = block.style.name if block.style else None
+        text = block.text.strip()
+
+        rids = paragraph_image_rids(block)
+        if rids:
+            flush_list()
+            caption_text = None
+            if i + 1 < len(blocks) and isinstance(blocks[i + 1], Paragraph):
+                next_style = blocks[i + 1].style.name if blocks[i + 1].style else None
+                if next_style == "Caption":
+                    caption_text = strip_figure_prefix(blocks[i + 1].text.strip())
+            for rid in rids:
+                filename = save_image(doc, rid, images_dir, image_index)
+                image_index += 1
+                if caption_text:
+                    slug = slugify(caption_text, existing_slugs)
+                    lines.append(f"![{caption_text}](images/{filename}){{#fig:{slug}}}")
+                else:
+                    lines.append(f"![](images/{filename})")
+            lines.append("")
+            continue
+
+        if style_name == "Caption":
+            prev_had_image = (
+                i > 0
+                and isinstance(blocks[i - 1], Paragraph)
+                and paragraph_image_rids(blocks[i - 1])
+            )
+            if not prev_had_image:
+                flush_list()
+                warnings.append(f"orphan Caption paragraph with no preceding image: {text!r}")
+                lines.append(text)
+                lines.append("")
+            continue
+
+        if not text:
+            continue
+
+        level = word_heading_level(style_name)
+        if level is not None:
+            flush_list()
+            if is_suspicious_heading_text(text):
+                warnings.append(f"heading-styled paragraph reads like body text: {text!r}")
+            lines.append(f"{markdown_heading_prefix(level, shift)} {text}")
+            lines.append("")
+            continue
+
+        if style_name == "List Paragraph":
+            if not in_list:
+                lines.append("")
+                in_list = True
+            lines.append(f"- {text}")
+            continue
+
+        flush_list()
+        lines.append(text)
+        lines.append("")
+
+    flush_list()
+    return "\n".join(lines).strip() + "\n", warnings
+
+
+def extract(docx_path, output_dir):
+    """Extract docx_path into output_dir/<slug>.md plus output_dir/images/.
+    Returns {'markdown_path': Path, 'images_dir': Path, 'warnings': list[str]}."""
+    from docx import Document
+
+    docx_path = Path(docx_path)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    images_dir = output_dir / "images"
+    images_dir.mkdir(exist_ok=True)
+
+    doc = Document(docx_path)
+
+    front_matter = {
+        "title": docx_path.stem,
+        "author": "",
+        "department": "",
+        "doc_number": "",
+        "current_revision": "00",
+        "regulatory_rep": "",
+        "quality_rep": "",
+        "department_head": "",
+        "revisions": [],
+    }
+    front_matter.update(extract_header_footer_metadata(doc))
+
+    shift = compute_heading_shift(doc)
+    blocks = list(iter_block_items(doc))
+    body_text, warnings = build_markdown_body(doc, blocks, shift, images_dir, front_matter)
+
+    slug = slugify(docx_path.stem)
+    md_path = output_dir / f"{slug}.md"
+
+    yaml_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=True)
+    parts = [f"---\n{yaml_text}---\n\n"]
+    if warnings:
+        parts.append("\n".join(f"<!-- EXTRACTOR: {w} -->" for w in warnings))
+        parts.append("\n\n")
+    parts.append(body_text)
+
+    md_path.write_text("".join(parts), encoding="utf-8")
+
+    return {"markdown_path": md_path, "images_dir": images_dir, "warnings": warnings}

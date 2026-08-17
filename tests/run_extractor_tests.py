@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
 from docx import Document
 from docx.shared import Inches
 
@@ -236,6 +237,101 @@ def test_slugify_dedup():
     check(ex.slugify("Crystal Ring", seen) == "crystal-ring-3", "third collision gets a -3 suffix")
 
 
+def _build_fixture_docx(path):
+    """Builds a small synthetic .docx exercising every extraction path at
+    once: header/footer metadata, a signature table with one mismatched
+    role label, a revision table, two heading levels, an inline image with
+    an adjacent Caption paragraph, a List Paragraph run, and a plain
+    content table. Mirrors WI-00077's structure at a scale small enough to
+    hand-verify in a test."""
+    doc = Document()
+    section = doc.sections[0]
+    header_table = section.header.add_table(rows=2, cols=3, width=Inches(6))
+    header_table.rows[0].cells[1].text = "WI:\nFixture Document"
+    header_table.rows[0].cells[2].text = "Rev 00"
+    header_table.rows[1].cells[1].text = "Number:\nWI-99999"
+    section.footer.paragraphs[0].text = "WI-99999 Rev 00\tECO-000099\tRevision Date: 1/1/2026"
+
+    doc.add_paragraph("Preparation", style="Heading 1")
+    doc.add_paragraph("Clean the parts before assembly.", style="Normal")
+    p1 = doc.add_paragraph("Wear clean gloves.", style="List Paragraph")
+    p2 = doc.add_paragraph("Blow away loose dust.", style="List Paragraph")
+
+    image_path = Path(__file__).parent / "extractor-test-output" / "_fixture_image.png"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    # 1x1 transparent PNG, smallest valid image payload
+    image_path.write_bytes(bytes.fromhex(
+        "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753"
+        "de0000000c49444154789c63f8ffff3f0005fe02fe0def46b8000000004945"
+        "4e44ae426082"
+    ))
+    doc.add_picture(str(image_path))
+    doc.add_paragraph("Figure 1: Crystal Ends (Polished on Left)", style="Caption")
+
+    doc.add_paragraph("Bonding", style="Heading 1")
+    doc.add_paragraph("Apply epoxy to the crystal.", style="Normal")
+
+    _add_table(doc, [["Setting", "Value"], ["Pressure", "75 psi"]])
+
+    _add_table(doc, [
+        ["Group", "Preparer", "Signature"],
+        ["Engineering", "P. Gray", "Electronic"],
+        ["Department", "Name", "Signature"],
+        ["R&D / Eng", "K. Lint", "Electronic"],
+        ["Manufacturing", "J. Jones", "Electronic"],
+        ["Quality", "K. Mack", "Electronic"],
+    ])
+
+    _add_table(doc, [
+        ["REVISION HISTORY", "", "", ""],
+        ["REV #", "DESCRIPTION OF CHANGE", "ECO #", "DATE"],
+        ["00", "Initial release", "ECO-000099", "1 Jan 2026"],
+    ])
+
+    doc.save(str(path))
+
+
+def test_extract_full_fixture():
+    import extract_docx as ex
+    fixture_path = TEST_OUTPUT_DIR / "fixture.docx"
+    output_dir = TEST_OUTPUT_DIR / "fixture-extracted"
+    _build_fixture_docx(fixture_path)
+
+    result = ex.extract(fixture_path, output_dir)
+
+    check(result["markdown_path"].exists(), "extract() writes a markdown file")
+    content = result["markdown_path"].read_text(encoding="utf-8")
+
+    front_matter_text = content.split("---\n")[1]
+    front_matter = yaml.safe_load(front_matter_text)
+
+    check(front_matter["doc_number"] == "WI-99999", f"doc_number in front matter, got {front_matter.get('doc_number')!r}")
+    check(front_matter["author"] == "P. Gray", f"author in front matter, got {front_matter.get('author')!r}")
+    check(front_matter["quality_rep"] == "J. Jones", f"quality_rep assigned by position, got {front_matter.get('quality_rep')!r}")
+    check(front_matter["revisions"][0]["eco_number"] == "ECO-000099", "revisions list populated from body table")
+
+    check("Group | Preparer | Signature" not in content, "signature table text excluded from body")
+    check("REVISION HISTORY" not in content, "revision table text excluded from body")
+    check("## Preparation" in content, "Heading 1 shifted to markdown H2")
+    check("## Bonding" in content, "second Heading 1 also shifted to markdown H2")
+    check("- Wear clean gloves." in content, "List Paragraph converted to a markdown bullet")
+    check("![Crystal Ends (Polished on Left)]" in content, "figure prefix stripped, remaining caption used as alt text")
+    check("{#fig:crystal-ends-polished-on-left}" in content, "figure gets a slugified id")
+    check("<!-- EXTRACTOR:" in content, "at least one review comment present (mismatched signature-role labels)")
+
+    images = list(result["images_dir"].glob("*"))
+    check(len(images) == 1, f"one image extracted, got {len(images)}")
+
+
+def test_table_to_markdown_pipe():
+    import extract_docx as ex
+    doc = Document()
+    table = _add_table(doc, [["A", "B"], ["1", "2"]])
+    md = ex.table_to_markdown(table)
+    check(md.splitlines()[0] == "| A | B |", "pipe table header row rendered")
+    check("---" in md.splitlines()[1], "pipe table separator row rendered")
+
+
 def main():
     if TEST_OUTPUT_DIR.exists():
         import shutil
@@ -257,6 +353,8 @@ def main():
     test_extract_header_footer_metadata()
     test_strip_figure_prefix()
     test_slugify_dedup()
+    test_extract_full_fixture()
+    test_table_to_markdown_pipe()
 
     print(f"\n{passed} passed, {failed} failed (dilon-document-extractor)")
     if failed == 0:
