@@ -332,6 +332,31 @@ def test_table_to_markdown_pipe():
     check("---" in md.splitlines()[1], "pipe table separator row rendered")
 
 
+def _build_fixture_pdf(path):
+    import fitz
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Fixture PDF Document")
+    page.insert_text((72, 100), "This is a body paragraph in the fixture PDF.")
+    doc.save(str(path))
+    doc.close()
+
+
+def test_extract_pdf_banner_and_text():
+    import extract_pdf as expdf
+    fixture_path = TEST_OUTPUT_DIR / "fixture.pdf"
+    output_dir = TEST_OUTPUT_DIR / "fixture-pdf-extracted"
+    _build_fixture_pdf(fixture_path)
+
+    result = expdf.extract(fixture_path, output_dir)
+
+    check(result["markdown_path"].exists(), "extract_pdf.extract() writes a markdown file")
+    content = result["markdown_path"].read_text(encoding="utf-8")
+    check("PDF source" in content, "PDF banner comment present at the top of the draft")
+    check("Fixture PDF Document" in content, "extracted text includes page content")
+    check(any("PDF source" in w for w in result["warnings"]), "the banner warning is also reported in the returned warnings list")
+
+
 def main():
     if TEST_OUTPUT_DIR.exists():
         import shutil
@@ -355,6 +380,7 @@ def main():
     test_slugify_dedup()
     test_extract_full_fixture()
     test_table_to_markdown_pipe()
+    test_extract_pdf_banner_and_text()
 
     print(f"\n{passed} passed, {failed} failed (dilon-document-extractor)")
     if failed == 0:
