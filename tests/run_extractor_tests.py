@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from docx import Document
+from docx.shared import Inches
 
 REPO_ROOT = Path(__file__).parent.parent
 EXTRACTOR_DIR = REPO_ROOT / "skills" / "dilon-document-extractor"
@@ -199,6 +200,42 @@ def test_extract_revisions():
     check(revisions[0]["eco_number"] == "ECO-000046", "eco_number extracted")
 
 
+def test_extract_header_footer_metadata():
+    import extract_docx as ex
+    doc = Document()
+    section = doc.sections[0]
+    header_table = section.header.add_table(rows=2, cols=4, width=Inches(6))
+    header_table.rows[0].cells[1].text = "WI:\nNav 3, Detector Head Assembly"
+    header_table.rows[0].cells[2].text = "Rev 00"
+    header_table.rows[1].cells[1].text = "Number:\nWI-00077"
+    section.footer.paragraphs[0].text = "WI-00077 Rev 00\tECO-000046\tRevision Date: 03/4/2025"
+
+    fields = ex.extract_header_footer_metadata(doc)
+    check(fields.get("doc_number") == "WI-00077", f"doc_number parsed from header/footer, got {fields.get('doc_number')!r}")
+    check(fields.get("current_revision") == "00", f"current_revision parsed, got {fields.get('current_revision')!r}")
+
+
+def test_strip_figure_prefix():
+    import extract_docx as ex
+    check(
+        ex.strip_figure_prefix("Figure 1: Crystal Ends (Polished on Left)") == "Crystal Ends (Polished on Left)",
+        "colon-style figure prefix stripped",
+    )
+    check(
+        ex.strip_figure_prefix("Figure 12.3 - Compressor Gauges") == "Compressor Gauges",
+        "dash-style figure prefix with a decimal number stripped",
+    )
+    check(ex.strip_figure_prefix("Just a caption") == "Just a caption", "text with no prefix is unchanged")
+
+
+def test_slugify_dedup():
+    import extract_docx as ex
+    seen = set()
+    check(ex.slugify("Crystal Ring", seen) == "crystal-ring", "basic slugify")
+    check(ex.slugify("Crystal Ring", seen) == "crystal-ring-2", "second collision gets a -2 suffix")
+    check(ex.slugify("Crystal Ring", seen) == "crystal-ring-3", "third collision gets a -3 suffix")
+
+
 def main():
     if TEST_OUTPUT_DIR.exists():
         import shutil
@@ -217,6 +254,9 @@ def main():
     test_extract_signature_fields_clean_labels()
     test_extract_signature_fields_mismatched_labels_warns()
     test_extract_revisions()
+    test_extract_header_footer_metadata()
+    test_strip_figure_prefix()
+    test_slugify_dedup()
 
     print(f"\n{passed} passed, {failed} failed (dilon-document-extractor)")
     if failed == 0:

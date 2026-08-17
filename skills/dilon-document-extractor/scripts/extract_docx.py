@@ -150,3 +150,84 @@ def extract_revisions(table):
             "eco_date": row[3].strip(),
         })
     return revisions
+
+
+DOC_NUMBER_RE = re.compile(r'Number:\s*([A-Za-z]{2,}-\d+)')
+REV_RE = re.compile(r'Rev\s+(\d+)')
+FOOTER_LINE_RE = re.compile(
+    r'([A-Za-z]{2,}-\d+)\s+Rev\s+(\d+)\s+(ECO-\d+)\s+Revision Date:\s*([\d/]+)'
+)
+FIGURE_PREFIX_RE = re.compile(r'^Figure\s+[\d.]+\s*[:\-]\s*', re.IGNORECASE)
+
+
+def extract_header_footer_metadata(doc):
+    """Returns a dict that may include 'title', 'doc_number',
+    'current_revision', 'footer_eco_number', 'footer_eco_date', parsed from
+    the document's running header table and footer text - the most
+    structured, reliable source for these fields (see the spec's empirical
+    findings)."""
+    fields = {}
+    section = doc.sections[0]
+
+    for table in section.header.tables:
+        for row in table.rows:
+            joined = " ".join(cell.text.strip() for cell in row.cells)
+            m = DOC_NUMBER_RE.search(joined)
+            if m:
+                fields["doc_number"] = m.group(1)
+            m = REV_RE.search(joined)
+            if m:
+                fields["current_revision"] = m.group(1)
+
+    footer_text = "\n".join(p.text for p in section.footer.paragraphs if p.text.strip())
+    m = FOOTER_LINE_RE.search(footer_text)
+    if m:
+        fields.setdefault("doc_number", m.group(1))
+        fields.setdefault("current_revision", m.group(2))
+        fields["footer_eco_number"] = m.group(3)
+        fields["footer_eco_date"] = m.group(4)
+
+    return fields
+
+
+def strip_figure_prefix(text):
+    """Strip a leading 'Figure N:'/'Figure N.M -' prefix from caption text,
+    since the compiler generates that prefix itself from the image's alt
+    text (MARKDOWN_STYLING_GUIDE.md SS4.1)."""
+    return FIGURE_PREFIX_RE.sub('', text).strip()
+
+
+def slugify(text, existing=None):
+    """Lowercase, hyphenate text into a Pandoc-safe identifier fragment,
+    deduplicated against `existing` (a set this function mutates) with a
+    -2, -3, ... suffix on collision."""
+    slug = re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-') or "figure"
+    existing = existing if existing is not None else set()
+    candidate = slug
+    n = 2
+    while candidate in existing:
+        candidate = f"{slug}-{n}"
+        n += 1
+    existing.add(candidate)
+    return candidate
+
+
+def paragraph_image_rids(paragraph):
+    """Return the r:embed relationship IDs of any inline images in a
+    paragraph, in document order."""
+    from docx.oxml.ns import qn
+    return [
+        blip.get(qn('r:embed'))
+        for blip in paragraph._p.findall('.//' + qn('a:blip'))
+        if blip.get(qn('r:embed'))
+    ]
+
+
+def save_image(doc, rid, images_dir, index):
+    """Write the image identified by relationship id `rid` to
+    images_dir/imageNN.<ext>, returning the filename (not full path)."""
+    part = doc.part.related_parts[rid]
+    ext = part.content_type.split('/')[-1].replace('jpeg', 'jpg')
+    filename = f"image{index:02d}.{ext}"
+    (Path(images_dir) / filename).write_bytes(part.blob)
+    return filename
