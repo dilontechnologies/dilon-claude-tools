@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-Generate Document from Markdown using Jinja2 Word template in Dilon formatting.
+Generate Document from Markdown in Dilon formatting.
 
 This script:
-1. Reads a Word template with Jinja2 variables ({{variable}})
-2. Parses Markdown file with YAML front matter
-3. Converts Markdown body to Rich Text using python-docx
-4. Appends content to the template
-5. Generates final Word document
+1. Parses a Markdown file with YAML front matter
+2. Builds the signature page (header/footer/signature table), revision
+   table, and title page directly via python-docx from the front-matter
+   dict - no Jinja/docxtpl involved for any of these parts
+3. Converts the Markdown body to Rich Text via Pandoc, with body-level
+   Jinja2 {{field}} substitution against the same front-matter dict
+4. Composes all parts into the final Word document
 
 Usage:
     python generate_dilon_doc.py <input.md> <output.docx>
@@ -15,17 +17,16 @@ Usage:
 Example:
     python generate_dilon_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx
 
-The Pandoc-conversion and Word-styling helpers this script calls
-(apply_styles, apply_figure_captions, markdown_to_docx,
-extract_yaml_and_markdown, set_update_fields_on_open, compose_documents)
-live in lib/dilon_docx_common.py (repo root) - shared with
-dilon-document-form-compiler. See
+The Pandoc-conversion, Word-styling, and header/footer-building helpers
+this script calls (apply_styles, apply_figure_captions, markdown_to_docx,
+extract_yaml_and_markdown, set_update_fields_on_open, compose_documents,
+populate_header, populate_footer) live in lib/dilon_docx_common.py (repo
+root) - shared with dilon-document-form-compiler. See
 docs/superpowers/specs/2026-08-17-document-extraction-and-form-tooling-design.md.
 """
 
 import sys
 from pathlib import Path
-from docxtpl import DocxTemplate
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
@@ -48,6 +49,8 @@ from dilon_docx_common import (  # noqa: E402
     parse_column_widths,
     apply_table_column_widths,
     render_jinja,
+    populate_header,
+    populate_footer,
 )
 
 
@@ -73,11 +76,13 @@ def create_revision_table(revisions):
     table = temp_doc.add_table(rows=2 + len(revisions), cols=4)
     table.style = 'Table Grid'
 
-    # Set column widths (in inches): REV # narrow, DESCRIPTION wide, ECO # medium, DATE medium
-    table.columns[0].width = Inches(0.6)   # REV # - narrower
-    table.columns[1].width = Inches(3.5)   # DESCRIPTION - wider
-    table.columns[2].width = Inches(1.0)   # ECO # - medium
-    table.columns[3].width = Inches(1.0)   # DATE - medium
+    # Set column widths (in inches): REV # is never more than 2 characters
+    # so stays narrow; ECO # stays wide enough for "ECO-000000"; DATE
+    # trimmed; the rest goes to DESCRIPTION.
+    table.columns[0].width = Inches(0.5)   # REV # - max 2 characters
+    table.columns[1].width = Inches(3.9)   # DESCRIPTION - wider
+    table.columns[2].width = Inches(1.0)   # ECO # - fits "ECO-000000"
+    table.columns[3].width = Inches(0.7)   # DATE - narrower
 
     # Title row (row 0) - spans all columns
     title_cell = table.rows[0].cells[0]
@@ -175,9 +180,10 @@ def create_signature_table(metadata):
     table = temp_doc.add_table(rows=6, cols=3)
     table.style = 'Normal Table'
 
-    table.columns[0].width = Inches(1.5520833333333333)
-    table.columns[1].width = Inches(3.4375)
-    table.columns[2].width = Inches(1.6875)
+    # Group/Department and Signature narrowed to give Preparer/Name more room.
+    table.columns[0].width = Inches(1.1)
+    table.columns[1].width = Inches(4.5)
+    table.columns[2].width = Inches(1.0)
 
     def set_cell(row_idx, col_idx, text, bold=False, center=True, fill=None):
         cell = table.rows[row_idx].cells[col_idx]
@@ -218,6 +224,26 @@ def create_signature_table(metadata):
     set_cell(5, 1, metadata.get('department_head', ''), center=False)
     set_cell(5, 2, 'Electronic', center=True)
 
+    table.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Explicit grid borders (all edges + inside lines) - 'Normal Table'
+    # alone carries none. Matches the DilonTable_List/DilonTable_Chart
+    # custom styles' own border spec (single, sz=8 = 1pt, auto color) for
+    # visual consistency with every other table in a compiled document.
+    tbl_pr = table._element.tblPr
+    if tbl_pr is None:
+        tbl_pr = OxmlElement('w:tblPr')
+        table._element.insert(0, tbl_pr)
+    borders = OxmlElement('w:tblBorders')
+    for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+        edge_el = OxmlElement(f'w:{edge}')
+        edge_el.set(qn('w:val'), 'single')
+        edge_el.set(qn('w:sz'), '8')
+        edge_el.set(qn('w:space'), '0')
+        edge_el.set(qn('w:color'), 'auto')
+        borders.append(edge_el)
+    tbl_pr.append(borders)
+
     return table
 
 
@@ -251,35 +277,131 @@ def _insert_table_before_section_properties(document, table):
         body.append(separator)
 
 
-def generate_requirements_document(markdown_path, output_path, signature_template_path=None, content_template_path=None):
+def _add_runs(paragraph, spans):
+    """Append (text, bold, italic) tuples to `paragraph` as separate runs -
+    used for title-page boilerplate that bolds/italicizes specific words
+    mid-sentence."""
+    for text, bold, italic in spans:
+        run = paragraph.add_run(text)
+        run.font.bold = bold
+        run.font.italic = italic
+
+
+def build_title_page(document, metadata):
+    """
+    Build the title page (title, author table, master-document/
+    effectivity/approval boilerplate) directly via python-docx, in place
+    of a docxtpl-rendered TEMPLATE_Word_Content.docx. Only {{title}} and
+    {{author}} were ever dynamic in that template - everything else was
+    static boilerplate, now inlined here as plain Python.
+    """
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    title_para = document.add_paragraph(metadata.get('title', ''), style='Title')
+
+    table = document.add_table(rows=1, cols=2)
+    table.columns[0].width = Inches(1.7326388888888888)
+    table.columns[1].width = Inches(4.814583333333333)
+    label_cell, value_cell = table.rows[0].cells
+    label_run = label_cell.paragraphs[0].add_run('Author/Revised by:')
+    label_run.font.bold = True
+    value_cell.paragraphs[0].add_run(metadata.get('author', ''))
+
+    # Explicit grid borders - 'Normal Table' alone carries none, which
+    # made this table invisible (indistinguishable from plain side-by-side
+    # text). Same border spec as create_signature_table()'s fix.
+    tbl_pr = table._element.tblPr
+    if tbl_pr is None:
+        tbl_pr = OxmlElement('w:tblPr')
+        table._element.insert(0, tbl_pr)
+    borders = OxmlElement('w:tblBorders')
+    for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+        edge_el = OxmlElement(f'w:{edge}')
+        edge_el.set(qn('w:val'), 'single')
+        edge_el.set(qn('w:sz'), '8')
+        edge_el.set(qn('w:space'), '0')
+        edge_el.set(qn('w:color'), 'auto')
+        borders.append(edge_el)
+    tbl_pr.append(borders)
+
+    for _ in range(4):
+        document.add_paragraph()
+
+    document.add_paragraph('Master Document', style='Normal').alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    effectivity_heading = document.add_paragraph(style='Normal')
+    effectivity_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    effectivity_run = effectivity_heading.add_run('Effectivity and Location:')
+    effectivity_run.font.underline = True
+
+    effectivity_body = document.add_paragraph(style='Normal')
+    effectivity_body.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _add_runs(effectivity_body, [
+        ('This is an electronic document, the authoritative ', False, False),
+        ('Item', True, False),
+        (' ', False, True),
+        ('in the ', False, False),
+        ('Dilon Technologies', True, False),
+        (' Production Workspace in the ', False, False),
+        ('ARENA PLM system.', True, False),
+    ])
+
+    non_authoritative = document.add_paragraph(style='Normal')
+    non_authoritative.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _add_runs(non_authoritative, [
+        ('\nAll other copies of this document, either in electronic or physical media, shall be considered as ', False, False),
+        ('non-authoritative', True, False),
+        (' copies.', False, False),
+    ])
+
+    document.add_paragraph(style='Normal').alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    approval_heading = document.add_paragraph(style='Normal')
+    approval_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    approval_run = approval_heading.add_run('Approval, Release and Change History:')
+    approval_run.font.underline = True
+
+    approval_body = document.add_paragraph(style='Normal')
+    approval_body.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _add_runs(approval_body, [
+        ('Records of the approvals and release of this document version and its full revision history are available in the History ', False, False),
+        ('Subview', False, False),
+        (' of the Revisions View of the related ', False, False),
+        ('Item', True, False),
+        (' in the ', False, False),
+        ('Dilon Technologies Production Workspace', True, False),
+        (' in the ', False, False),
+        ('ARENA PLM system', True, False),
+    ])
+
+    for _ in range(3):
+        document.add_paragraph()
+
+    return title_para
+
+
+def generate_requirements_document(markdown_path, output_path, signature_template_path=None):
     """
     Generate final requirements Word document.
 
     Args:
         markdown_path: Path to Markdown file with YAML front matter
         output_path: Path to save final Word document
-        signature_template_path: Path to signature page template (Part A)
-        content_template_path: Path to title/content template (Part C)
+        signature_template_path: Path to the base template (Part A) -
+            header/footer/styles only; no Jinja fields, no docxtpl
+            involved anymore. See populate_header()/populate_footer() in
+            lib/dilon_docx_common.py.
     """
-    # Default template locations
-    script_dir = Path(__file__).parent
-
     if signature_template_path is None:
         signature_template_path = _REPO_ROOT / "templates" / "TEMPLATE_Word_Base.docx"
     else:
         signature_template_path = Path(signature_template_path)
 
-    if content_template_path is None:
-        content_template_path = _REPO_ROOT / "templates" / "TEMPLATE_Word_Content.docx"
-    else:
-        content_template_path = Path(content_template_path)
-
     if not signature_template_path.exists():
-        print(f"Error: Signature template not found: {signature_template_path}")
-        sys.exit(1)
-
-    if not content_template_path.exists():
-        print(f"Error: Content template not found: {content_template_path}")
+        print(f"Error: Base template not found: {signature_template_path}")
         sys.exit(1)
 
     if not Path(markdown_path).exists():
@@ -294,26 +416,20 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
 
     print(f"Metadata extracted: {list(metadata.keys())}")
 
-    # Step 1: Render Part A (Signature template)
-    print(f"Rendering signature page (Part A): {signature_template_path}")
-    doc_a = DocxTemplate(signature_template_path)
-    doc_a.render(metadata)
+    # Step 1: Build Part A (base template: header, footer, signature table)
+    print(f"Building signature page (Part A) from: {signature_template_path}")
+    doc_a = Document(signature_template_path)
+    populate_header(doc_a, metadata)
+    populate_footer(doc_a, metadata)
 
     # Build the signature-approval table programmatically (same pattern as
-    # Part B's revision table) and insert it into Part A itself, rather
-    # than relying on Jinja fields baked into the template - see
-    # create_signature_table() for why.
-    #
-    # Use doc_a.docx directly, NOT doc_a.get_docx(): get_docx() calls
-    # init_docx(reload=True), which - because is_rendered is already True
-    # at this point - discards the just-rendered header/footer/body and
-    # reparses a fresh, unrendered copy of the template file instead.
+    # Part B's revision table) and insert it into Part A itself.
     signature_table = create_signature_table(metadata)
-    _insert_table_before_section_properties(doc_a.docx, signature_table)
+    _insert_table_before_section_properties(doc_a, signature_table)
 
     temp_part_a = Path(output_path).parent / "_temp_part_a.docx"
     doc_a.save(temp_part_a)
-    print(f"Part A rendered")
+    print(f"Part A built")
 
     # Step 2: Generate Part B (Revision table)
     temp_part_b = Path(output_path).parent / "_temp_part_b.docx"
@@ -339,13 +455,13 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
         revision_doc.save(temp_part_b)
         print(f"No revisions found, created placeholder")
 
-    # Step 3: Render Part C (Content template - title page)
-    print(f"Rendering title page (Part C): {content_template_path}")
-    doc_c = DocxTemplate(content_template_path)
-    doc_c.render(metadata)
+    # Step 3: Build Part C (title page)
+    print("Building title page (Part C)...")
+    doc_c = Document()
+    build_title_page(doc_c, metadata)
     temp_part_c = Path(output_path).parent / "_temp_part_c.docx"
     doc_c.save(temp_part_c)
-    print(f"Part C rendered")
+    print(f"Part C built")
 
     # Step 4: Convert Markdown body to Word (Part D) using signature template as style reference
     print("Converting Markdown content to Word (Part D)...")
@@ -389,19 +505,18 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python generate_requirements_doc.py <input.md> <output.docx> [signature_template.docx] [content_template.docx]")
+        print("Usage: python generate_requirements_doc.py <input.md> <output.docx> [base_template.docx]")
         print("\nExample:")
         print("  python generate_requirements_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx")
-        print("  python generate_requirements_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx custom_sig.docx custom_content.docx")
+        print("  python generate_requirements_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx custom_base.docx")
         sys.exit(1)
 
     markdown_path = Path(sys.argv[1])
     output_path = Path(sys.argv[2])
     signature_template_path = Path(sys.argv[3]) if len(sys.argv) > 3 else None
-    content_template_path = Path(sys.argv[4]) if len(sys.argv) > 4 else None
 
     try:
-        generate_requirements_document(markdown_path, output_path, signature_template_path, content_template_path)
+        generate_requirements_document(markdown_path, output_path, signature_template_path)
     except Exception as e:
         print(f"\nError: {e}")
         import traceback

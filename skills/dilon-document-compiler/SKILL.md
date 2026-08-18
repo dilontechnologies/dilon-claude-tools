@@ -21,16 +21,15 @@ If it reports any `[FAIL]` line, stop and tell the user exactly which dependency
 
 ## Compiling
 
-Invoke the script with explicit template paths — always pass all four arguments, never rely on the script's own default template lookup:
+Invoke the script with an explicit base template path — never rely on the script's own default template lookup:
 
 ```
-python scripts/generate_dilon_doc.py <input.md> <output.docx> <signature_template> <content_template>
+python scripts/generate_dilon_doc.py <input.md> <output.docx> <base_template>
 ```
 
 - `<input.md>`: the markdown file to compile (must have YAML front matter — if it doesn't, point the user at the `dilon-document-writer` skill first).
 - `<output.docx>`: defaults to the same name as the input with a `.docx` extension if the user doesn't specify one.
-- `<signature_template>`: defaults to `templates/TEMPLATE_Word_Base.docx` at the repo root, unless the user supplies a custom one.
-- `<content_template>`: defaults to `templates/TEMPLATE_Word_Content.docx` at the repo root, unless the user supplies a custom one.
+- `<base_template>`: defaults to `templates/TEMPLATE_Word_Base.docx` at the repo root, unless the user supplies a custom one. Header/footer/styles only — the title page, signature-approval table, and revision table are all built programmatically by the script and inserted around the base template's header/footer.
 
 After the script exits, verify the output file now exists. Report the script's stdout/stderr to the user on failure; report the output path on success.
 

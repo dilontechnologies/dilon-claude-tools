@@ -178,6 +178,15 @@ def test_apply_form_fields_marker():
     check("@@@" not in result_doc.paragraphs[0].text, "no marker text remains")
 
 
+def test_no_shebang_in_form_compiler_scripts():
+    def has_shebang(path):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return bool(lines) and lines[0].startswith("#!")
+
+    offenders = [str(p) for p in SHEBANG_GUARDED_SCRIPTS if has_shebang(p)]
+    check(not offenders, f"no shebang lines in guarded form-compiler scripts (offenders: {offenders})")
+
+
 def test_check_deps_runs_and_reports():
     result = subprocess.run(
         [sys.executable, str(CHECK_DEPS_SCRIPT)],
@@ -201,6 +210,7 @@ def main():
     test_underscore_until_end_of_line_body_paragraph()
     test_underscore_until_end_of_line_in_table_cell()
     test_apply_form_fields_marker()
+    test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
 
     print(f"\n{passed} passed, {failed} failed (dilon-document-form-compiler)")

@@ -2,15 +2,16 @@
 
 **Claude Code plugin for Dilon Technologies document authoring tools**
 
-This repository is a [Claude Code plugin](https://code.claude.com/docs/en/plugins) that bundles three Skills for working with Dilon Technologies' regulatory-compliant technical documentation:
+This repository is a [Claude Code plugin](https://code.claude.com/docs/en/plugins) that bundles four Skills for working with Dilon Technologies' regulatory-compliant technical documentation:
 
 - **`dilon-document-writer`** - create a new Dilon document from the standard template, and apply Dilon markdown styling conventions while editing existing Dilon documents.
 - **`dilon-document-compiler`** - compile a Dilon-formatted markdown file into a regulatory-compliant Word document (signature page, revision history table, table of contents).
+- **`dilon-document-form-compiler`** - compile a Dilon form/traveler markdown file into a Word document with a running header/footer only (no title page, signature page, or table of contents).
 - **`dilon-document-extractor`** - bootstrap a Dilon markdown draft from an existing Word or PDF document.
 
 ## Prerequisites
 
-- **Python** (>= 3.8) and the following pip packages: `python-docx`, `python-docx-template`, `docxcompose`, `pyyaml>=6.0`, `pymupdf`
+- **Python** (>= 3.8) and the following pip packages: `python-docx`, `python-docx-template`, `docxcompose`, `pyyaml>=6.0`, `pymupdf`, `jinja2`
 - **Pandoc** (for Markdown to Word conversion), on PATH
 
 Run `install.ps1` (as Administrator) from the repo root to auto-install these via winget and pip:
@@ -80,8 +81,11 @@ dilon-claude-tools/
 │   ├── plugin.json              # plugin manifest
 │   └── marketplace.json         # self-hosted marketplace listing this plugin
 ├── templates/                    # shared Word reference templates
-│   ├── TEMPLATE_Word_Base.docx
-│   └── TEMPLATE_Word_Content.docx
+│   ├── TEMPLATE_Word_Base.docx  # header/footer + styles only, shared by both compiler skills
+│   └── assets/
+│       └── dilon_logo.png        # header logo
+├── lib/
+│   └── dilon_docx_common.py      # Pandoc-conversion/styling helpers shared by both compiler skills
 ├── skills/
 │   ├── dilon-document-writer/
 │   │   ├── SKILL.md
@@ -92,6 +96,12 @@ dilon-claude-tools/
 │   │   └── scripts/
 │   │       ├── generate_dilon_doc.py
 │   │       └── check_deps.py
+│   ├── dilon-document-form-compiler/
+│   │   ├── SKILL.md
+│   │   └── scripts/
+│   │       ├── generate_dilon_form.py
+│   │       ├── form_fields.py
+│   │       └── check_deps.py
 │   └── dilon-document-extractor/
 │       ├── SKILL.md
 │       └── scripts/
@@ -101,6 +111,7 @@ dilon-claude-tools/
 ├── install.ps1                   # dependency setup (Python, Pandoc, pip packages)
 ├── tests/
 │   ├── run_tests.py
+│   ├── run_form_tests.py
 │   ├── run_extractor_tests.py
 │   ├── validate-output.py
 │   ├── README.md

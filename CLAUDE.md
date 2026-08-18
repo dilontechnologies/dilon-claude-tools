@@ -2,7 +2,7 @@
 
 ## Plugin Overview
 
-This is a **self-hosted Claude Code plugin** for Windows environments, providing regulatory-compliant technical documentation workflows at Dilon Technologies. It bundles three Skills rather than exposing MCP tools/resources.
+This is a **self-hosted Claude Code plugin** for Windows environments, providing regulatory-compliant technical documentation workflows at Dilon Technologies. It bundles four Skills rather than exposing MCP tools/resources.
 
 **Plugin Details:**
 - Plugin name: `dilon-tools` (version 2.0.0), defined in `.claude-plugin/plugin.json`
@@ -30,18 +30,30 @@ This is a **self-hosted Claude Code plugin** for Windows environments, providing
 - Explicitly does not invoke Pandoc or the Python compiler - that's the `dilon-document-compiler` skill's job.
 
 ### Skill 2: `dilon-document-compiler`
-**Location:** `skills/dilon-document-compiler/` (`SKILL.md`, `scripts/generate_dilon_doc.py`, `scripts/check_deps.py`); reference templates (`templates/TEMPLATE_Word_Base.docx`, `templates/TEMPLATE_Word_Content.docx`) live at the repo root, shared with `dilon-document-extractor`.
+**Location:** `skills/dilon-document-compiler/` (`SKILL.md`, `scripts/generate_dilon_doc.py`, `scripts/check_deps.py`); the reference template (`templates/TEMPLATE_Word_Base.docx`) lives at the repo root, shared with `dilon-document-form-compiler` and `dilon-document-extractor`.
 
-**Dependencies:** Python (>= 3.8) with `python-docx`, `python-docx-template`, `docxcompose`, `pyyaml>=6.0`; Pandoc on PATH. Installed via `install.ps1`.
+**Dependencies:** Python (>= 3.8) with `python-docx`, `docxcompose`, `pyyaml>=6.0`, `jinja2`; Pandoc on PATH. Installed via `install.ps1`.
 
 **Capabilities (per `SKILL.md`):**
 - Runs `scripts/check_deps.py` first; if it reports any `[FAIL]`, stops and tells the user which dependency is missing (pointing at `install.ps1`) rather than attempting a partial compile.
-- Invokes `scripts/generate_dilon_doc.py <input.md> <output.docx> <signature_template> <content_template>` with all four arguments always explicit (never relies on the script's own default template lookup).
-- Produces a regulatory-compliant Word document: signature page + revision history table + title page/content + table of contents, from a markdown file with Dilon YAML front matter.
+- Invokes `scripts/generate_dilon_doc.py <input.md> <output.docx> <base_template>` with the base template argument always explicit (never relies on the script's own default template lookup).
+- Produces a regulatory-compliant Word document: signature page + revision history table + title page/content + table of contents, from a markdown file with Dilon YAML front matter. The signature-approval table, revision table, and title page are all built programmatically (not template-baked); only the header/footer/styles come from the base template.
 - Verifies the output file exists after the script runs; reports stdout/stderr to the user on failure, or the output path on success.
 - Points users lacking YAML front matter back to the `dilon-document-writer` skill.
 
-### Skill 3: `dilon-document-extractor`
+### Skill 3: `dilon-document-form-compiler`
+**Location:** `skills/dilon-document-form-compiler/` (`SKILL.md`, `scripts/generate_dilon_form.py`, `scripts/form_fields.py`, `scripts/check_deps.py`); shares the same repo-root `templates/TEMPLATE_Word_Base.docx` that `dilon-document-compiler` uses - there is no form-specific template file.
+
+**Dependencies:** same as `dilon-document-compiler` - Python (>= 3.8) with `python-docx`, `docxcompose`, `pyyaml>=6.0`, `jinja2`; Pandoc on PATH. Installed via `install.ps1`.
+
+**Capabilities (per `SKILL.md`):**
+- Runs `scripts/check_deps.py` first; same fail-fast behavior as `dilon-document-compiler`.
+- Invokes `scripts/generate_dilon_form.py <input.md> <output.docx> <base_template>`.
+- Produces a running-header/footer-only Word document (no title page, no signature-approval page, no table of contents) - for forms/travelers meant to be printed and filled out by hand, as opposed to `dilon-document-compiler`'s narrative documents.
+- Expects the same rich Dilon YAML front matter as `dilon-document-compiler` (front-matter fields beyond title/doc_number/current_revision aren't rendered into the form's header, but are kept for consistency with the rest of the front-matter-driven tooling).
+- Supports one form-only markdown marker on top of everything `MARKDOWN_STYLING_GUIDE.md` documents: `@@@FORM_FIELD:FillLine@@@Label@@@END_FORM_FIELD@@@`, which becomes a label followed by a right-aligned, underscore-leadered tab stop filling to the page's or table cell's true available width (`form_fields.py`'s `underscore_until_end_of_line()`).
+
+### Skill 4: `dilon-document-extractor`
 **Location:** `skills/dilon-document-extractor/` (`SKILL.md`, `scripts/extract_docx.py`, `scripts/extract_pdf.py`, `scripts/check_deps.py`)
 
 **Dependencies:** Python (>= 3.8) with `python-docx`, `pyyaml`, `pymupdf`. Installed via `install.ps1`.
@@ -67,8 +79,12 @@ dilon-claude-tools/
 │   └── marketplace.json               # self-hosted marketplace listing this plugin
 │
 ├── templates/                          # Shared Word reference templates
-│   ├── TEMPLATE_Word_Base.docx
-│   └── TEMPLATE_Word_Content.docx
+│   ├── TEMPLATE_Word_Base.docx        # header/footer + styles only, shared by both compiler skills
+│   └── assets/
+│       └── dilon_logo.png             # header logo, re-embedded by populate_header()
+│
+├── lib/
+│   └── dilon_docx_common.py           # Pandoc-conversion/styling helpers shared by both compiler skills
 │
 ├── skills/
 │   ├── dilon-document-writer/
@@ -78,7 +94,13 @@ dilon-claude-tools/
 │   ├── dilon-document-compiler/
 │   │   ├── SKILL.md
 │   │   └── scripts/
-│   │       ├── generate_dilon_doc.py  # Markdown -> Word compiler
+│   │       ├── generate_dilon_doc.py  # Markdown -> Word compiler (signature/title/TOC)
+│   │       └── check_deps.py          # Preflight dependency checker
+│   ├── dilon-document-form-compiler/
+│   │   ├── SKILL.md
+│   │   └── scripts/
+│   │       ├── generate_dilon_form.py # Markdown -> Word compiler (header/footer only)
+│   │       ├── form_fields.py         # @@@FORM_FIELD:FillLine@@@ marker
 │   │       └── check_deps.py          # Preflight dependency checker
 │   └── dilon-document-extractor/
 │       ├── SKILL.md
@@ -89,6 +111,7 @@ dilon-claude-tools/
 │
 └── tests/
     ├── run_tests.py                   # direct-invocation test suite (writer/compiler)
+    ├── run_form_tests.py              # direct-invocation test suite (form compiler)
     ├── run_extractor_tests.py         # direct-invocation test suite (extractor)
     ├── validate-output.py             # output validation checks
     ├── README.md
@@ -98,13 +121,15 @@ dilon-claude-tools/
 
 ## Document Generation (Word Compilation)
 
-The `dilon-document-compiler` skill assembles Word documents from several parts:
+The base template (repo-root `templates/TEMPLATE_Word_Base.docx`) carries only style definitions and document properties now - its header and footer are empty containers with zero paragraphs/tables. Everything document-specific is built programmatically in Python and merged in with `docxcompose`, rather than via Jinja/`docxtpl` template substitution:
 
-- **Base template** (repo-root `templates/TEMPLATE_Word_Base.docx`): master document with style definitions, running header/footer (Jinja2 fields for title/doc_number/current_revision), and document properties - no body content of its own.
-- **Signature table**: generated programmatically (`create_signature_table()`) from front-matter fields (author, department, regulatory_rep, quality_rep, department_head) and inserted into Part A - also the canonical shape `dilon-document-extractor` classifies signature tables against.
-- **Revision table**: generated programmatically from the markdown's `revisions` YAML list (custom column widths, gray headers, centered text).
-- **Content template** (repo-root `templates/TEMPLATE_Word_Content.docx`): title page and content wrapper (author/revision info).
-- **Markdown content**: converted via Pandoc, with TOC generation from H2 section headings.
+- **Header/footer**: `populate_header()` / `populate_footer()` (`lib/dilon_docx_common.py`, shared by both compiler skills) build the running header (logo + title/doc_number table with an explicit grid border, plus a "Page N of M" complex field) and footer (doc_number/rev/ECO/date line with top/bottom borders, boilerplate) fresh at compile time from the front-matter metadata dict - no Jinja fields baked into the template.
+- **Signature table**: generated programmatically (`create_signature_table()` in `generate_dilon_doc.py`) from front-matter fields (author, department, regulatory_rep, quality_rep, department_head) and inserted into Part A - also the canonical shape `dilon-document-extractor` classifies signature tables against.
+- **Revision table**: generated programmatically (`create_revision_table()`) from the markdown's `revisions` YAML list (custom column widths, gray headers, centered text).
+- **Title page**: `build_title_page()` (`generate_dilon_doc.py`) builds Part C from the metadata dict - title, Author/Revised-by table, and boilerplate about ARENA PLM/master-document/approval history are all hardcoded Python + python-docx calls now; there is no separate content template file.
+- **Markdown content**: converted via Pandoc, with TOC generation from H2 section headings (`markdown_to_docx()`, `include_toc` flag).
+
+`dilon-document-form-compiler` reuses `populate_header()`/`populate_footer()` against the same base template but skips the signature table, revision table, title page, and TOC entirely - see Skill 3 above.
 
 `TEMPLATE_Document.md` (in `dilon-document-writer`) provides the starter markdown with the full YAML front-matter shape and section templates for new documents.
 
@@ -118,8 +143,8 @@ Covers YAML front matter requirements, heading conventions/numbering, table form
 
 1. **Skill Modularity:** Each skill is self-contained (`SKILL.md` + any scripts/docs it needs) and independently installable in concept - `dilon-document-writer` has zero runtime dependencies, `dilon-document-compiler` and `dilon-document-extractor` depend on Python (and Pandoc, for the compiler). The Word reference templates are shared at the repo root since both `dilon-document-compiler` and `dilon-document-extractor` reference their canonical shape.
 2. **Preflight Validation:** The compiler skill checks dependencies (`check_deps.py`) before attempting work, rather than failing partway through.
-3. **Explicit Arguments:** The compiler script is always invoked with all four arguments spelled out (input, output, signature template, content template) rather than relying on internal defaults.
-4. **Template Inheritance:** Word styles cascade from the signature master template through to the assembled document.
+3. **Explicit Arguments:** The compiler script is always invoked with all three arguments spelled out (input, output, base template) rather than relying on internal defaults.
+4. **Template Inheritance:** Word styles cascade from the base template through to the assembled document; header, footer, signature table, revision table, and title page are all generated programmatically in Python against that template's style definitions rather than being template-baked.
 5. **Self-Hosted Distribution:** The repo is both the source and its own plugin marketplace - no external registry or publish pipeline.
 
 ## Dependencies
@@ -129,7 +154,9 @@ Covers YAML front matter requirements, heading conventions/numbering, table form
 **For `dilon-document-compiler`:**
 - Python >= 3.8
 - Pandoc (on PATH)
-- Python packages: `python-docx`, `python-docx-template`, `docxcompose`, `pyyaml>=6.0`
+- Python packages: `python-docx`, `docxcompose`, `pyyaml>=6.0`, `jinja2`
+
+**For `dilon-document-form-compiler`:** same as `dilon-document-compiler`.
 
 **For `dilon-document-extractor`:**
 - Python >= 3.8

@@ -171,9 +171,9 @@ Write-Host ""
 Write-Host "Step 3: Installing Python dependencies..." -ForegroundColor Cyan
 Write-Host ""
 
-# Install Python packages required by the dilon-document-compiler and
-# dilon-document-extractor skills
-$requiredPackages = @("python-docx", "python-docx-template", "docxcompose", "pyyaml>=6.0", "pymupdf")
+# Install Python packages required by the dilon-document-compiler,
+# dilon-document-form-compiler, and dilon-document-extractor skills
+$requiredPackages = @("python-docx", "docxcompose", "pyyaml>=6.0", "pymupdf", "jinja2")
 
 foreach ($package in $requiredPackages) {
     Write-Host "  -> Installing $package..." -ForegroundColor Gray

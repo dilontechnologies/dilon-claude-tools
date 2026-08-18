@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 
-REQUIRED_MODULES = ["docx", "docxtpl", "docxcompose", "yaml"]
+REQUIRED_MODULES = ["docx", "docxcompose", "yaml", "jinja2"]
 
 
 def check_pandoc():

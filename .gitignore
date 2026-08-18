@@ -19,6 +19,7 @@ Thumbs.db
 *.tmp
 ~$*
 tests/test-output/
+tests/form-test-output/
 tests/extractor-test-output/
 tests/manual-fixtures/
 

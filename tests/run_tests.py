@@ -30,7 +30,6 @@ TEMPLATE_PATH = WRITER_DIR / "TEMPLATE_Document.md"
 COMPILER_SCRIPT = COMPILER_DIR / "scripts" / "generate_dilon_doc.py"
 CHECK_DEPS_SCRIPT = COMPILER_DIR / "scripts" / "check_deps.py"
 SIGNATURE_TEMPLATE = REPO_ROOT / "templates" / "TEMPLATE_Word_Base.docx"
-CONTENT_TEMPLATE = REPO_ROOT / "templates" / "TEMPLATE_Word_Content.docx"
 
 # Scripts that must not carry a `#!/usr/bin/env python3` shebang: Windows'
 # py launcher parses that line and can re-dispatch to a different,
@@ -303,7 +302,6 @@ def test_compile_valid_document():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -360,7 +358,6 @@ def test_compile_signature_table_generated_programmatically():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -402,7 +399,6 @@ def test_compile_bom_front_matter():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -451,7 +447,6 @@ def test_compile_table_marker_no_blank_line():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -518,7 +513,6 @@ def test_compile_adjacent_tables_no_merge():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -611,7 +605,6 @@ def test_compile_table_column_widths():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -701,9 +694,8 @@ def test_compile_with_default_templates():
     """Regression test for a bug where the compiler's default template
     lookup pointed at the wrong directory instead of the repo-root
     templates/ directory. Invokes with only <input> <output> (no template
-    args) so the script
-    must resolve its own defaults, rather than the explicit four-argument
-    form SKILL.md always uses."""
+    arg) so the script must resolve its own default, rather than the
+    explicit three-argument form SKILL.md always uses."""
     input_md = TEST_OUTPUT_DIR / "compile_test_defaults.md"
     output_docx = TEST_OUTPUT_DIR / "compile_test_defaults.docx"
     input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
@@ -797,7 +789,6 @@ def test_compile_resolves_relative_image_paths():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -858,7 +849,6 @@ def test_compile_body_jinja_substitution():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -909,7 +899,6 @@ def test_figure_auto_numbering():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -962,7 +951,6 @@ def test_heading_auto_numbering():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,

@@ -464,6 +464,226 @@ def set_update_fields_on_open(docx_file):
         doc.save(docx_file)
 
 
+_LOGO_PATH = Path(__file__).resolve().parent.parent / "templates" / "assets" / "dilon_logo.png"
+
+
+def _clear_container(container):
+    """Remove every paragraph/table from a python-docx header/footer (or
+    body) container, leaving it empty so populate_header()/
+    populate_footer() can build fresh content into it - rather than
+    appending after whatever placeholder paragraph Word/python-docx
+    always creates by default."""
+    for child in list(container._element):
+        container._element.remove(child)
+
+
+def _add_complex_field(paragraph, instr, cached_text):
+    """
+    Append a complex Word field (begin/instrText/separate/cached-result/
+    end run sequence) to a paragraph. Used for PAGE/NUMPAGES fields, which
+    - unlike the STYLEREF/SEQ fields _add_field_simple_run() handles -
+    are conventionally authored as complex fields (that's what Word's own
+    Insert Page Number feature emits), not fldSimple.
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    def _fld_char(kind):
+        run_el = OxmlElement('w:r')
+        fld = OxmlElement('w:fldChar')
+        fld.set(qn('w:fldCharType'), kind)
+        run_el.append(fld)
+        return run_el
+
+    paragraph._p.append(_fld_char('begin'))
+
+    instr_run = OxmlElement('w:r')
+    instr_el = OxmlElement('w:instrText')
+    instr_el.set(qn('xml:space'), 'preserve')
+    instr_el.text = instr
+    instr_run.append(instr_el)
+    paragraph._p.append(instr_run)
+
+    paragraph._p.append(_fld_char('separate'))
+
+    text_run = OxmlElement('w:r')
+    t_el = OxmlElement('w:t')
+    t_el.text = cached_text
+    text_run.append(t_el)
+    paragraph._p.append(text_run)
+
+    paragraph._p.append(_fld_char('end'))
+
+
+def populate_header(document, metadata):
+    """
+    Build the running header (logo | Title/Number | Rev | Page N of M)
+    directly via python-docx, in place of a docxtpl-rendered Jinja
+    version baked into the template. Shared by dilon-document-compiler
+    and dilon-document-form-compiler, since both use the same
+    TEMPLATE_Word_Base.docx.
+
+    Column widths are sized to fit "999 of 999" in the page-number column
+    without wrapping/truncating (regulatory documents can run well past
+    single or double-digit page counts), while keeping the table's total
+    width within the page's available content width (previously
+    overflowed it) - see the base template's page setup for margins.
+    """
+    from docx.shared import Inches, Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    section = document.sections[0]
+    header = section.header
+    header.is_linked_to_previous = False
+    _clear_container(header)
+
+    col_widths = [Inches(1.25), Inches(3.0), Inches(0.8), Inches(1.2)]
+    table_width = sum(col_widths, Inches(0))
+    table = header.add_table(rows=1, cols=4, width=table_width)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
+
+    tbl_pr = table._element.tblPr
+    borders = OxmlElement('w:tblBorders')
+    for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+        edge_el = OxmlElement(f'w:{edge}')
+        edge_el.set(qn('w:val'), 'single')
+        edge_el.set(qn('w:sz'), '4')
+        edge_el.set(qn('w:space'), '0')
+        edge_el.set(qn('w:color'), 'auto')
+        borders.append(edge_el)
+    tbl_pr.append(borders)
+    cell_mar = OxmlElement('w:tblCellMar')
+    for side in ('top', 'left', 'bottom', 'right'):
+        side_el = OxmlElement(f'w:{side}')
+        side_el.set(qn('w:w'), '29')
+        side_el.set(qn('w:type'), 'dxa')
+        cell_mar.append(side_el)
+    tbl_pr.append(cell_mar)
+
+    row = table.rows[0]
+    row.height = Inches(945 / 1440)
+    for idx, width in enumerate(col_widths):
+        table.columns[idx].width = width
+        row.cells[idx].width = width
+        row.cells[idx].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+    # Cell 0: logo
+    logo_cell = row.cells[0]
+    logo_para = logo_cell.paragraphs[0]
+    logo_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if _LOGO_PATH.exists():
+        logo_para.add_run().add_picture(str(_LOGO_PATH), width=Inches(0.88), height=Inches(0.656))
+
+    # Cell 1: Title / Number - both left-justified (paragraph default;
+    # no indent/tab needed, unlike the hanging-indent + leading-tab
+    # combo the original template used, which left the "Number:" line
+    # landing at Word's default tab stop instead of the true left edge)
+    title_cell = row.cells[1]
+    title_para = title_cell.paragraphs[0]
+    title_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    title_para.add_run(f"Title: {metadata.get('title', '')}")
+    number_para = title_cell.add_paragraph()
+    number_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    number_para.add_run(f"Number: {metadata.get('doc_number', '')}")
+
+    # Cell 2: Rev
+    rev_cell = row.cells[2]
+    rev_para = rev_cell.paragraphs[0]
+    rev_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    rev_run = rev_para.add_run(f"Rev {metadata.get('current_revision', '')}")
+    rev_run.font.bold = True
+
+    # Cell 3: Page N of M (live PAGE/NUMPAGES fields)
+    page_cell = row.cells[3]
+    page_label_para = page_cell.paragraphs[0]
+    page_label_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    page_label_run = page_label_para.add_run('Page')
+    page_label_run.font.bold = True
+
+    page_field_para = page_cell.add_paragraph()
+    page_field_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _add_complex_field(page_field_para, 'page \\* arabic', '1')
+    mid_run = page_field_para.add_run(' of ')
+    mid_run.font.bold = True
+    _add_complex_field(page_field_para, 'numpages ', '1')
+    for run in page_field_para.runs:
+        run.font.bold = True
+
+
+def populate_footer(document, metadata):
+    """
+    Build the running footer (doc_number/rev/ECO/revision-date line +
+    confidentiality boilerplate) directly via python-docx and plain
+    Python string formatting, in place of a docxtpl-rendered Jinja
+    version. Shared by dilon-document-compiler and
+    dilon-document-form-compiler.
+
+    ECO number/date come from the latest (last) entry in the front
+    matter's `revisions` list, since neither is its own flat top-level
+    field.
+    """
+    from docx.shared import Inches, Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    section = document.sections[0]
+    footer = section.footer
+    footer.is_linked_to_previous = False
+    _clear_container(footer)
+
+    revisions = metadata.get('revisions') or []
+    latest_revision = revisions[-1] if revisions else {}
+
+    available_width = section.page_width.inches - section.left_margin.inches - section.right_margin.inches
+
+    def _set_footer_font(paragraph):
+        for run in paragraph.runs:
+            run.font.size = Pt(9)
+
+    def _set_border(paragraph, top=False, bottom=False):
+        p_pr = paragraph._p.get_or_add_pPr()
+        p_bdr = OxmlElement('w:pBdr')
+        for side, enabled in (('top', top), ('bottom', bottom)):
+            if not enabled:
+                continue
+            side_el = OxmlElement(f'w:{side}')
+            side_el.set(qn('w:val'), 'single')
+            side_el.set(qn('w:sz'), '4')
+            side_el.set(qn('w:space'), '4')
+            side_el.set(qn('w:color'), 'auto')
+            p_bdr.append(side_el)
+        p_pr.append(p_bdr)
+
+    id_para = footer.add_paragraph()
+    id_para.paragraph_format.tab_stops.add_tab_stop(Inches(available_width / 2), WD_TAB_ALIGNMENT.CENTER)
+    id_para.paragraph_format.tab_stops.add_tab_stop(Inches(available_width), WD_TAB_ALIGNMENT.RIGHT)
+    id_para.style = document.styles['Footer']
+    id_para.add_run(
+        f"{metadata.get('doc_number', '')} Rev {metadata.get('current_revision', '')}"
+        f"\t{latest_revision.get('eco_number', '')}"
+        f"\tRevision Date: {latest_revision.get('eco_date', '')}"
+    )
+    _set_footer_font(id_para)
+    _set_border(id_para, top=True)
+
+    notice_lines = [
+        "This document and information contained within is confidential and proprietary to Dilon Technologies.",
+        "All unauthorized use and/or reproduction is prohibited.",
+    ]
+    for i, line in enumerate(notice_lines):
+        para = footer.add_paragraph(line)
+        para.style = document.styles['Footer']
+        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_footer_font(para)
+        if i == len(notice_lines) - 1:
+            _set_border(para, bottom=True)
+
+
 def extract_yaml_and_markdown(md_file):
     """
     Extract YAML front matter and Markdown body from a Markdown file.

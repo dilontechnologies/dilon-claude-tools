@@ -10,7 +10,7 @@ Usage:
 
 import sys
 from pathlib import Path
-from docxtpl import DocxTemplate
+from docx import Document
 
 # Set UTF-8 encoding for Windows console
 if sys.platform == 'win32':
@@ -26,6 +26,8 @@ from dilon_docx_common import (  # noqa: E402
     apply_styles,
     compose_documents,
     set_update_fields_on_open,
+    populate_header,
+    populate_footer,
 )
 
 try:
@@ -65,10 +67,11 @@ def generate_form_document(markdown_path, output_path, form_template_path=None):
     markdown_body = render_jinja(markdown_body, metadata)
     print(f"Metadata extracted: {list(metadata.keys())}")
 
-    # Part A: the base template, rendered for its header/footer
-    print(f"Rendering form header/footer: {form_template_path}")
-    doc_a = DocxTemplate(form_template_path)
-    doc_a.render(metadata)
+    # Part A: the base template, populated with header/footer
+    print(f"Building form header/footer: {form_template_path}")
+    doc_a = Document(form_template_path)
+    populate_header(doc_a, metadata)
+    populate_footer(doc_a, metadata)
     temp_part_a = Path(output_path).parent / "_temp_form_a.docx"
     doc_a.save(temp_part_a)
 
