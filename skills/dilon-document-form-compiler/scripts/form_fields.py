@@ -269,6 +269,39 @@ def build_field_grid_row_table(document, row, row_width):
     return table
 
 
+def insert_field_grid(doc, paragraph, block_text, max_width_inches=None):
+    """
+    Replace `paragraph` (a @@@FORM_FIELD:FieldGrid@@@ marker paragraph)
+    with one Word table per declared row, each built via
+    build_field_grid_row_table(), stacked directly adjacent with no
+    separating paragraph so they read as one continuous bordered grid.
+    The marker paragraph itself is removed.
+    """
+    available_width = _paragraph_available_width_inches(paragraph)
+    if max_width_inches is not None:
+        if max_width_inches > available_width:
+            print(
+                f"  FieldGrid: max width {max_width_inches}in exceeds the available "
+                f"width ({available_width}in) - clamped"
+            )
+            row_width = available_width
+        else:
+            row_width = max_width_inches
+    else:
+        row_width = available_width
+
+    rows = parse_field_grid_block(block_text)
+    if not rows:
+        print("  FieldGrid: no valid rows found in block - leaving no content behind")
+
+    marker_element = paragraph._p
+    for row in rows:
+        table = build_field_grid_row_table(doc, row, row_width)
+        marker_element.addprevious(table._element)
+
+    marker_element.getparent().remove(marker_element)
+
+
 def _enclosing_table_cell(paragraph):
     """Return the nearest enclosing <w:tc> XML element, or None if
     `paragraph` is body-level (not inside a table cell)."""
@@ -416,6 +449,15 @@ def apply_form_fields(docx_file):
             para.add_run(cleaned_label)
             underscore_until_end_of_line(para, width_override=width_override, num_lines=num_lines)
             changed = True
+
+        elif function_name == "FieldGrid":
+            if _enclosing_table_cell(para) is not None:
+                print("  FieldGrid marker found inside a table cell - not supported, leaving marker text as-is")
+                continue
+            max_width_inches = float(block_width[:-2]) if block_width else None
+            insert_field_grid(doc, para, label, max_width_inches)
+            changed = True
+
         else:
             print(f"  Unrecognized @@@FORM_FIELD:{function_name}@@@ - leaving marker text as-is")
 

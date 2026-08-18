@@ -454,6 +454,56 @@ def test_build_field_grid_row_table_is_centered():
     check(table.alignment == WD_TABLE_ALIGNMENT.CENTER, f"row-table is centered, got {table.alignment}")
 
 
+def test_insert_field_grid_replaces_marker_with_row_tables():
+    import form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_FIELD:FieldGrid@@@\nWork Order: | Date:\nCarrier Board Assy Lot:\n@@@END_FORM_FIELD@@@")
+    temp_path = TEST_OUTPUT_DIR / "field_grid_marker.docx"
+    doc.save(temp_path)
+
+    ff.apply_form_fields(temp_path)
+
+    result_doc = Document(temp_path)
+    check(not any("@@@" in p.text for p in result_doc.paragraphs), "no marker text remains in the body")
+    check(len(result_doc.tables) == 2, f"2 declared rows produce 2 separate row-tables, found {len(result_doc.tables)}")
+    if len(result_doc.tables) == 2:
+        check(result_doc.tables[0].rows[0].cells[0].paragraphs[0].text == "Work Order:", "first row's first label")
+        check(result_doc.tables[1].rows[0].cells[0].paragraphs[0].text == "Carrier Board Assy Lot:", "second row's label")
+
+
+def test_insert_field_grid_max_width():
+    import form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_FIELD:FieldGrid:3in@@@\nA: | B:\n@@@END_FORM_FIELD@@@")
+    temp_path = TEST_OUTPUT_DIR / "field_grid_max_width.docx"
+    doc.save(temp_path)
+
+    ff.apply_form_fields(temp_path)
+
+    result_doc = Document(temp_path)
+    table = result_doc.tables[0]
+    total_width = sum(col.width.inches for col in table.columns)
+    check(abs(total_width - 3.0) < 0.05, f"block-level max width of 3in respected, got {total_width}in")
+
+
+def test_field_grid_marker_inside_table_cell_warns_and_skips():
+    import form_fields as ff
+    doc = Document()
+    table = doc.add_table(rows=1, cols=1)
+    table.columns[0].width = Inches(2.0)
+    cell = table.rows[0].cells[0]
+    cell.width = Inches(2.0)
+    cell.paragraphs[0].text = "@@@FORM_FIELD:FieldGrid@@@\nA: | B:\n@@@END_FORM_FIELD@@@"
+    temp_path = TEST_OUTPUT_DIR / "field_grid_in_cell.docx"
+    doc.save(temp_path)
+
+    ff.apply_form_fields(temp_path)
+
+    result_doc = Document(temp_path)
+    cell_text = result_doc.tables[0].rows[0].cells[0].text
+    check("@@@FORM_FIELD:FieldGrid@@@" in cell_text, "FieldGrid marker inside a table cell is left as-is, not processed")
+
+
 def test_no_shebang_in_form_compiler_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -509,6 +559,9 @@ def main():
     test_build_field_grid_row_table_horizontal()
     test_build_field_grid_row_table_vertical_with_rows()
     test_build_field_grid_row_table_is_centered()
+    test_insert_field_grid_replaces_marker_with_row_tables()
+    test_insert_field_grid_max_width()
+    test_field_grid_marker_inside_table_cell_warns_and_skips()
     test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
 
