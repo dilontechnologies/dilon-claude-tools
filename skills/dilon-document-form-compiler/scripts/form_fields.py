@@ -16,7 +16,10 @@ from docx.oxml.ns import qn
 from docx.shared import Inches
 from docx.text.paragraph import Paragraph
 
-FORM_FIELD_RE = re.compile(r'@@@FORM_FIELD:(\w+)@@@(.*?)@@@END_FORM_FIELD@@@', re.DOTALL)
+FORM_FIELD_RE = re.compile(
+    r'@@@FORM_FIELD:(\w+)(?::([\d.]+in))?@@@(.*?)@@@END_FORM_FIELD@@@',
+    re.DOTALL,
+)
 
 BRACKET_ANNOTATION_RE = re.compile(r'^(.*?)\[([^\[\]]+)\]\s*$')
 
@@ -168,7 +171,7 @@ def apply_form_fields(docx_file):
         if not match:
             continue
 
-        function_name, label = match.group(1), match.group(2)
+        function_name, block_width, label = match.group(1), match.group(2), match.group(3)
         if function_name == "FillLine":
             cleaned_label, annotations = parse_bracket_annotations(label)
 

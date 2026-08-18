@@ -302,6 +302,22 @@ def test_apply_form_fields_fillline_lines_annotation():
     check(result_doc.paragraphs[0].text == "Notes:\t", f"first paragraph keeps the label, got {result_doc.paragraphs[0].text!r}")
 
 
+def test_form_field_re_optional_width_group():
+    import form_fields as ff
+    match = ff.FORM_FIELD_RE.search("@@@FORM_FIELD:FieldGrid:6.5in@@@Work Order:@@@END_FORM_FIELD@@@")
+    check(match is not None, "marker with a block-level width suffix matches")
+    if match:
+        check(match.group(1) == "FieldGrid", f"function name captured, got {match.group(1)!r}")
+        check(match.group(2) == "6.5in", f"width suffix captured, got {match.group(2)!r}")
+        check(match.group(3) == "Work Order:", f"block content captured, got {match.group(3)!r}")
+
+    match_no_width = ff.FORM_FIELD_RE.search("@@@FORM_FIELD:FillLine@@@Work Order:@@@END_FORM_FIELD@@@")
+    check(match_no_width is not None, "marker without a width suffix still matches")
+    if match_no_width:
+        check(match_no_width.group(2) is None, "width group is None when no suffix is given")
+        check(match_no_width.group(3) == "Work Order:", f"block content captured, got {match_no_width.group(3)!r}")
+
+
 def test_no_shebang_in_form_compiler_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -342,6 +358,7 @@ def main():
     test_underscore_until_end_of_line_multiple_lines_ignores_width()
     test_apply_form_fields_fillline_width_annotation()
     test_apply_form_fields_fillline_lines_annotation()
+    test_form_field_re_optional_width_group()
     test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
 
