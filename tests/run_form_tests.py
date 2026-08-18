@@ -318,6 +318,47 @@ def test_form_field_re_optional_width_group():
         check(match_no_width.group(3) == "Work Order:", f"block content captured, got {match_no_width.group(3)!r}")
 
 
+def test_parse_row_annotation():
+    import form_fields as ff
+    check(ff.parse_row_annotation("Work Order: | Date:") == ("Work Order: | Date:", {}), "no row annotation -> unchanged, empty dict")
+    check(ff.parse_row_annotation("Notes: {dir=v,rows=3}") == ("Notes:", {"dir": "v", "rows": "3"}), "row annotation parsed and stripped")
+
+
+def test_parse_field_grid_block_simple():
+    import form_fields as ff
+    block = "Work Order: | Date:\nCarrier Board Assy Lot:\n"
+    rows = ff.parse_field_grid_block(block)
+    check(len(rows) == 2, f"two declared rows produce two parsed rows, found {len(rows)}")
+    if len(rows) == 2:
+        check(rows[0]['pairs'] == [("Work Order:", {}), ("Date:", {})], f"first row's pairs, got {rows[0]['pairs']!r}")
+        check(rows[0]['annotations'] == {}, "first row has no row-level annotations")
+        check(rows[1]['pairs'] == [("Carrier Board Assy Lot:", {})], f"second row's single pair, got {rows[1]['pairs']!r}")
+
+
+def test_parse_field_grid_block_annotations():
+    import form_fields as ff
+    block = "Cure Temp:[pair=60] | Start Time:[pair=40]\nNotes: {dir=v,rows=3}\n"
+    rows = ff.parse_field_grid_block(block)
+    check(len(rows) == 2, f"expected 2 rows, found {len(rows)}")
+    if len(rows) == 2:
+        check(
+            rows[0]['pairs'] == [("Cure Temp:", {"pair": "60"}), ("Start Time:", {"pair": "40"})],
+            f"per-pair annotations parsed, got {rows[0]['pairs']!r}",
+        )
+        check(rows[1]['pairs'] == [("Notes:", {})], f"row-level annotation not mistaken for a per-pair one, got {rows[1]['pairs']!r}")
+        check(rows[1]['annotations'] == {"dir": "v", "rows": "3"}, f"row-level annotations parsed, got {rows[1]['annotations']!r}")
+
+
+def test_parse_field_grid_block_skips_blank_and_unparseable_lines():
+    import form_fields as ff
+    block = "Work Order:\n\n   \n|\nDate:\n"
+    rows = ff.parse_field_grid_block(block)
+    check(len(rows) == 2, f"blank lines and an unparseable row are skipped, found {len(rows)} rows")
+    if len(rows) == 2:
+        check(rows[0]['pairs'] == [("Work Order:", {})], f"got {rows[0]['pairs']!r}")
+        check(rows[1]['pairs'] == [("Date:", {})], f"got {rows[1]['pairs']!r}")
+
+
 def test_no_shebang_in_form_compiler_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -359,6 +400,10 @@ def main():
     test_apply_form_fields_fillline_width_annotation()
     test_apply_form_fields_fillline_lines_annotation()
     test_form_field_re_optional_width_group()
+    test_parse_row_annotation()
+    test_parse_field_grid_block_simple()
+    test_parse_field_grid_block_annotations()
+    test_parse_field_grid_block_skips_blank_and_unparseable_lines()
     test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
 

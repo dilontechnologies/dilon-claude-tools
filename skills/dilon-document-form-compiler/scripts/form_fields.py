@@ -51,6 +51,62 @@ def parse_bracket_annotations(text):
     return match.group(1), _parse_key_value_pairs(match.group(2))
 
 
+ROW_ANNOTATION_RE = re.compile(r'^(.*?)\s*\{([^{}]+)\}\s*$')
+
+
+def parse_row_annotation(line):
+    """
+    Split a trailing ` {key=value,key=value,...}` row-level annotation
+    off `line` - a distinct delimiter ({} instead of []) from the
+    per-pair [...] annotations, so the two never collide. Returns
+    (remaining_line, annotations_dict), or (line, {}) if there's no
+    trailing brace group.
+    """
+    match = ROW_ANNOTATION_RE.match(line)
+    if not match:
+        return line, {}
+    return match.group(1).rstrip(), _parse_key_value_pairs(match.group(2))
+
+
+def parse_field_grid_block(block_text):
+    """
+    Parse a @@@FORM_FIELD:FieldGrid@@@ block's contents into a list of
+    rows. Each row is a dict:
+        {
+            'pairs': [(label_text, pair_annotations_dict), ...],
+            'annotations': row_annotations_dict,
+        }
+
+    Blank lines are skipped. A line that produces no non-empty pair
+    label is skipped with a printed warning - never a hard failure.
+    """
+    rows = []
+    for raw_line in block_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        remaining, row_annotations = parse_row_annotation(line)
+        pair_tokens = [token.strip() for token in remaining.split('|')]
+        pairs = []
+        for token in pair_tokens:
+            if not token:
+                continue
+            label_text, pair_annotations = parse_bracket_annotations(token)
+            label_text = label_text.strip()
+            if not label_text:
+                continue
+            pairs.append((label_text, pair_annotations))
+
+        if not pairs:
+            print(f"  FieldGrid: skipping unparseable row: {raw_line!r}")
+            continue
+
+        rows.append({'pairs': pairs, 'annotations': row_annotations})
+
+    return rows
+
+
 def _enclosing_table_cell(paragraph):
     """Return the nearest enclosing <w:tc> XML element, or None if
     `paragraph` is body-level (not inside a table cell)."""
