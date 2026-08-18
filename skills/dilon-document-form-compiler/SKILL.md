@@ -31,7 +31,7 @@ After the script exits, verify the output file now exists. Report the script's s
 
 ## Form-specific markdown
 
-Everything documented in `dilon-document-writer`'s `MARKDOWN_STYLING_GUIDE.md` applies (headings, tables, `@@@STYLE@@@`/`@@@TABLE_STYLE@@@`/`@@@TABLE_COLUMNS@@@`, body-level `{{field}}` substitution), plus two form-only markers:
+Everything documented in `dilon-document-writer`'s `MARKDOWN_STYLING_GUIDE.md` applies (headings, tables, `@@@STYLE@@@`/`@@@TABLE_STYLE@@@`/`@@@TABLE_COLUMNS@@@`, body-level `{{field}}` substitution), plus three form-only markers:
 
 ### Fill-in-the-blank line (`FillLine`)
 
@@ -82,6 +82,18 @@ Each non-blank line is one **row**, rendered as its own bordered Word table (`Ta
 **Block-level max width** — optional `:<width>in` suffix on the opening marker, e.g. `@@@FORM_FIELD:FieldGrid:6.5in@@@`. Defaults to the available page/cell width; clamped (with a warning) if the given value exceeds it.
 
 `FieldGrid` is top-level body content only — it isn't supported inside a markdown table cell (the marker is left as-is with a warning if found there).
+
+### Section header (`Form_Section_Header`)
+
+An alternative to a Pandoc `#`/`##`/`###` markdown heading, purpose-built for forms: a single, automatically-numbered heading, restyled with the template's `Form Section Header` paragraph style. Use it to mark the start of a chunk of a form meant to be completed in full before moving on — unlike `#` headings, it isn't hooked up to numbering-list linkage or a table of contents (forms have neither):
+
+```markdown
+@@@FORM_FIELD:Form_Section_Header@@@Assembly Prep@@@END_FORM_FIELD@@@
+```
+
+Renders as `Section 1 - Assembly Prep`. The number increments once per `Form_Section_Header` marker found, in document order, starting at 1 — there's no nesting or reset. If the compiled document doesn't yet have a `Form Section Header` style (e.g. an older `TEMPLATE_Word_Base.docx`), the heading text still renders with its number, just without the style, with a printed warning — never a hard failure.
+
+`Form_Section_Header` is top-level body content only — it isn't supported inside a markdown table cell (the marker is left as-is with a warning if found there).
 
 ## Why no title/signature/TOC
 

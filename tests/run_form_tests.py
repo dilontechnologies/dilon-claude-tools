@@ -857,6 +857,104 @@ def test_protect_field_grid_line_breaks():
     check(ff.protect_field_grid_line_breaks(unrelated) == unrelated, "text with no FieldGrid block is unchanged")
 
 
+def test_apply_form_fields_form_section_header_numbers_sequentially():
+    import form_fields as ff
+    from docx.enum.style import WD_STYLE_TYPE
+    doc = Document()
+    doc.styles.add_style('Form Section Header', WD_STYLE_TYPE.PARAGRAPH)
+    doc.add_paragraph("@@@FORM_FIELD:Form_Section_Header@@@Assembly Prep@@@END_FORM_FIELD@@@")
+    doc.add_paragraph("some body content")
+    doc.add_paragraph("@@@FORM_FIELD:Form_Section_Header@@@Final Inspection@@@END_FORM_FIELD@@@")
+    temp_path = TEST_OUTPUT_DIR / "form_section_header_sequential.docx"
+    doc.save(temp_path)
+
+    ff.apply_form_fields(temp_path)
+
+    result_doc = Document(temp_path)
+    check(result_doc.paragraphs[0].text == "Section 1 - Assembly Prep", f"first marker numbered 1, got {result_doc.paragraphs[0].text!r}")
+    check(result_doc.paragraphs[0].style.name == "Form Section Header", f"first marker gets the Form Section Header style, got {result_doc.paragraphs[0].style.name!r}")
+    check(result_doc.paragraphs[2].text == "Section 2 - Final Inspection", f"second marker numbered 2, got {result_doc.paragraphs[2].text!r}")
+    check(result_doc.paragraphs[2].style.name == "Form Section Header", f"second marker gets the Form Section Header style, got {result_doc.paragraphs[2].style.name!r}")
+
+
+def test_apply_form_fields_form_section_header_missing_style_degrades():
+    import form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_FIELD:Form_Section_Header@@@Assembly Prep@@@END_FORM_FIELD@@@")
+    temp_path = TEST_OUTPUT_DIR / "form_section_header_missing_style.docx"
+    doc.save(temp_path)
+
+    ff.apply_form_fields(temp_path)
+
+    result_doc = Document(temp_path)
+    check(result_doc.paragraphs[0].text == "Section 1 - Assembly Prep", f"marker still numbered and rendered without the style, got {result_doc.paragraphs[0].text!r}")
+    check("@@@" not in result_doc.paragraphs[0].text, "no marker text remains")
+
+
+def test_form_section_header_marker_inside_table_cell_warns_and_skips():
+    import form_fields as ff
+    doc = Document()
+    table = doc.add_table(rows=1, cols=1)
+    table.columns[0].width = Inches(2.0)
+    cell = table.rows[0].cells[0]
+    cell.width = Inches(2.0)
+    cell.paragraphs[0].text = "@@@FORM_FIELD:Form_Section_Header@@@Assembly Prep@@@END_FORM_FIELD@@@"
+    temp_path = TEST_OUTPUT_DIR / "form_section_header_in_cell.docx"
+    doc.save(temp_path)
+
+    ff.apply_form_fields(temp_path)
+
+    result_doc = Document(temp_path)
+    cell_text = result_doc.tables[0].rows[0].cells[0].text
+    check("@@@FORM_FIELD:Form_Section_Header@@@" in cell_text, "Form_Section_Header marker inside a table cell is left as-is, not processed")
+
+
+def test_form_section_header_compiles_through_full_pipeline():
+    input_md = TEST_OUTPUT_DIR / "form_section_header.md"
+    output_docx = TEST_OUTPUT_DIR / "form_section_header.docx"
+    input_md.write_text(
+        '---\n'
+        'title: "Section Header Test"\n'
+        'doc_number: "FO-77777"\n'
+        'current_revision: "00"\n'
+        '---\n'
+        '\n'
+        '@@@FORM_FIELD:Form_Section_Header@@@Assembly Prep@@@END_FORM_FIELD@@@\n'
+        '\n'
+        '@@@FORM_FIELD:FillLine@@@Work Order:@@@END_FORM_FIELD@@@\n'
+        '\n'
+        '@@@FORM_FIELD:Form_Section_Header@@@Final Inspection@@@END_FORM_FIELD@@@\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(FORM_COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(BASE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "Form_Section_Header markdown compiles cleanly")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(output_docx.exists(), "form_section_header.docx created on disk")
+    if not output_docx.exists():
+        return
+
+    doc = Document(output_docx)
+    all_text = "\n".join(p.text for p in doc.paragraphs)
+    check("@@@" not in all_text, "no leftover marker text in the compiled document")
+    check("Section 1 - Assembly Prep" in all_text, f"first section numbered and titled correctly, got {all_text!r}")
+    check("Section 2 - Final Inspection" in all_text, f"second section numbered and titled correctly, got {all_text!r}")
+
+
 def test_no_shebang_in_form_compiler_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -917,6 +1015,10 @@ def main():
     test_field_grid_marker_inside_table_cell_warns_and_skips()
     test_protect_field_grid_line_breaks()
     test_field_grid_permutations_compile()
+    test_apply_form_fields_form_section_header_numbers_sequentially()
+    test_apply_form_fields_form_section_header_missing_style_degrades()
+    test_form_section_header_marker_inside_table_cell_warns_and_skips()
+    test_form_section_header_compiles_through_full_pipeline()
     test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
     test_fo_00127_replica_compiles_with_expected_fields()

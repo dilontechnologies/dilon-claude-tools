@@ -21,6 +21,8 @@ FORM_FIELD_RE = re.compile(
     re.DOTALL,
 )
 
+FORM_SECTION_HEADER_STYLE_NAME = "Form Section Header"
+
 BRACKET_ANNOTATION_RE = re.compile(r'^(.*?)\[([^\[\]]+)\]\s*$')
 
 
@@ -449,6 +451,7 @@ def apply_form_fields(docx_file):
     """
     doc = Document(docx_file)
     changed = False
+    section_number = 0
 
     for para in list(_iter_all_paragraphs(doc)):
         match = FORM_FIELD_RE.search(para.text)
@@ -489,6 +492,20 @@ def apply_form_fields(docx_file):
                 continue
             max_width_inches = float(block_width[:-2]) if block_width else None
             insert_field_grid(doc, para, label, max_width_inches)
+            changed = True
+
+        elif function_name == "Form_Section_Header":
+            if _enclosing_table_cell(para) is not None:
+                print("  Form_Section_Header marker found inside a table cell - not supported, leaving marker text as-is")
+                continue
+            section_number += 1
+            for run in list(para.runs):
+                run._element.getparent().remove(run._element)
+            para.add_run(f"Section {section_number} - {label}")
+            try:
+                para.style = doc.styles[FORM_SECTION_HEADER_STYLE_NAME]
+            except KeyError:
+                print(f"  Form_Section_Header: style {FORM_SECTION_HEADER_STYLE_NAME!r} not found in the template - leaving default styling")
             changed = True
 
         else:
