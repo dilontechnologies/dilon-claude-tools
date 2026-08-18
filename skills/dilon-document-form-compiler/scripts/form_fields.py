@@ -11,8 +11,10 @@ import re
 
 from docx import Document
 from docx.enum.text import WD_TAB_ALIGNMENT, WD_TAB_LEADER
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches
+from docx.text.paragraph import Paragraph
 
 FORM_FIELD_RE = re.compile(r'@@@FORM_FIELD:(\w+)@@@(.*?)@@@END_FORM_FIELD@@@', re.DOTALL)
 
@@ -95,24 +97,58 @@ def _iter_all_paragraphs(doc):
         yield from _iter_table_paragraphs(table)
 
 
-def underscore_until_end_of_line(paragraph):
+def underscore_until_end_of_line(paragraph, width_override=None, num_lines=1):
     """
     Rewrite `paragraph` (currently just its label text, e.g. "Work
-    Order:") into "<label>\\t" with a right-aligned, underscore-leadered
-    tab stop positioned at the true available width - the enclosing table
-    cell's width if the paragraph is in a table cell, otherwise the page's
-    content width. Word computes the resulting fill-to-the-edge blank at
-    render time; nothing here counts characters.
+    Order:") into one or more right-aligned, underscore-leadered blank
+    lines.
+
+    width_override: explicit blank length in inches for the (single)
+        label line. Ignored - with a warning - if num_lines > 1, since
+        multi-line blanks always span the full available width. Clamped
+        - with a warning - if it exceeds the available width in context.
+    num_lines: total number of blank lines. 1 (default) keeps the
+        original single "<label>\\t" paragraph. >1 appends num_lines - 1
+        additional full-width blank paragraphs immediately after the
+        label paragraph, each with its own tab stop.
+
+    Word computes the resulting fill-to-the-edge blank(s) at render time;
+    nothing here counts characters.
     """
     label = paragraph.text
     for run in list(paragraph.runs):
         run._element.getparent().remove(run._element)
 
-    width = _paragraph_available_width_inches(paragraph)
+    available_width = _paragraph_available_width_inches(paragraph)
+
+    if num_lines > 1:
+        if width_override is not None:
+            print(f"  FillLine: width= ignored because lines={num_lines} (multi-line blanks always span the full available width)")
+        line_width = available_width
+    elif width_override is not None:
+        if width_override > available_width:
+            print(f"  FillLine: width={width_override}in exceeds the available width ({available_width}in) - clamped")
+            line_width = available_width
+        else:
+            line_width = width_override
+    else:
+        line_width = available_width
+
     paragraph.paragraph_format.tab_stops.add_tab_stop(
-        Inches(width), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.LINES
+        Inches(line_width), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.LINES
     )
     paragraph.add_run(f"{label}\t")
+
+    previous_p = paragraph._p
+    for _ in range(num_lines - 1):
+        new_p = OxmlElement('w:p')
+        previous_p.addnext(new_p)
+        previous_p = new_p
+        new_paragraph = Paragraph(new_p, paragraph._parent)
+        new_paragraph.paragraph_format.tab_stops.add_tab_stop(
+            Inches(line_width), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.LINES
+        )
+        new_paragraph.add_run("\t")
 
 
 def apply_form_fields(docx_file):
@@ -134,10 +170,30 @@ def apply_form_fields(docx_file):
 
         function_name, label = match.group(1), match.group(2)
         if function_name == "FillLine":
+            cleaned_label, annotations = parse_bracket_annotations(label)
+
+            width_override = None
+            if 'width' in annotations:
+                width_match = re.match(r'^([\d.]+)in$', annotations['width'])
+                if width_match:
+                    width_override = float(width_match.group(1))
+                else:
+                    print(f"  FillLine: invalid width={annotations['width']!r} - ignoring")
+
+            num_lines = 1
+            if 'lines' in annotations:
+                try:
+                    num_lines = int(annotations['lines'])
+                    if num_lines < 1:
+                        print(f"  FillLine: lines={annotations['lines']!r} must be >= 1 - using 1")
+                        num_lines = 1
+                except ValueError:
+                    print(f"  FillLine: invalid lines={annotations['lines']!r} - ignoring")
+
             for run in list(para.runs):
                 run._element.getparent().remove(run._element)
-            para.add_run(label)
-            underscore_until_end_of_line(para)
+            para.add_run(cleaned_label)
+            underscore_until_end_of_line(para, width_override=width_override, num_lines=num_lines)
             changed = True
         else:
             print(f"  Unrecognized @@@FORM_FIELD:{function_name}@@@ - leaving marker text as-is")

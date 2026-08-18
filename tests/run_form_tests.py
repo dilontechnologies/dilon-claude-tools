@@ -208,6 +208,100 @@ def test_parse_bracket_annotations():
     check(ff.parse_bracket_annotations("Label[malformed]") == ("Label", {}), "entry without '=' is ignored, not an error")
 
 
+def test_underscore_until_end_of_line_width_override():
+    import form_fields as ff
+    doc = Document()
+    p = doc.add_paragraph("Work Order:")
+    ff.underscore_until_end_of_line(p, width_override=3.0)
+
+    tab_stops = p.paragraph_format.tab_stops
+    check(len(tab_stops) == 1, f"exactly one tab stop added, found {len(tab_stops)}")
+    if len(tab_stops) == 1:
+        check(abs(tab_stops[0].position.inches - 3.0) < 0.01, f"tab stop positioned at the given width (3.0in), got {tab_stops[0].position.inches}in")
+
+
+def test_underscore_until_end_of_line_width_override_clamped():
+    import form_fields as ff
+    doc = Document()
+    p = doc.add_paragraph("Work Order:")
+    section = doc.sections[0]
+    available_width = section.page_width.inches - section.left_margin.inches - section.right_margin.inches
+    ff.underscore_until_end_of_line(p, width_override=available_width + 5.0)
+
+    tab_stops = p.paragraph_format.tab_stops
+    check(
+        len(tab_stops) == 1 and abs(tab_stops[0].position.inches - available_width) < 0.01,
+        f"width_override exceeding the available width is clamped to it ({available_width}in), got "
+        f"{tab_stops[0].position.inches if len(tab_stops) == 1 else 'N/A'}in",
+    )
+
+
+def test_underscore_until_end_of_line_multiple_lines():
+    import form_fields as ff
+    doc = Document()
+    p = doc.add_paragraph("Notes:")
+    ff.underscore_until_end_of_line(p, num_lines=3)
+
+    all_paragraphs = doc.paragraphs
+    check(len(all_paragraphs) == 3, f"num_lines=3 produces 3 paragraphs, found {len(all_paragraphs)}")
+    if len(all_paragraphs) == 3:
+        check(all_paragraphs[0].text == "Notes:\t", f"first paragraph keeps the label, got {all_paragraphs[0].text!r}")
+        check(all_paragraphs[1].text == "\t", f"extra line is a bare tab, got {all_paragraphs[1].text!r}")
+        check(all_paragraphs[2].text == "\t", f"extra line is a bare tab, got {all_paragraphs[2].text!r}")
+        for para in all_paragraphs:
+            tab_stops = para.paragraph_format.tab_stops
+            check(len(tab_stops) == 1, f"each line has exactly one tab stop, found {len(tab_stops)}")
+
+
+def test_underscore_until_end_of_line_multiple_lines_ignores_width():
+    import form_fields as ff
+    doc = Document()
+    p = doc.add_paragraph("Notes:")
+    section = doc.sections[0]
+    available_width = section.page_width.inches - section.left_margin.inches - section.right_margin.inches
+    ff.underscore_until_end_of_line(p, width_override=2.0, num_lines=2)
+
+    for para in doc.paragraphs:
+        tab_stops = para.paragraph_format.tab_stops
+        check(
+            len(tab_stops) == 1 and abs(tab_stops[0].position.inches - available_width) < 0.01,
+            f"num_lines > 1 ignores width_override, expected {available_width}in, got "
+            f"{tab_stops[0].position.inches if len(tab_stops) == 1 else 'N/A'}in",
+        )
+
+
+def test_apply_form_fields_fillline_width_annotation():
+    import form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_FIELD:FillLine@@@Work Order:[width=3in]@@@END_FORM_FIELD@@@")
+    temp_path = TEST_OUTPUT_DIR / "form_fields_fillline_width.docx"
+    doc.save(temp_path)
+
+    ff.apply_form_fields(temp_path)
+
+    result_doc = Document(temp_path)
+    check(result_doc.paragraphs[0].text == "Work Order:\t", f"annotation stripped from label, got {result_doc.paragraphs[0].text!r}")
+    tab_stops = result_doc.paragraphs[0].paragraph_format.tab_stops
+    check(
+        len(tab_stops) == 1 and abs(tab_stops[0].position.inches - 3.0) < 0.01,
+        f"width=3in annotation applied, got {tab_stops[0].position.inches if len(tab_stops) == 1 else 'N/A'}in",
+    )
+
+
+def test_apply_form_fields_fillline_lines_annotation():
+    import form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_FIELD:FillLine@@@Notes:[lines=3]@@@END_FORM_FIELD@@@")
+    temp_path = TEST_OUTPUT_DIR / "form_fields_fillline_lines.docx"
+    doc.save(temp_path)
+
+    ff.apply_form_fields(temp_path)
+
+    result_doc = Document(temp_path)
+    check(len(result_doc.paragraphs) == 3, f"lines=3 annotation produces 3 paragraphs, found {len(result_doc.paragraphs)}")
+    check(result_doc.paragraphs[0].text == "Notes:\t", f"first paragraph keeps the label, got {result_doc.paragraphs[0].text!r}")
+
+
 def test_no_shebang_in_form_compiler_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -242,6 +336,12 @@ def main():
     test_apply_form_fields_marker()
     test_apply_form_fields_marker_in_table_cell()
     test_parse_bracket_annotations()
+    test_underscore_until_end_of_line_width_override()
+    test_underscore_until_end_of_line_width_override_clamped()
+    test_underscore_until_end_of_line_multiple_lines()
+    test_underscore_until_end_of_line_multiple_lines_ignores_width()
+    test_apply_form_fields_fillline_width_annotation()
+    test_apply_form_fields_fillline_lines_annotation()
     test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
 
