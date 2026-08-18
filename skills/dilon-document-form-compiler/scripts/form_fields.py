@@ -17,14 +17,21 @@ from docx.shared import Inches
 FORM_FIELD_RE = re.compile(r'@@@FORM_FIELD:(\w+)@@@(.*?)@@@END_FORM_FIELD@@@', re.DOTALL)
 
 
+def _enclosing_table_cell(paragraph):
+    """Return the nearest enclosing <w:tc> XML element, or None if
+    `paragraph` is body-level (not inside a table cell)."""
+    tc = paragraph._p.getparent()
+    while tc is not None and tc.tag != qn('w:tc'):
+        tc = tc.getparent()
+    return tc
+
+
 def _paragraph_available_width_inches(paragraph):
     """Return the available width (inches) for a fill-to-end-of-line tab
     stop: the enclosing table cell's width if the paragraph lives in a
     table cell, otherwise the page's content width (page width minus
     margins)."""
-    tc = paragraph._p.getparent()
-    while tc is not None and tc.tag != qn('w:tc'):
-        tc = tc.getparent()
+    tc = _enclosing_table_cell(paragraph)
 
     if tc is not None:
         tc_pr = tc.find(qn('w:tcPr'))
@@ -37,6 +44,26 @@ def _paragraph_available_width_inches(paragraph):
     doc = paragraph.part.document
     section = doc.sections[0]
     return section.page_width.inches - section.left_margin.inches - section.right_margin.inches
+
+
+def _iter_table_paragraphs(table):
+    """Yield every paragraph inside `table`'s cells, recursing into any
+    nested tables (a cell can itself contain a table)."""
+    for row in table.rows:
+        for cell in row.cells:
+            yield from cell.paragraphs
+            for nested_table in cell.tables:
+                yield from _iter_table_paragraphs(nested_table)
+
+
+def _iter_all_paragraphs(doc):
+    """Yield every paragraph in `doc` - body-level paragraphs plus every
+    paragraph inside every table cell (recursively). python-docx's
+    `doc.paragraphs` alone only sees body-level paragraphs, silently
+    skipping markers placed inside markdown table cells."""
+    yield from doc.paragraphs
+    for table in doc.tables:
+        yield from _iter_table_paragraphs(table)
 
 
 def underscore_until_end_of_line(paragraph):
@@ -71,7 +98,7 @@ def apply_form_fields(docx_file):
     doc = Document(docx_file)
     changed = False
 
-    for para in doc.paragraphs:
+    for para in list(_iter_all_paragraphs(doc)):
         match = FORM_FIELD_RE.search(para.text)
         if not match:
             continue

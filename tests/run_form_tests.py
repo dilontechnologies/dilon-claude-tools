@@ -178,6 +178,25 @@ def test_apply_form_fields_marker():
     check("@@@" not in result_doc.paragraphs[0].text, "no marker text remains")
 
 
+def test_apply_form_fields_marker_in_table_cell():
+    import form_fields as ff
+    doc = Document()
+    table = doc.add_table(rows=1, cols=1)
+    table.columns[0].width = Inches(2.0)
+    cell = table.rows[0].cells[0]
+    cell.width = Inches(2.0)
+    cell.paragraphs[0].text = "@@@FORM_FIELD:FillLine@@@WO#@@@END_FORM_FIELD@@@"
+    temp_path = TEST_OUTPUT_DIR / "form_fields_marker_in_cell.docx"
+    doc.save(temp_path)
+
+    ff.apply_form_fields(temp_path)
+
+    result_doc = Document(temp_path)
+    cell_text = result_doc.tables[0].rows[0].cells[0].text
+    check("@@@" not in cell_text, "no marker text remains inside the table cell")
+    check(cell_text == "WO#\t", f"marker replaced with label + tab inside a table cell, got {cell_text!r}")
+
+
 def test_no_shebang_in_form_compiler_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -210,6 +229,7 @@ def main():
     test_underscore_until_end_of_line_body_paragraph()
     test_underscore_until_end_of_line_in_table_cell()
     test_apply_form_fields_marker()
+    test_apply_form_fields_marker_in_table_cell()
     test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
 
