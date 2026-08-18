@@ -359,6 +359,101 @@ def test_parse_field_grid_block_skips_blank_and_unparseable_lines():
         check(rows[1]['pairs'] == [("Date:", {})], f"got {rows[1]['pairs']!r}")
 
 
+def test_resolve_row_settings_defaults_and_overrides():
+    import form_fields as ff
+    check(ff.resolve_row_settings({}) == ('h', 1), "defaults to horizontal, rows=1")
+    check(ff.resolve_row_settings({'dir': 'v', 'rows': '3'}) == ('v', 3), "explicit dir/rows honored")
+    check(ff.resolve_row_settings({'dir': 'sideways'}) == ('h', 1), "invalid dir falls back to 'h'")
+    check(ff.resolve_row_settings({'rows': '0'}) == ('h', 1), "rows < 1 falls back to 1")
+    check(ff.resolve_row_settings({'rows': 'abc'}) == ('h', 1), "non-numeric rows falls back to 1")
+
+
+def test_resolve_pair_rows():
+    import form_fields as ff
+    check(ff.resolve_pair_rows({}, 2) == 2, "falls back to the row default when absent")
+    check(ff.resolve_pair_rows({'rows': '5'}, 2) == 5, "per-pair override takes precedence")
+    check(ff.resolve_pair_rows({'rows': '0'}, 2) == 2, "invalid override falls back to the row default")
+
+
+def test_resolve_pair_widths_even_split():
+    import form_fields as ff
+    pairs = [("A:", {}), ("B:", {})]
+    widths = ff.resolve_pair_widths(pairs, 6.0)
+    check(widths == [3.0, 3.0], f"default even split across 2 pairs, got {widths}")
+
+    pairs3 = [("A:", {}), ("B:", {}), ("C:", {})]
+    widths3 = ff.resolve_pair_widths(pairs3, 6.0)
+    check(widths3 == [2.0, 2.0, 2.0], f"default even split across 3 pairs, got {widths3}")
+
+
+def test_resolve_pair_widths_explicit_and_remainder():
+    import form_fields as ff
+    pairs = [("A:", {'pair': '60'}), ("B:", {})]
+    widths = ff.resolve_pair_widths(pairs, 10.0)
+    check(widths == [6.0, 4.0], f"explicit pair=60 with remainder auto-filled, got {widths}")
+
+
+def test_resolve_pair_widths_overshoot_falls_back():
+    import form_fields as ff
+    pairs = [("A:", {'pair': '60'}), ("B:", {'pair': '50'})]
+    widths = ff.resolve_pair_widths(pairs, 10.0)
+    check(widths == [5.0, 5.0], f"declared total > 100 falls back to an even split, got {widths}")
+
+
+def test_resolve_pair_widths_nonpositive_remainder_falls_back():
+    import form_fields as ff
+    pairs = [("A:", {'pair': '100'}), ("B:", {})]
+    widths = ff.resolve_pair_widths(pairs, 10.0)
+    check(widths == [5.0, 5.0], f"a fully-declared pair leaving no room for an undeclared one falls back to an even split, got {widths}")
+
+
+def test_resolve_label_width():
+    import form_fields as ff
+    check(ff.resolve_label_width({}, 10.0, 'h') == (5.0, 5.0), "default 50/50 split")
+    check(ff.resolve_label_width({'label': '70'}, 10.0, 'h') == (7.0, 3.0), "explicit label= split")
+    check(ff.resolve_label_width({'label': '70'}, 10.0, 'v') == (None, None), "dir=v ignores label=, returns (None, None)")
+    check(ff.resolve_label_width({}, 10.0, 'v') == (None, None), "dir=v with no label= still returns (None, None)")
+
+
+def test_build_field_grid_row_table_horizontal():
+    import form_fields as ff
+    doc = Document()
+    row = {'pairs': [("Work Order:", {}), ("Date:", {})], 'annotations': {}}
+    table = ff.build_field_grid_row_table(doc, row, 6.0)
+
+    check(table.style.name == "Table Grid", f"row-table uses the Table Grid style, got {table.style.name!r}")
+    check(len(table.columns) == 4, f"2 horizontal pairs produce 4 columns, found {len(table.columns)}")
+    cells = table.rows[0].cells
+    check(cells[0].paragraphs[0].text == "Work Order:", f"first label cell text, got {cells[0].paragraphs[0].text!r}")
+    check(cells[1].text == "", "first blank cell starts empty")
+    check(cells[2].paragraphs[0].text == "Date:", f"second label cell text, got {cells[2].paragraphs[0].text!r}")
+    check(cells[3].text == "", "second blank cell starts empty")
+    check(len(cells[1].paragraphs) == 1, f"rows=1 default: blank cell has exactly 1 paragraph, found {len(cells[1].paragraphs)}")
+
+
+def test_build_field_grid_row_table_vertical_with_rows():
+    import form_fields as ff
+    doc = Document()
+    row = {'pairs': [("Notes:", {})], 'annotations': {'dir': 'v', 'rows': '3'}}
+    table = ff.build_field_grid_row_table(doc, row, 6.0)
+
+    check(len(table.columns) == 1, f"1 vertical pair produces 1 column, found {len(table.columns)}")
+    cell = table.rows[0].cells[0]
+    check(cell.paragraphs[0].text == "Notes:", f"label paragraph text, got {cell.paragraphs[0].text!r}")
+    check(len(cell.paragraphs) == 4, f"1 label paragraph + rows=3 blank paragraphs = 4 total, found {len(cell.paragraphs)}")
+    for blank_paragraph in cell.paragraphs[1:]:
+        check(blank_paragraph.text == "", f"blank paragraph is empty, got {blank_paragraph.text!r}")
+
+
+def test_build_field_grid_row_table_is_centered():
+    import form_fields as ff
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    doc = Document()
+    row = {'pairs': [("A:", {})], 'annotations': {}}
+    table = ff.build_field_grid_row_table(doc, row, 6.0)
+    check(table.alignment == WD_TABLE_ALIGNMENT.CENTER, f"row-table is centered, got {table.alignment}")
+
+
 def test_no_shebang_in_form_compiler_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -404,6 +499,16 @@ def main():
     test_parse_field_grid_block_simple()
     test_parse_field_grid_block_annotations()
     test_parse_field_grid_block_skips_blank_and_unparseable_lines()
+    test_resolve_row_settings_defaults_and_overrides()
+    test_resolve_pair_rows()
+    test_resolve_pair_widths_even_split()
+    test_resolve_pair_widths_explicit_and_remainder()
+    test_resolve_pair_widths_overshoot_falls_back()
+    test_resolve_pair_widths_nonpositive_remainder_falls_back()
+    test_resolve_label_width()
+    test_build_field_grid_row_table_horizontal()
+    test_build_field_grid_row_table_vertical_with_rows()
+    test_build_field_grid_row_table_is_centered()
     test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
 

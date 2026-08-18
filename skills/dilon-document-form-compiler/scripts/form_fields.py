@@ -107,6 +107,168 @@ def parse_field_grid_block(block_text):
     return rows
 
 
+def resolve_row_settings(row_annotations):
+    """Resolve a row's dir=/rows= annotations to (direction, rows),
+    defaulting to ('h', 1) and warning-and-defaulting on invalid
+    values."""
+    direction = row_annotations.get('dir', 'h')
+    if direction not in ('h', 'v'):
+        print(f"  FieldGrid: invalid dir={direction!r} - using 'h'")
+        direction = 'h'
+
+    rows = 1
+    if 'rows' in row_annotations:
+        try:
+            rows = int(row_annotations['rows'])
+            if rows < 1:
+                print(f"  FieldGrid: rows={row_annotations['rows']!r} must be >= 1 - using 1")
+                rows = 1
+        except ValueError:
+            print(f"  FieldGrid: invalid rows={row_annotations['rows']!r} - using 1")
+
+    return direction, rows
+
+
+def resolve_pair_rows(pair_annotations, row_rows):
+    """Resolve a pair's own rows= override, falling back to the row's
+    default (row_rows) if absent or invalid."""
+    if 'rows' not in pair_annotations:
+        return row_rows
+    try:
+        rows = int(pair_annotations['rows'])
+        if rows < 1:
+            print(f"  FieldGrid: rows={pair_annotations['rows']!r} must be >= 1 - using {row_rows}")
+            return row_rows
+        return rows
+    except ValueError:
+        print(f"  FieldGrid: invalid rows={pair_annotations['rows']!r} - using {row_rows}")
+        return row_rows
+
+
+def resolve_pair_widths(pairs, row_width):
+    """
+    Resolve each pair's width (inches) from its optional pair=NN
+    annotation.
+
+    pairs: list of (label_text, annotations_dict) as returned by
+        parse_field_grid_block().
+    row_width: total available width (inches) for the row.
+
+    Returns a list of floats (inches), one per pair, in the same order
+    as `pairs`. Falls back to an even split across all pairs - with a
+    printed warning - if declared percentages exceed 100, or leave a
+    non-positive remainder for the undeclared pairs.
+    """
+    declared = {}
+    for idx, (_, annotations) in enumerate(pairs):
+        if 'pair' in annotations:
+            try:
+                declared[idx] = float(annotations['pair'])
+            except ValueError:
+                print(f"  FieldGrid: invalid pair={annotations['pair']!r} - ignoring")
+
+    num_pairs = len(pairs)
+    even_split = [row_width / num_pairs] * num_pairs
+
+    if not declared:
+        return even_split
+
+    declared_total = sum(declared.values())
+    undeclared_count = num_pairs - len(declared)
+    remainder = 100.0 - declared_total
+
+    if declared_total > 100 or (undeclared_count > 0 and remainder <= 0):
+        print(
+            f"  FieldGrid: pair= values on this row don't leave room for the "
+            f"undeclared pairs (declared {declared_total}%) - falling back to an even split"
+        )
+        return even_split
+
+    undeclared_share = remainder / undeclared_count if undeclared_count else 0.0
+    widths = []
+    for idx in range(num_pairs):
+        pct = declared.get(idx, undeclared_share)
+        widths.append(row_width * pct / 100.0)
+    return widths
+
+
+def resolve_label_width(pair_annotations, pair_width, row_dir):
+    """
+    Resolve a horizontal pair's label sub-cell width (inches) from its
+    optional label=NN annotation. Ignored (with a warning) if the row is
+    dir=v, since there's no left/right split to control. Returns
+    (label_width, blank_width), or (None, None) for a vertical row.
+    """
+    if row_dir == 'v':
+        if 'label' in pair_annotations:
+            print("  FieldGrid: label= ignored on a dir=v row (no left/right split to control)")
+        return None, None
+
+    pct = 50.0
+    if 'label' in pair_annotations:
+        try:
+            pct = float(pair_annotations['label'])
+        except ValueError:
+            print(f"  FieldGrid: invalid label={pair_annotations['label']!r} - using 50")
+            pct = 50.0
+
+    label_width = pair_width * pct / 100.0
+    blank_width = pair_width - label_width
+    return label_width, blank_width
+
+
+def build_field_grid_row_table(document, row, row_width):
+    """
+    Build one FieldGrid row as a standalone 1-row Word table, added to
+    `document` (so it inherits the document's available styles,
+    including the built-in 'Table Grid' style).
+
+    row: one entry from parse_field_grid_block()'s return value
+        ({'pairs': [...], 'annotations': {...}}).
+    row_width: total available width (inches) for this row.
+
+    Returns the created Table object.
+    """
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+
+    pairs = row['pairs']
+    direction, row_rows = resolve_row_settings(row['annotations'])
+    pair_widths = resolve_pair_widths(pairs, row_width)
+
+    num_cols = len(pairs) if direction == 'v' else len(pairs) * 2
+    table = document.add_table(rows=1, cols=num_cols)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
+
+    col_idx = 0
+    for (label_text, pair_annotations), pair_width in zip(pairs, pair_widths):
+        pair_rows = resolve_pair_rows(pair_annotations, row_rows)
+
+        if direction == 'v':
+            cell = table.rows[0].cells[col_idx]
+            cell.width = Inches(pair_width)
+            table.columns[col_idx].width = Inches(pair_width)
+            cell.paragraphs[0].add_run(label_text)
+            for _ in range(pair_rows):
+                cell.add_paragraph()
+            col_idx += 1
+        else:
+            label_width, blank_width = resolve_label_width(pair_annotations, pair_width, direction)
+            label_cell = table.rows[0].cells[col_idx]
+            blank_cell = table.rows[0].cells[col_idx + 1]
+            label_cell.width = Inches(label_width)
+            blank_cell.width = Inches(blank_width)
+            table.columns[col_idx].width = Inches(label_width)
+            table.columns[col_idx + 1].width = Inches(blank_width)
+            label_cell.paragraphs[0].add_run(label_text)
+            for _ in range(pair_rows - 1):
+                blank_cell.add_paragraph()
+            col_idx += 2
+
+    return table
+
+
 def _enclosing_table_cell(paragraph):
     """Return the nearest enclosing <w:tc> XML element, or None if
     `paragraph` is body-level (not inside a table cell)."""
