@@ -31,9 +31,10 @@ from dilon_docx_common import (  # noqa: E402
 )
 
 try:
-    from form_fields import apply_form_fields
+    from form_fields import apply_form_fields, protect_field_grid_line_breaks
 except ImportError:
     apply_form_fields = None
+    protect_field_grid_line_breaks = None
 
 
 def generate_form_document(markdown_path, output_path, form_template_path=None):
@@ -65,6 +66,8 @@ def generate_form_document(markdown_path, output_path, form_template_path=None):
     print(f"Reading Markdown file: {markdown_path}")
     metadata, markdown_body = extract_yaml_and_markdown(markdown_path)
     markdown_body = render_jinja(markdown_body, metadata)
+    if protect_field_grid_line_breaks is not None:
+        markdown_body = protect_field_grid_line_breaks(markdown_body)
     print(f"Metadata extracted: {list(metadata.keys())}")
 
     # Part A: the base template, populated with header/footer

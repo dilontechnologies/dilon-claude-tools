@@ -70,6 +70,225 @@ SAMPLE_FORM_MARKDOWN = (
 )
 
 
+FIELD_GRID_PERMUTATIONS_MARKDOWN = (
+    '---\n'
+    'title: "Field Grid Permutations"\n'
+    'author: "Test Suite"\n'
+    'department: "Engineering"\n'
+    'doc_number: "FO-88888"\n'
+    'current_revision: "00"\n'
+    'regulatory_rep: "Test Rep"\n'
+    'quality_rep: "Test QA"\n'
+    'department_head: "Test Head"\n'
+    'revisions:\n'
+    '  - number: "00"\n'
+    '    description: "Initial test"\n'
+    '    eco_number: "ECO-000"\n'
+    '    eco_date: "2025-01-01"\n'
+    '---\n'
+    '\n'
+    '@@@FORM_FIELD:FieldGrid@@@\n'
+    'Default Pair A: | Default Pair B:\n'
+    'Label Split:[label=70] | Label Default:\n'
+    'Explicit Pair:[pair=70] | Inferred Remainder:\n'
+    'All Explicit A:[pair=30] | All Explicit B:[pair=30] | All Explicit C:[pair=40]\n'
+    'Overshoot A:[pair=70] | Overshoot B:[pair=60]\n'
+    'Row Rows Default: | Row Rows Default 2: {rows=2}\n'
+    'Row Rows Override:[rows=3] | Row Rows Default 3: {rows=1}\n'
+    'Vertical Single: {dir=v}\n'
+    'Vertical Multi A: | Vertical Multi B: {dir=v,rows=2}\n'
+    'Vertical Override A:[rows=4] | Vertical Override B: {dir=v,rows=2}\n'
+    'Combined A:[label=60,pair=55,rows=2] | Combined B:[pair=45]\n'
+    '@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FieldGrid:4in@@@\n'
+    'Narrow A: | Narrow B:\n'
+    '@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Default Line:@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Custom Width Line:[width=2.5in]@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Multi Line Notes:[lines=3]@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Conflicting Line:[width=2in,lines=2]@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '| Field | Value |\n'
+    '|---|---|\n'
+    '| Cell FillLine | @@@FORM_FIELD:FillLine@@@Cell Line:@@@END_FORM_FIELD@@@ |\n'
+)
+
+
+def test_field_grid_permutations_compile():
+    input_md = TEST_OUTPUT_DIR / "field_grid_permutations.md"
+    output_docx = TEST_OUTPUT_DIR / "field_grid_permutations.docx"
+    input_md.write_text(FIELD_GRID_PERMUTATIONS_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(FORM_COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(BASE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "field grid permutations markdown compiles cleanly")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(output_docx.exists(), "field_grid_permutations.docx created on disk")
+    if not output_docx.exists():
+        return
+
+    doc = Document(output_docx)
+    grid_tables = [t for t in doc.tables if t.style is not None and t.style.name == "Table Grid"]
+
+    def table_for(first_cell_text):
+        return next(
+            (t for t in grid_tables if t.rows[0].cells[0].paragraphs[0].text == first_cell_text),
+            None,
+        )
+
+    default_pair_table = table_for("Default Pair A:")
+    check(default_pair_table is not None, "default horizontal pair row present")
+    if default_pair_table is not None:
+        check(len(default_pair_table.columns) == 4, f"2 horizontal pairs -> 4 columns, got {len(default_pair_table.columns)}")
+        widths = [c.width.inches for c in default_pair_table.columns]
+        check(abs(widths[0] - widths[1]) < 0.05, f"default 50/50 label/blank split within the pair, got {widths[0]}in/{widths[1]}in")
+
+    label_split_table = table_for("Label Split:")
+    check(label_split_table is not None, "label= split row present")
+    if label_split_table is not None:
+        widths = [c.width.inches for c in label_split_table.columns]
+        check(widths[0] > widths[1], f"label=70 gives the label sub-cell more width than the blank, got {widths[0]}in/{widths[1]}in")
+
+    explicit_pair_table = table_for("Explicit Pair:")
+    check(explicit_pair_table is not None, "pair= with inferred remainder row present")
+    if explicit_pair_table is not None:
+        widths = [c.width.inches for c in explicit_pair_table.columns]
+        pair1_width = widths[0] + widths[1]
+        pair2_width = widths[2] + widths[3]
+        check(pair1_width > pair2_width, f"pair=70 pair wider than the inferred-remainder pair, got {pair1_width}in vs {pair2_width}in")
+
+    all_explicit_table = table_for("All Explicit A:")
+    check(all_explicit_table is not None, "all-pairs-explicit pair= row present")
+    if all_explicit_table is not None:
+        check(len(all_explicit_table.columns) == 6, f"3 horizontal pairs -> 6 columns, got {len(all_explicit_table.columns)}")
+
+    overshoot_table = table_for("Overshoot A:")
+    check(overshoot_table is not None, "pair= overshoot row present (compiled despite invalid spec)")
+    if overshoot_table is not None:
+        widths = [c.width.inches for c in overshoot_table.columns]
+        pair1_width = widths[0] + widths[1]
+        pair2_width = widths[2] + widths[3]
+        check(abs(pair1_width - pair2_width) < 0.05, f"overshoot falls back to an even split, got {pair1_width}in vs {pair2_width}in")
+
+    row_rows_default_table = table_for("Row Rows Default:")
+    check(row_rows_default_table is not None, "row-level rows= row present")
+    if row_rows_default_table is not None:
+        cells = row_rows_default_table.rows[0].cells
+        check(len(cells[1].paragraphs) == 2, f"row-level rows=2 applies to both pairs' blanks, first blank got {len(cells[1].paragraphs)} paragraphs")
+        check(len(cells[3].paragraphs) == 2, f"row-level rows=2 applies to both pairs' blanks, second blank got {len(cells[3].paragraphs)} paragraphs")
+
+    row_rows_override_table = table_for("Row Rows Override:")
+    check(row_rows_override_table is not None, "per-pair rows= override row present")
+    if row_rows_override_table is not None:
+        cells = row_rows_override_table.rows[0].cells
+        check(len(cells[1].paragraphs) == 3, f"per-pair rows=3 override, first blank got {len(cells[1].paragraphs)} paragraphs")
+        check(len(cells[3].paragraphs) == 1, f"row-level rows=1 default on the second pair, got {len(cells[3].paragraphs)} paragraphs")
+
+    vertical_single_table = table_for("Vertical Single:")
+    check(vertical_single_table is not None, "single-pair vertical row present")
+    if vertical_single_table is not None:
+        check(len(vertical_single_table.columns) == 1, f"1 vertical pair -> 1 column, got {len(vertical_single_table.columns)}")
+
+    vertical_multi_table = table_for("Vertical Multi A:")
+    check(vertical_multi_table is not None, "multi-pair vertical row present")
+    if vertical_multi_table is not None:
+        check(len(vertical_multi_table.columns) == 2, f"2 vertical pairs -> 2 columns, got {len(vertical_multi_table.columns)}")
+        cells = vertical_multi_table.rows[0].cells
+        check(len(cells[0].paragraphs) == 3, f"1 label + row-level rows=2 blanks = 3 paragraphs, got {len(cells[0].paragraphs)}")
+        check(len(cells[1].paragraphs) == 3, f"1 label + row-level rows=2 blanks = 3 paragraphs, got {len(cells[1].paragraphs)}")
+
+    vertical_override_table = table_for("Vertical Override A:")
+    check(vertical_override_table is not None, "vertical row with a per-pair rows= override present")
+    if vertical_override_table is not None:
+        cells = vertical_override_table.rows[0].cells
+        check(len(cells[0].paragraphs) == 5, f"1 label + per-pair rows=4 override = 5 paragraphs, got {len(cells[0].paragraphs)}")
+        check(len(cells[1].paragraphs) == 3, f"1 label + row-level rows=2 default = 3 paragraphs, got {len(cells[1].paragraphs)}")
+
+    combined_table = table_for("Combined A:")
+    check(combined_table is not None, "label=+pair=+rows= combined row present")
+    if combined_table is not None:
+        widths = [c.width.inches for c in combined_table.columns]
+        check(widths[0] > widths[1], f"label=60 within the first pair gives the label more width, got {widths[0]}in/{widths[1]}in")
+        pair1_width = widths[0] + widths[1]
+        pair2_width = widths[2] + widths[3]
+        check(pair1_width > pair2_width, f"pair=55 pair wider than the pair=45 pair, got {pair1_width}in vs {pair2_width}in")
+        cells = combined_table.rows[0].cells
+        check(len(cells[1].paragraphs) == 2, f"per-pair rows=2 on the first pair's blank, got {len(cells[1].paragraphs)} paragraphs")
+
+    narrow_table = table_for("Narrow A:")
+    check(narrow_table is not None, "block-level max-width FieldGrid present")
+    if narrow_table is not None:
+        total_width = sum(c.width.inches for c in narrow_table.columns)
+        check(abs(total_width - 4.0) < 0.05, f"block-level max width of 4in respected, got {total_width}in")
+
+    fillline_paragraphs = {
+        p.text.split('\t')[0]: p
+        for p in doc.paragraphs
+        if p.text.startswith(("Default Line:", "Custom Width Line:", "Multi Line Notes:", "Conflicting Line:"))
+    }
+
+    check("Default Line:" in fillline_paragraphs, "default FillLine present")
+    if "Default Line:" in fillline_paragraphs:
+        tab_stops = fillline_paragraphs["Default Line:"].paragraph_format.tab_stops
+        check(len(tab_stops) == 1, f"default FillLine has exactly one tab stop, found {len(tab_stops)}")
+
+    check("Custom Width Line:" in fillline_paragraphs, "width= FillLine present")
+    if "Custom Width Line:" in fillline_paragraphs:
+        tab_stops = fillline_paragraphs["Custom Width Line:"].paragraph_format.tab_stops
+        check(
+            len(tab_stops) == 1 and abs(tab_stops[0].position.inches - 2.5) < 0.05,
+            f"width=2.5in respected, got {tab_stops[0].position.inches if len(tab_stops) == 1 else 'N/A'}in",
+        )
+
+    multi_line_start = next((i for i, p in enumerate(doc.paragraphs) if p.text == "Multi Line Notes:\t"), None)
+    check(multi_line_start is not None, "lines= FillLine present")
+    if multi_line_start is not None:
+        following = doc.paragraphs[multi_line_start + 1 : multi_line_start + 3]
+        check(
+            len(following) == 2 and all(p.text == "\t" for p in following),
+            f"lines=3 produces 2 additional bare-tab paragraphs, got {[p.text for p in following]!r}",
+        )
+
+    check("Conflicting Line:" in fillline_paragraphs, "width=+lines= conflicting FillLine present")
+    if "Conflicting Line:" in fillline_paragraphs:
+        section = doc.sections[0]
+        available_width = section.page_width.inches - section.left_margin.inches - section.right_margin.inches
+        tab_stops = fillline_paragraphs["Conflicting Line:"].paragraph_format.tab_stops
+        check(
+            len(tab_stops) == 1 and abs(tab_stops[0].position.inches - available_width) < 0.05,
+            f"lines= wins over width= when both given, expected full width {available_width}in, got "
+            f"{tab_stops[0].position.inches if len(tab_stops) == 1 else 'N/A'}in",
+        )
+
+    cell_fillline_row = next(
+        (row for t in doc.tables for row in t.rows if row.cells[0].text == "Cell FillLine"),
+        None,
+    )
+    check(cell_fillline_row is not None, "table row containing the cell-level FillLine is present")
+    if cell_fillline_row is not None:
+        value_cell_text = cell_fillline_row.cells[1].text
+        check("@@@" not in value_cell_text, "table-cell FillLine marker resolved (Task 1's fix), no leftover marker text")
+        check(value_cell_text == "Cell Line:\t", f"table-cell FillLine rendered correctly, got {value_cell_text!r}")
+
+
 def test_generate_form_document():
     input_md = TEST_OUTPUT_DIR / "form_test.md"
     output_docx = TEST_OUTPUT_DIR / "form_test.docx"
@@ -504,6 +723,29 @@ def test_field_grid_marker_inside_table_cell_warns_and_skips():
     check("@@@FORM_FIELD:FieldGrid@@@" in cell_text, "FieldGrid marker inside a table cell is left as-is, not processed")
 
 
+def test_protect_field_grid_line_breaks():
+    import form_fields as ff
+    source = (
+        "@@@FORM_FIELD:FieldGrid@@@\n"
+        "Work Order: | Date:\n"
+        "Carrier Board Assy Lot:\n"
+        "@@@END_FORM_FIELD@@@\n"
+    )
+    protected = ff.protect_field_grid_line_breaks(source)
+    check(
+        "Work Order: | Date:  \n" in protected,
+        f"non-blank row line gets a trailing hard-break, got {protected!r}",
+    )
+    check(
+        "Carrier Board Assy Lot:  \n" in protected,
+        f"last row line also gets a trailing hard-break, got {protected!r}",
+    )
+
+    # FillLine markers and text outside FieldGrid blocks are untouched.
+    unrelated = "@@@FORM_FIELD:FillLine@@@Work Order:@@@END_FORM_FIELD@@@\n\nSome body text.\n"
+    check(ff.protect_field_grid_line_breaks(unrelated) == unrelated, "text with no FieldGrid block is unchanged")
+
+
 def test_no_shebang_in_form_compiler_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -562,6 +804,8 @@ def main():
     test_insert_field_grid_replaces_marker_with_row_tables()
     test_insert_field_grid_max_width()
     test_field_grid_marker_inside_table_cell_warns_and_skips()
+    test_protect_field_grid_line_breaks()
+    test_field_grid_permutations_compile()
     test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
 

@@ -302,6 +302,39 @@ def insert_field_grid(doc, paragraph, block_text, max_width_inches=None):
     marker_element.getparent().remove(marker_element)
 
 
+FIELD_GRID_BLOCK_RE = re.compile(
+    r'(@@@FORM_FIELD:FieldGrid(?::[\d.]+in)?@@@)(.*?)(@@@END_FORM_FIELD@@@)',
+    re.DOTALL,
+)
+
+
+def protect_field_grid_line_breaks(markdown_text):
+    """
+    Pandoc's markdown-to-docx conversion joins consecutive non-blank
+    source lines into a single paragraph, separated by a space -
+    collapsing every declared FieldGrid row onto one line before
+    apply_form_fields() ever sees the compiled document. This appends a
+    Markdown hard-line-break (two trailing spaces) to every non-blank
+    line inside each @@@FORM_FIELD:FieldGrid@@@...@@@END_FORM_FIELD@@@
+    block, so Pandoc preserves each row as a real line break -
+    python-docx surfaces a resulting <w:br/> as '\\n' in the compiled
+    paragraph's .text, exactly what parse_field_grid_block() expects to
+    split rows on.
+
+    Call this on the raw markdown body before it's handed to Pandoc.
+    FillLine markers and text outside FieldGrid blocks are untouched.
+    """
+    def _protect(match):
+        open_marker, block, close_marker = match.group(1), match.group(2), match.group(3)
+        protected_lines = [
+            line + '  ' if line.strip() else line
+            for line in block.split('\n')
+        ]
+        return open_marker + '\n'.join(protected_lines) + close_marker
+
+    return FIELD_GRID_BLOCK_RE.sub(_protect, markdown_text)
+
+
 def _enclosing_table_cell(paragraph):
     """Return the nearest enclosing <w:tc> XML element, or None if
     `paragraph` is body-level (not inside a table cell)."""
