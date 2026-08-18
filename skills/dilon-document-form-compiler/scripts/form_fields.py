@@ -16,6 +16,35 @@ from docx.shared import Inches
 
 FORM_FIELD_RE = re.compile(r'@@@FORM_FIELD:(\w+)@@@(.*?)@@@END_FORM_FIELD@@@', re.DOTALL)
 
+BRACKET_ANNOTATION_RE = re.compile(r'^(.*?)\[([^\[\]]+)\]\s*$')
+
+
+def _parse_key_value_pairs(annotation_text):
+    """Split a comma-separated `key=value,key=value` string into a dict.
+    Entries without '=' are ignored, not an error."""
+    annotations = {}
+    for entry in annotation_text.split(','):
+        if '=' not in entry:
+            continue
+        key, value = entry.split('=', 1)
+        annotations[key.strip()] = value.strip()
+    return annotations
+
+
+def parse_bracket_annotations(text):
+    """
+    Split a trailing `[key=value,key=value,...]` annotation off `text`.
+
+    Returns (cleaned_text, annotations) where annotations is a
+    str -> str dict (values are not type-converted here - callers parse
+    ints/floats themselves). Returns (text, {}) if there's no trailing
+    bracket.
+    """
+    match = BRACKET_ANNOTATION_RE.match(text)
+    if not match:
+        return text, {}
+    return match.group(1), _parse_key_value_pairs(match.group(2))
+
 
 def _enclosing_table_cell(paragraph):
     """Return the nearest enclosing <w:tc> XML element, or None if

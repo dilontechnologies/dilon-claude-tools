@@ -197,6 +197,17 @@ def test_apply_form_fields_marker_in_table_cell():
     check(cell_text == "WO#\t", f"marker replaced with label + tab inside a table cell, got {cell_text!r}")
 
 
+def test_parse_bracket_annotations():
+    import form_fields as ff
+    check(ff.parse_bracket_annotations("Work Order:") == ("Work Order:", {}), "no bracket -> unchanged text, empty annotations")
+    check(ff.parse_bracket_annotations("Cure Temp:[pair=60]") == ("Cure Temp:", {"pair": "60"}), "single annotation parsed")
+    check(
+        ff.parse_bracket_annotations("Notes:[dir=v,rows=3]") == ("Notes:", {"dir": "v", "rows": "3"}),
+        "multiple comma-separated annotations parsed",
+    )
+    check(ff.parse_bracket_annotations("Label[malformed]") == ("Label", {}), "entry without '=' is ignored, not an error")
+
+
 def test_no_shebang_in_form_compiler_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -230,6 +241,7 @@ def main():
     test_underscore_until_end_of_line_in_table_cell()
     test_apply_form_fields_marker()
     test_apply_form_fields_marker_in_table_cell()
+    test_parse_bracket_annotations()
     test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
 
