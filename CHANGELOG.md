@@ -24,6 +24,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `skills/dilon-document-compiler/scripts/check_deps.py` - preflight dependency check
 - `tests/run_tests.py` - direct-invocation test suite replacing the MCP-protocol-based `test-all-features.js`
 
+## [2.2.0] - 2026-08-18
+
+### Added
+- `dilon-document-form-compiler` skill (`scripts/generate_dilon_form.py`, `scripts/form_fields.py`, `scripts/check_deps.py`) - compiles the same Dilon-front-matter markdown into a running-header/footer-only Word document (no title page, no signature-approval page, no table of contents), for forms/travelers meant to be printed and filled out by hand
+- `@@@FORM_FIELD:FillLine@@@Label@@@END_FORM_FIELD@@@` marker (form compiler only) - a label followed by a right-aligned, underscore-leadered fill-in blank sized to the page's or table cell's true available width
+- `lib/dilon_docx_common.py` - Pandoc-conversion/styling helpers shared by both compiler skills, extracted from `generate_dilon_doc.py`
+- Body-level `{{field}}` substitution: document body text can now reference any YAML front-matter field (e.g. `{{doc_number}}`, `{{title}}`), resolved via Jinja2 against the same metadata dict that drives the header/footer/signature table/title page
+- `include_toc` flag on `markdown_to_docx()`, letting the form compiler skip table-of-contents generation
+
+### Changed
+- **BREAKING:** `generate_dilon_doc.py`'s CLI dropped its fourth argument - `python generate_dilon_doc.py <input.md> <output.docx> <base_template>` (was `<signature_template> <content_template>`)
+- Header, footer, signature-approval table, and title page are now all generated programmatically via python-docx instead of `docxtpl`/Jinja2 Word-template substitution - fixes a real bug where the signature table's Jinja fields were silently never rendering (`docxtpl.get_docx()` resets to an unrendered template copy when called after `.render()`)
+- `TEMPLATE_Word_Signature.docx` renamed to `TEMPLATE_Word_Base.docx` (it no longer carries a signature-specific table); its header/footer content is now built fresh at compile time rather than template-baked, and its top margin increased 1.0in → 1.4in
+- Formatting fixes surfaced by review: signature/revision/header tables given explicit grid borders (`Normal Table` style has none) and rebalanced column widths; header table resized to fit within the page's available content width; the doc_number footer line's broken hanging-indent/tab-stop fixed to true left-justification; footer font set to 9pt with separator borders
+
+### Removed
+- `docxtpl` (`python-docx-template`) dependency, replaced by direct `jinja2` usage plus plain python-docx calls
+- `templates/TEMPLATE_Word_Content.docx` - its title-page content is now hardcoded in `build_title_page()` (`generate_dilon_doc.py`)
+- "PRINTED COPIES ARE FOR REFERENCE ONLY." footer line
+
 ## [2.1.1] - 2026-07-02
 
 ### Fixed

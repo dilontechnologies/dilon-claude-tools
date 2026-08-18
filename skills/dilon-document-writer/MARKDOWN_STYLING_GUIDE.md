@@ -42,24 +42,22 @@ revisions:
 - `regulatory_rep`, `quality_rep`, `department_head`: Approver names
 - `revisions`: Array of revision history entries
 
+**Referencing Front Matter in the Document Body:**
+
+The document body may reference any front-matter field with `{{field_name}}` (e.g. `{{doc_number}}`, `{{title}}`, `{{current_revision}}`), so a value doesn't have to be hand-duplicated between the YAML front matter and the prose. This is resolved by Jinja2 against the same metadata dict that drives the header, footer, signature table, and title page, before Pandoc ever sees the text. To write a literal `{{` or `}}` (e.g. to document this syntax itself), wrap it in `{% raw %}...{% endraw %}`.
+
+A misspelled field name (e.g. `{{doc_nubmer}}`) does not error and does not produce a visible gray block - Jinja2 silently renders it as an empty string. Proofread body text that uses this syntax against the front matter fields listed above.
+
+The compiled Word document's own header/footer/signature-table/title-page content is generated directly in Python from the same front-matter dict (not via a Word-template Jinja substitution) - `{{field}}` syntax only applies to markdown body text.
+
 **Troubleshooting Gray Blocks:**
-If you see gray highlighted blocks in the generated Word document, there are two possible causes:
-
-**Cause 1: Unresolved Jinja2 Variable**
-1. Check that all variables in the Word template (e.g., `{{variable_name}}`) have corresponding entries in the YAML front matter
-2. Open `TEMPLATE_Word_Base.docx` and search for `{{` to find all template variables
-3. Ensure every template variable has a value in your markdown's YAML front matter
-4. Common culprits: missing author, department, or approver names
-
-**Cause 2: Legacy Word Form Fields**
-If the gray block appears without any `{{variable}}` nearby, it's likely a Word form field:
+If you see gray highlighted blocks in the generated Word document, it's a legacy Word form field left over in `TEMPLATE_Word_Base.docx`, not a Jinja2 variable (the base template carries no `{{...}}` fields of its own):
 1. Open `TEMPLATE_Word_Base.docx` in Word
 2. Enable "Developer" tab: File → Options → Customize Ribbon → Check "Developer"
 3. Click "Design Mode" button in Developer tab to see form fields
 4. Click the gray form field and press Delete
 5. Turn off "Design Mode"
 6. Save the template
-7. **Note**: Form fields often appear after text like "Electronic" in signature tables
 
 **Revision Entry Format:**
 ```yaml
@@ -660,6 +658,8 @@ This sentence needs a footnote.[^1]
 ## 12. Custom Paragraph Styles
 
 For content that requires specific formatting beyond Pandoc's automatic styling, you can apply custom paragraph styles using `@@@STYLE@@@` markers.
+
+**Form-only marker:** Documents compiled with the `dilon-document-form-compiler` skill (forms/travelers meant to be printed and filled out by hand) support one additional marker on top of everything in this guide: `@@@FORM_FIELD:FillLine@@@Label@@@END_FORM_FIELD@@@`, which becomes a label followed by a right-aligned, underscore-leadered fill-in blank. See that skill's `SKILL.md` for details - it does not apply to documents compiled with `dilon-document-compiler`.
 
 ### 12.1 Syntax
 
