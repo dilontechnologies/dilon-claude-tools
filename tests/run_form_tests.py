@@ -289,6 +289,117 @@ def test_field_grid_permutations_compile():
         check(value_cell_text == "Cell Line:\t", f"table-cell FillLine rendered correctly, got {value_cell_text!r}")
 
 
+FO_00127_REPLICA_MARKDOWN = (
+    '---\n'
+    'title: "Detector Head Assembly Traveler"\n'
+    'author: "Test Suite"\n'
+    'department: "Engineering"\n'
+    'doc_number: "FO-00127"\n'
+    'current_revision: "01"\n'
+    'regulatory_rep: "Test Rep"\n'
+    'quality_rep: "Test QA"\n'
+    'department_head: "Test Head"\n'
+    'revisions:\n'
+    '  - number: "01"\n'
+    '    description: "Initial test"\n'
+    '    eco_number: "ECO-000055"\n'
+    '    eco_date: "2025-03-13"\n'
+    '---\n'
+    '\n'
+    '@@@FORM_FIELD:FieldGrid@@@\n'
+    'Work Order: | Date:\n'
+    '5mm GAGG Crystal Lot: | Technician:\n'
+    'Carrier Board Assy Lot:\n'
+    'Epoxy Lot # and Expiration:\n'
+    'Cure Temp:[pair=60] | Start Time:[pair=40]\n'
+    'End Time:\n'
+    '@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Alignment Fixture:[width=0.5in]@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '| Document # | Rev | Date | Initial |\n'
+    '|---|---|---|---|\n'
+    '| WI-00077 |  |  |  |\n'
+    '\n'
+    '| Position | Clean / Inspect (Initial) | Epoxy Bead Check (Initial) | Alignment Check (Initial) | Bond Check (Initial) | Serial Number | Tested (Pass / Fail) | Pulled for WO# | Pulled for WO# |\n'
+    '|---|---|---|---|---|---|---|---|---|\n'
+    '| 1 |  |  |  |  |  |  | WO# |  |\n'
+    '| 2 |  |  |  |  |  |  | WO# |  |\n'
+)
+
+
+def test_fo_00127_replica_compiles_with_expected_fields():
+    input_md = TEST_OUTPUT_DIR / "fo_00127_replica.md"
+    output_docx = TEST_OUTPUT_DIR / "fo_00127_replica.docx"
+    input_md.write_text(FO_00127_REPLICA_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(FORM_COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(BASE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "FO-00127 replica compiles cleanly")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(output_docx.exists(), "fo_00127_replica.docx created on disk")
+    if not output_docx.exists():
+        return
+
+    doc = Document(output_docx)
+    all_text = "\n".join(p.text for p in doc.paragraphs) + "\n" + "\n".join(
+        cell.text for table in doc.tables for row in table.rows for cell in row.cells
+    )
+    check("@@@" not in all_text, "no leftover marker text anywhere in the compiled document")
+
+    field_grid_labels = [
+        "Work Order:", "Date:", "5mm GAGG Crystal Lot:", "Technician:",
+        "Carrier Board Assy Lot:", "Epoxy Lot # and Expiration:",
+        "Cure Temp:", "Start Time:", "End Time:",
+    ]
+    field_grid_tables = [t for t in doc.tables if t.style is not None and t.style.name == "Table Grid"]
+    grid_cell_texts = {
+        cell.paragraphs[0].text
+        for table in field_grid_tables
+        for row in table.rows
+        for cell in row.cells
+    }
+    missing_labels = [label for label in field_grid_labels if label not in grid_cell_texts]
+    check(not missing_labels, f"every FieldGrid label from FO-00127 is present, missing: {missing_labels}")
+
+    cure_temp_table = next(
+        (t for t in field_grid_tables if t.rows[0].cells[0].paragraphs[0].text == "Cure Temp:"),
+        None,
+    )
+    check(cure_temp_table is not None, "the Cure Temp/Start Time row-table is present")
+    if cure_temp_table is not None:
+        widths = [col.width.inches for col in cure_temp_table.columns]
+        check(len(widths) == 4, f"2 horizontal pairs produce 4 columns, found {len(widths)}")
+
+    alignment_paragraphs = [p for p in doc.paragraphs if p.text.startswith("Alignment Fixture:")]
+    check(len(alignment_paragraphs) == 1, "Alignment Fixture rendered as a single FillLine paragraph")
+    if alignment_paragraphs:
+        tab_stops = alignment_paragraphs[0].paragraph_format.tab_stops
+        check(
+            len(tab_stops) == 1 and abs(tab_stops[0].position.inches - 0.5) < 0.05,
+            f"Alignment Fixture uses its width=0.5in override, got "
+            f"{tab_stops[0].position.inches if len(tab_stops) == 1 else 'N/A'}in",
+        )
+
+    qc_tables = [t for t in doc.tables if t.rows and t.rows[0].cells and t.rows[0].cells[0].text == "Position"]
+    check(len(qc_tables) == 1, "the 9-column QC tracking table is present")
+    if qc_tables:
+        check(len(qc_tables[0].columns) == 9, f"QC table has 9 columns, found {len(qc_tables[0].columns)}")
+
+
 def test_generate_form_document():
     input_md = TEST_OUTPUT_DIR / "form_test.md"
     output_docx = TEST_OUTPUT_DIR / "form_test.docx"
@@ -808,6 +919,7 @@ def main():
     test_field_grid_permutations_compile()
     test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
+    test_fo_00127_replica_compiles_with_expected_fields()
 
     print(f"\n{passed} passed, {failed} failed (dilon-document-form-compiler)")
     if failed == 0:
