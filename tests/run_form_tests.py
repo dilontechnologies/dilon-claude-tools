@@ -1,11 +1,13 @@
 """
-Test suite for the dilon-document-form-compiler skill.
+Test suite for the dilon-document-form-compiler and
+dilon-document-form-writer skills.
 
 Direct-invocation style, matching tests/run_tests.py: a global
 passed/failed counter via check(), explicit test calls from main(), no
 pytest.
 """
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +18,8 @@ from docx.shared import Inches
 REPO_ROOT = Path(__file__).parent.parent
 FORM_COMPILER_DIR = REPO_ROOT / "skills" / "dilon-document-form-compiler"
 SCRIPTS_DIR = FORM_COMPILER_DIR / "scripts"
+FORM_WRITER_DIR = REPO_ROOT / "skills" / "dilon-document-form-writer"
+FORM_TEMPLATE_PATH = FORM_WRITER_DIR / "TEMPLATE_Form.md"
 # Shared with dilon-document-compiler - both skills use the same
 # header/footer/styles-only base template, no form-specific copy.
 BASE_TEMPLATE = REPO_ROOT / "templates" / "TEMPLATE_Word_Base.docx"
@@ -1108,6 +1112,133 @@ def test_form_section_header_compiles_through_full_pipeline():
     check("Section 2 - Final Inspection" in all_text, f"second section numbered and titled correctly, got {all_text!r}")
 
 
+def generate_form_stub(output_path, **overrides):
+    """Python port of the dilon-document-form-writer stub-generation
+    logic (lives in SKILL.md as plain instructions for Claude; ported
+    here so it can be exercised by an automated test), mirroring
+    tests/run_tests.py's generate_stub() for dilon-document-writer.
+    Defaults doc_number to the FO- form-number convention rather than
+    dilon-document-writer's narrative-doc DD_XXX_XXXXX."""
+    output_path = Path(output_path)
+    if output_path.exists():
+        raise FileExistsError(f"Output file already exists: {output_path}")
+
+    template = FORM_TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    values = {
+        "title": overrides.get("title", "Form Title"),
+        "author": overrides.get("author", "Author Name"),
+        "department": overrides.get("department", "--"),
+        "doc_number": overrides.get("doc_number", "FO-XXXXX"),
+        "current_revision": overrides.get("current_revision", "00"),
+        "regulatory_rep": overrides.get("regulatory_rep", "--"),
+        "quality_rep": overrides.get("quality_rep", "--"),
+        "department_head": overrides.get("department_head", "--"),
+        "revision_description": overrides.get("revision_description", "Initial release"),
+        "eco_number": overrides.get("eco_number", "ECO-TBD"),
+        "eco_date": overrides.get("eco_date", "YYYY-MM-DD"),
+    }
+
+    content = template
+    content = re.sub(r'title: ".*?"', f'title: "{values["title"]}"', content, count=1)
+    content = re.sub(r'author: ".*?"', f'author: "{values["author"]}"', content, count=1)
+    content = re.sub(r'department: ".*?"', f'department: "{values["department"]}"', content, count=1)
+    content = re.sub(r'doc_number: ".*?"', f'doc_number: "{values["doc_number"]}"', content, count=1)
+    content = re.sub(r'current_revision: ".*?"', f'current_revision: "{values["current_revision"]}"', content, count=1)
+    content = re.sub(r'regulatory_rep: ".*?"', f'regulatory_rep: "{values["regulatory_rep"]}"', content, count=1)
+    content = re.sub(r'quality_rep: ".*?"', f'quality_rep: "{values["quality_rep"]}"', content, count=1)
+    content = re.sub(r'department_head: ".*?"', f'department_head: "{values["department_head"]}"', content, count=1)
+    content = re.sub(
+        r'- number: ".*?"\s+description: ".*?"\s+eco_number: ".*?"\s+eco_date: ".*?"',
+        '- number: "{0}"\n    description: "{1}"\n    eco_number: "{2}"\n    eco_date: "{3}"'.format(
+            values["current_revision"], values["revision_description"], values["eco_number"], values["eco_date"]
+        ),
+        content,
+        count=1,
+    )
+
+    output_path.write_text(content, encoding="utf-8")
+
+
+def test_form_stub_custom_params():
+    path = TEST_OUTPUT_DIR / "custom_form_stub.md"
+    generate_form_stub(
+        path,
+        title="Detector Head Assy Traveler",
+        author="QA Team",
+        doc_number="FO-00200",
+        department="Quality",
+        current_revision="01",
+    )
+    check(path.exists(), "custom_form_stub.md created")
+    content = path.read_text(encoding="utf-8")
+    check('title: "Detector Head Assy Traveler"' in content, "custom title substituted")
+    check('doc_number: "FO-00200"' in content, "custom doc_number substituted")
+    check('department: "Quality"' in content, "custom department substituted")
+    check('current_revision: "01"' in content, "custom current_revision substituted")
+    check('number: "01"' in content, "initial revision entry mirrors current_revision")
+
+
+def test_form_stub_default_params():
+    path = TEST_OUTPUT_DIR / "default_form_stub.md"
+    generate_form_stub(path)
+    check(path.exists(), "default_form_stub.md created")
+    content = path.read_text(encoding="utf-8")
+    check('title: "Form Title"' in content, "default title used")
+    check(
+        'doc_number: "FO-XXXXX"' in content,
+        "default doc_number uses the FO- form-number convention, not dilon-document-writer's DD_XXX_XXXXX",
+    )
+
+
+def test_form_stub_refuses_overwrite():
+    path = TEST_OUTPUT_DIR / "custom_form_stub.md"  # already created above
+    raised = False
+    try:
+        generate_form_stub(path)
+    except FileExistsError:
+        raised = True
+    check(raised, "generate_form_stub refuses to overwrite an existing file")
+
+
+def test_form_template_contains_worked_example_markers():
+    content = FORM_TEMPLATE_PATH.read_text(encoding="utf-8")
+    check("@@@FORM_FIELD:Form_Section_Header@@@" in content, "template includes a Form_Section_Header example")
+    check("@@@FORM_FIELD:FieldGrid@@@" in content, "template includes a FieldGrid example")
+    check("@@@FORM_FIELD:FillLine@@@" in content, "template includes a FillLine example")
+
+
+def test_form_template_compiles_through_full_pipeline():
+    input_md = TEST_OUTPUT_DIR / "form_template_compile.md"
+    output_docx = TEST_OUTPUT_DIR / "form_template_compile.docx"
+    generate_form_stub(input_md, title="Template Compile Test", doc_number="FO-00300")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(FORM_COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(BASE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "TEMPLATE_Form.md's worked example compiles cleanly")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(output_docx.exists(), "form_template_compile.docx created on disk")
+    if output_docx.exists():
+        doc = Document(output_docx)
+        all_text = "\n".join(p.text for p in doc.paragraphs) + "\n" + "\n".join(
+            cell.text for table in doc.tables for row in table.rows for cell in row.cells
+        )
+        check("@@@" not in all_text, "no leftover marker text in the compiled worked example")
+
+
 def test_no_shebang_in_form_compiler_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1179,11 +1310,16 @@ def main():
     test_apply_form_fields_form_section_header_missing_style_degrades()
     test_form_section_header_marker_inside_table_cell_warns_and_skips()
     test_form_section_header_compiles_through_full_pipeline()
+    test_form_stub_custom_params()
+    test_form_stub_default_params()
+    test_form_stub_refuses_overwrite()
+    test_form_template_contains_worked_example_markers()
+    test_form_template_compiles_through_full_pipeline()
     test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
     test_fo_00127_replica_compiles_with_expected_fields()
 
-    print(f"\n{passed} passed, {failed} failed (dilon-document-form-compiler)")
+    print(f"\n{passed} passed, {failed} failed (dilon-document-form-compiler / dilon-document-form-writer)")
     if failed == 0:
         print("\nAll form-compiler tests passed!")
         return 0
