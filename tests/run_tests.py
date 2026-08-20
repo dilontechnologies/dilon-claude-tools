@@ -1165,6 +1165,30 @@ def test_preprocess_steps_malformed_block_passes_through_unmodified():
           "a malformed block is left completely untouched (markers included) rather than crashing")
 
 
+def test_preprocess_step_references_empty_link_becomes_sentinel():
+    md = "See [](#step:insert-carrier-boards) for details."
+    new_md = step_numbering.preprocess_step_references(md)
+    check('STEPREF:insert-carrier-boards' in new_md, "empty-text step link becomes a locatable sentinel")
+    check('[](#step:insert-carrier-boards)' not in new_md, "the original markdown link syntax is gone")
+
+
+def test_preprocess_step_references_leaves_real_link_text_untouched():
+    md = "See [step 4.2](#step:insert-carrier-boards) for details."
+    new_md = step_numbering.preprocess_step_references(md)
+    check(new_md == md, "a reference with real (non-empty) link text is left completely untouched")
+
+
+def test_preprocess_step_references_duplicate_label_does_not_raise():
+    """This test suite doesn't capture stdout (no existing test does -
+    see e.g. test_parse_column_widths_rejects_non_numeric, which checks
+    only the resulting behavior, never the printed warning text), so this
+    only confirms the warn-and-continue path doesn't crash. The warning
+    message itself is verified by reading the implementation in Step 3."""
+    md = "- First step. []{#step:dup}\n- Second step. []{#step:dup}\n"
+    result = step_numbering.preprocess_step_references(md)  # should not raise
+    check(result is not None, "a duplicate {#step:label} declaration degrades to a warning, not a crash")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1237,6 +1261,9 @@ def main():
     test_preprocess_steps_unknown_continue_named_starts_fresh()
     test_preprocess_steps_bare_continue_with_nothing_to_continue()
     test_preprocess_steps_malformed_block_passes_through_unmodified()
+    test_preprocess_step_references_empty_link_becomes_sentinel()
+    test_preprocess_step_references_leaves_real_link_text_untouched()
+    test_preprocess_step_references_duplicate_label_does_not_raise()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")

@@ -246,3 +246,35 @@ def preprocess_steps_markdown(markdown_text):
         print(f"  Warning: {warning}")
 
     return ''.join(output_parts), manifest
+
+
+_STEP_REF_RE = re.compile(r'\[\]\(#step:([\w-]+)\)')
+_STEP_LABEL_RE = re.compile(r'\{#step:([\w-]+)\}')
+
+
+def preprocess_step_references(markdown_text):
+    """
+    Replaces every [](#step:label) - an EMPTY-text link to a #step: id -
+    with a plain-text STEPREF:<label> sentinel Pandoc will pass through
+    untouched, for resolve_step_references() to later turn into a live
+    Word cross-reference field. A reference with real link text, e.g.
+    [see this step](#step:label), is intentionally left untouched - only
+    the empty-text form is auto-resolved.
+
+    The step's own {#step:label} anchor - e.g. []{#step:label} inline in
+    the step's bullet text - needs no preprocessing at all: it's already
+    valid Pandoc bracketed-span-with-id syntax, and Pandoc's docx writer
+    turns it into a real bookmark on its own (Task 6 verifies this). This
+    function does still scan for it, once, only to warn if the same
+    label is declared more than once (first occurrence wins, per the
+    design's error-handling rule) - this is the one pass both halves of
+    the reference syntax already share over the whole document body.
+    """
+    label_counts = {}
+    for label in _STEP_LABEL_RE.findall(markdown_text):
+        label_counts[label] = label_counts.get(label, 0) + 1
+    for label, count in label_counts.items():
+        if count > 1:
+            print(f"  Warning: {{#step:{label}}} declared more than once; the first occurrence wins for any [](#step:{label}) reference")
+
+    return _STEP_REF_RE.sub(lambda m: f'STEPREF:{m.group(1)}', markdown_text)
