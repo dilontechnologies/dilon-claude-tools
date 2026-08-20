@@ -1237,6 +1237,11 @@ def test_apply_step_numbering_reuses_numid_for_continued_sequence():
 
 
 def test_apply_step_numbering_skips_gracefully_without_abstract_id():
+    """Regression test: apply_step_numbering used to leave the raw
+    sentinel visible in the compiled document ("STEP0Wear clean
+    gloves.") when the template lacks the numbering setup, instead of
+    degrading to plain unnumbered text like every other marker in this
+    codebase does on a malformed/unresolvable input."""
     from docx import Document
     md = "@@@STEPS@@@\n- First\n@@@END_STEPS@@@\n"
     new_md, manifest = step_numbering.preprocess_steps_markdown(md)
@@ -1247,7 +1252,105 @@ def test_apply_step_numbering_skips_gracefully_without_abstract_id():
     step_numbering.apply_step_numbering(docx_path, manifest, None)  # should not raise
 
     doc = Document(docx_path)
-    check(any('STEP' in p.text for p in doc.paragraphs), "with no abstract_num_id, the file is left untouched (sentinel still present) rather than crashing")
+    check(not any('STEP' in p.text for p in doc.paragraphs), "with no abstract_num_id, the sentinel is still stripped (degrades to plain unnumbered text)")
+    check(any(p.text.strip() == 'First' for p in doc.paragraphs), "the step's own text survives, just without numbering applied")
+
+
+def test_preprocess_steps_digit_adjacent_text_no_corruption():
+    """Regression test: a step whose text starts with a digit (extremely
+    common in work instructions - "5 minutes", "10 mA", "24 AWG") used to
+    merge into the STEP<idx> sentinel's own digit run, e.g. idx=1 followed
+    by "5 minutes..." produced "STEP15 minutes...", which
+    apply_step_numbering's _STEP_SENTINEL_RE then misreads as idx=15,
+    raising IndexError against a 2-entry manifest and crashing the whole
+    compile. Mirrors the U+E000-delimiter fix already applied to the
+    sibling STEPREF sentinel for the same class of bug."""
+    md = "@@@STEPS@@@\n- A\n- 5 minutes of curing time required.\n@@@END_STEPS@@@\n"
+    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
+    check(len(manifest) == 2, f"2 steps recorded (got {len(manifest)})")
+
+    matches = list(step_numbering._STEP_SENTINEL_RE.finditer(new_md))
+    check(len(matches) == 2, f"exactly 2 sentinels found, not merged into one (got {len(matches)})")
+    if len(matches) == 2:
+        indices = [int(m.group(1)) for m in matches]
+        check(indices == [0, 1], f"sentinel indices are 0 and 1, not corrupted by adjacent digit text (got {indices})")
+
+
+def test_apply_step_numbering_end_to_end_digit_adjacent_text():
+    """End-to-end version of the above: must not raise IndexError when
+    actually applying numbering to a document with a digit-adjacent step."""
+    md = "@@@STEPS@@@\n- A\n- 5 minutes of curing time required.\n@@@END_STEPS@@@\n"
+    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_digit_adjacent_test.docx"
+    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
+
+    step_numbering.apply_step_numbering(docx_path, manifest, abstract_id)  # should not raise IndexError
+
+    from docx import Document
+    doc = Document(docx_path)
+    texts = [p.text.strip() for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List']
+    check("5 minutes of curing time required." in texts, f"digit-adjacent step text survives intact (got {texts})")
+
+
+def test_apply_step_numbering_preserves_inline_formatting():
+    """Regression test: apply_step_numbering used to clear every run in a
+    matched paragraph and rebuild it as one plain run, destroying inline
+    bold/italic formatting elsewhere in the step's text."""
+    md = "@@@STEPS@@@\n- Use **IPA** and a lint-free cloth.\n@@@END_STEPS@@@\n"
+    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_formatting_test.docx"
+    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
+
+    step_numbering.apply_step_numbering(docx_path, manifest, abstract_id)
+
+    from docx import Document
+    doc = Document(docx_path)
+    step_para = next(p for p in doc.paragraphs if 'IPA' in p.text)
+    bold_runs = [r for r in step_para.runs if r.font.bold and r.text.strip() == 'IPA']
+    check(len(bold_runs) == 1, f"inline bold formatting on 'IPA' survives sentinel cleanup (runs: {[(r.text, r.font.bold) for r in step_para.runs]})")
+
+
+def test_preprocess_steps_skips_code_fenced_example():
+    """Regression test: @@@STEPS@@@ syntax shown as a documentation
+    example inside a fenced code block (exactly like
+    MARKDOWN_STYLING_GUIDE.md's own worked example) must be left
+    completely untouched, matching apply_styles()'s existing precedent of
+    skipping 'Verbatim'-styled (i.e. code-fenced) paragraphs so
+    @@@STYLE@@@ syntax shown as an example isn't processed as a real
+    marker."""
+    md = (
+        "Here is how the marker works:\n\n"
+        "```markdown\n"
+        "@@@STEPS@@@\n"
+        "- Example step\n"
+        "@@@END_STEPS@@@\n"
+        "```\n\n"
+        "That's the syntax.\n"
+    )
+    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
+    check(len(manifest) == 0, "a code-fenced example block contributes nothing to the manifest")
+    check(new_md == md, "a code-fenced example block is left completely untouched")
+
+
+def test_resolve_step_references_resolves_multiple_in_same_paragraph():
+    """Regression test: resolve_step_references used .search() (first
+    match only) instead of scanning every sentinel in a paragraph, so a
+    sentence referencing two steps left the second reference's sentinel
+    literally visible and unresolved in the compiled document."""
+    md = "See [](#step:a) and []{#step:a} and []{#step:b} and [](#step:b) for details."
+    new_md = step_numbering.preprocess_step_references(md)
+    docx_path = TEST_OUTPUT_DIR / "step_ref_multi_test.docx"
+    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    step_numbering.resolve_step_references(docx_path)
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('REF step:a \\r \\h' in xml, "the first reference resolves to a live REF field")
+    check('REF step:b \\r \\h' in xml, "the second reference in the same paragraph ALSO resolves (not left as a dangling sentinel)")
+    check('STEPREF' not in xml, "no reference sentinel remains for either reference")
 
 
 def test_resolve_step_references_creates_ref_field():
@@ -1420,8 +1523,13 @@ def main():
     test_apply_step_numbering_styles_and_links_paragraphs()
     test_apply_step_numbering_reuses_numid_for_continued_sequence()
     test_apply_step_numbering_skips_gracefully_without_abstract_id()
+    test_preprocess_steps_digit_adjacent_text_no_corruption()
+    test_apply_step_numbering_end_to_end_digit_adjacent_text()
+    test_apply_step_numbering_preserves_inline_formatting()
+    test_preprocess_steps_skips_code_fenced_example()
     test_resolve_step_references_creates_ref_field()
     test_resolve_step_references_missing_label_degrades_to_plain_text()
+    test_resolve_step_references_resolves_multiple_in_same_paragraph()
     test_compile_step_numbering_end_to_end()
     test_no_shebang_in_python_scripts()
 

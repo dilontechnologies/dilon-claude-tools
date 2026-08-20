@@ -461,9 +461,10 @@ by its edges - never by its face.
 **Scope**: `@@@STEPS@@@` is document-internal only - it's for referencing
 a step from elsewhere in the *same* work instruction. There's no way to
 cite a specific step number from a different document (a Traveler, a
-CAPA, etc.); reference the work instruction by its document number
-instead, the way `FO-00127, Detector Head Assembly Traveler` already
-does in Section 9.
+CAPA, etc.); reference the other document by its document number and
+title in plain text instead - e.g. "per `FO-00127, Detector Head
+Assembly Traveler`" - the same external-document-reference convention
+Section 9 covers for links generally.
 
 ---
 

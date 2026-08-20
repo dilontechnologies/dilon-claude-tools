@@ -129,6 +129,30 @@ def create_num_instance(numbering_element, abstract_num_id):
     return new_num_id
 
 
+_CODE_FENCE_RE = re.compile(
+    r'^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[ \t]*$',
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def _code_fence_ranges(markdown_text):
+    """
+    Returns [(start, end), ...] character spans covering every fenced
+    (```/~~~) code block in markdown_text, so callers can skip a
+    @@@STEPS@@@/[](#step:...) marker that only appears inside a code
+    fence as documentation/example text (e.g.
+    MARKDOWN_STYLING_GUIDE.md's own worked example) instead of treating
+    it as a real marker to process. Matches apply_styles()'s existing
+    precedent (lib/dilon_docx_common.py) of skipping 'Verbatim'-styled
+    paragraphs for the same reason.
+    """
+    return [m.span() for m in _CODE_FENCE_RE.finditer(markdown_text)]
+
+
+def _inside_any_span(spans, pos):
+    return any(start <= pos < end for start, end in spans)
+
+
 _STEPS_BLOCK_RE = re.compile(
     r'@@@STEPS(?::\s*([^\n@]*?)\s*)?@@@\n(.*?)\n@@@END_STEPS@@@',
     re.DOTALL,
@@ -202,9 +226,19 @@ def preprocess_steps_markdown(markdown_text):
     cursor = 0
     warnings = []
 
+    fence_spans = _code_fence_ranges(markdown_text)
+
     for match in _STEPS_BLOCK_RE.finditer(markdown_text):
         output_parts.append(markdown_text[cursor:match.start()])
         cursor = match.end()
+
+        if _inside_any_span(fence_spans, match.start()):
+            # A @@@STEPS@@@ block shown as a code-fenced documentation
+            # example - leave it completely untouched, same as a
+            # malformed block, but without a warning since this is
+            # expected/intentional.
+            output_parts.append(match.group(0))
+            continue
 
         try:
             kind, name = _parse_attribute(match.group(1))
@@ -241,7 +275,7 @@ def preprocess_steps_markdown(markdown_text):
         for depth, text in bullet_lines:
             idx = len(manifest)
             manifest.append({'sequence_key': sequence_key, 'depth': depth})
-            rebuilt_lines.append('  ' * depth + f'- STEP{idx}{text}')
+            rebuilt_lines.append('  ' * depth + f'- STEP{idx}{text}')
         output_parts.append('\n'.join(rebuilt_lines))
 
     output_parts.append(markdown_text[cursor:])
@@ -278,17 +312,68 @@ def preprocess_step_references(markdown_text):
     design's error-handling rule) - this is the one pass both halves of
     the reference syntax already share over the whole document body.
     """
+    fence_spans = _code_fence_ranges(markdown_text)
+
     label_counts = {}
-    for label in _STEP_LABEL_RE.findall(markdown_text):
+    for label_match in _STEP_LABEL_RE.finditer(markdown_text):
+        if _inside_any_span(fence_spans, label_match.start()):
+            continue
+        label = label_match.group(1)
         label_counts[label] = label_counts.get(label, 0) + 1
     for label, count in label_counts.items():
         if count > 1:
             print(f"  Warning: {{#step:{label}}} declared more than once; the first occurrence wins for any [](#step:{label}) reference")
 
-    return _STEP_REF_RE.sub(lambda m: f'STEPREF:{m.group(1)}', markdown_text)
+    def _replace_ref(m):
+        if _inside_any_span(fence_spans, m.start()):
+            return m.group(0)
+        return f'STEPREF:{m.group(1)}'
+
+    return _STEP_REF_RE.sub(_replace_ref, markdown_text)
 
 
-_STEP_SENTINEL_RE = re.compile(r'STEP(\d+)')
+_STEP_SENTINEL_RE = re.compile('\uE000STEP(' + r'\d+' + ')\uE000')
+
+
+def _run_containing_span(paragraph, start, end):
+    """
+    Returns (run, local_start, local_end) if the character span
+    [start, end) of paragraph.text falls entirely within one run's own
+    text, else None. Lets a sentinel be stripped by editing just that
+    run's text in place - preserving every other run's formatting -
+    instead of clearing and rebuilding the whole paragraph as one plain
+    run (which silently destroys any inline bold/italic elsewhere in the
+    paragraph's text).
+    """
+    offset = 0
+    for run in paragraph.runs:
+        run_len = len(run.text)
+        if offset <= start and end <= offset + run_len:
+            return run, start - offset, end - offset
+        offset += run_len
+    return None
+
+
+def _strip_sentinel_from_paragraph(paragraph, match):
+    """
+    Removes match's span from paragraph's visible text. If the sentinel
+    lies entirely within one run, edits just that run's text (preserving
+    every other run's formatting). Falls back to clearing and rebuilding
+    the whole paragraph as one plain run only if the sentinel
+    unexpectedly spans multiple runs (not expected in practice - the
+    sentinel is always inserted as one contiguous piece of plain text
+    with no markdown formatting of its own).
+    """
+    located = _run_containing_span(paragraph, match.start(), match.end())
+    if located is not None:
+        run, local_start, local_end = located
+        run.text = run.text[:local_start] + run.text[local_end:]
+        return
+
+    cleaned_text = paragraph.text[:match.start()] + paragraph.text[match.end():]
+    for run in list(paragraph.runs):
+        run._element.getparent().remove(run._element)
+    paragraph.add_run(cleaned_text)
 
 
 def apply_step_numbering(docx_file, manifest, abstract_num_id):
@@ -302,17 +387,21 @@ def apply_step_numbering(docx_file, manifest, abstract_num_id):
     "continue" a real, native, live-updating continuation - Word's
     numbering engine counts by shared numId, not by paragraph adjacency.
 
-    Skips entirely (with a warning already printed by
-    get_step_list_abstract_num_id()) if abstract_num_id is None - the
-    template isn't set up yet. Does nothing if manifest is empty (no
-    @@@STEPS@@@ blocks in this document).
+    If abstract_num_id is None (a warning has already been printed by
+    get_step_list_abstract_num_id() - the template isn't set up yet),
+    still strips every sentinel so the step's own text ships as plain
+    unnumbered text, matching the warn-and-degrade convention every other
+    marker in this codebase follows, rather than leaving the raw
+    "STEP0Wear clean gloves." sentinel visible in the shipped document.
+    Does nothing if manifest is empty (no @@@STEPS@@@ blocks in this
+    document).
     """
-    if abstract_num_id is None or not manifest:
+    if not manifest:
         return
 
     from docx import Document
     doc = Document(docx_file)
-    numbering_element = doc.part.numbering_part.element
+    numbering_element = doc.part.numbering_part.element if abstract_num_id is not None else None
 
     key_to_num_id = {}
     matched = 0
@@ -322,40 +411,39 @@ def apply_step_numbering(docx_file, manifest, abstract_num_id):
         if not match:
             continue
 
-        idx = int(match.group(1))
-        entry = manifest[idx]
-        sequence_key = entry['sequence_key']
-        depth = entry['depth']
+        if abstract_num_id is not None:
+            idx = int(match.group(1))
+            entry = manifest[idx]
+            sequence_key = entry['sequence_key']
+            depth = entry['depth']
 
-        if sequence_key not in key_to_num_id:
-            key_to_num_id[sequence_key] = create_num_instance(numbering_element, abstract_num_id)
-        num_id = key_to_num_id[sequence_key]
+            if sequence_key not in key_to_num_id:
+                key_to_num_id[sequence_key] = create_num_instance(numbering_element, abstract_num_id)
+            num_id = key_to_num_id[sequence_key]
 
-        para.style = doc.styles['Dilon Step List']
-        p_pr = para._p.get_or_add_pPr()
-        # Remove any numPr Pandoc's own default list conversion already added.
-        existing_num_pr = p_pr.find(qn('w:numPr'))
-        if existing_num_pr is not None:
-            p_pr.remove(existing_num_pr)
-        num_pr = OxmlElement('w:numPr')
-        ilvl_el = OxmlElement('w:ilvl')
-        ilvl_el.set(qn('w:val'), str(depth))
-        num_id_el = OxmlElement('w:numId')
-        num_id_el.set(qn('w:val'), str(num_id))
-        num_pr.append(ilvl_el)
-        num_pr.append(num_id_el)
-        p_pr.append(num_pr)
+            para.style = doc.styles['Dilon Step List']
+            p_pr = para._p.get_or_add_pPr()
+            # Remove any numPr Pandoc's own default list conversion already added.
+            existing_num_pr = p_pr.find(qn('w:numPr'))
+            if existing_num_pr is not None:
+                p_pr.remove(existing_num_pr)
+            num_pr = OxmlElement('w:numPr')
+            ilvl_el = OxmlElement('w:ilvl')
+            ilvl_el.set(qn('w:val'), str(depth))
+            num_id_el = OxmlElement('w:numId')
+            num_id_el.set(qn('w:val'), str(num_id))
+            num_pr.append(ilvl_el)
+            num_pr.append(num_id_el)
+            p_pr.append(num_pr)
 
-        cleaned_text = _STEP_SENTINEL_RE.sub('', para.text)
-        for run in list(para.runs):
-            run._element.getparent().remove(run._element)
-        para.add_run(cleaned_text)
+        _strip_sentinel_from_paragraph(para, match)
 
         matched += 1
 
     if matched:
         doc.save(docx_file)
-        print(f"  Applied native step numbering to {matched} paragraph(s) across {len(key_to_num_id)} sequence(s)")
+        if abstract_num_id is not None:
+            print(f"  Applied native step numbering to {matched} paragraph(s) across {len(key_to_num_id)} sequence(s)")
 
 
 _STEP_REF_SENTINEL_RE = re.compile('STEPREF:([\\w-]+)')
@@ -387,31 +475,35 @@ def resolve_step_references(docx_file):
     missing = 0
 
     for para in doc.paragraphs:
-        match = _STEP_REF_SENTINEL_RE.search(para.text)
-        if not match:
+        matches = list(_STEP_REF_SENTINEL_RE.finditer(para.text))
+        if not matches:
             continue
 
-        label = match.group(1)
-        bookmark_name = f'step:{label}'
-        before_text = para.text[:match.start()]
-        after_text = para.text[match.end():]
-
+        original_text = para.text
         for run in list(para.runs):
             run._element.getparent().remove(run._element)
 
-        if before_text:
-            para.add_run(before_text)
+        cursor = 0
+        for match in matches:
+            before_text = original_text[cursor:match.start()]
+            if before_text:
+                para.add_run(before_text)
 
-        if bookmark_name in bookmark_names:
-            add_complex_field(para, f'REF {bookmark_name} \\r \\h', '1')
-            resolved += 1
-        else:
-            para.add_run(f'[missing step reference: {label}]')
-            print(f"  Warning: step reference to unknown label '{label}'; left as visible plain text")
-            missing += 1
+            label = match.group(1)
+            bookmark_name = f'step:{label}'
+            if bookmark_name in bookmark_names:
+                add_complex_field(para, f'REF {bookmark_name} \\r \\h', '1')
+                resolved += 1
+            else:
+                para.add_run(f'[missing step reference: {label}]')
+                print(f"  Warning: step reference to unknown label '{label}'; left as visible plain text")
+                missing += 1
 
-        if after_text:
-            para.add_run(after_text)
+            cursor = match.end()
+
+        trailing_text = original_text[cursor:]
+        if trailing_text:
+            para.add_run(trailing_text)
 
     if resolved or missing:
         doc.save(docx_file)

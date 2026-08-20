@@ -495,9 +495,10 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     print("Applying figure caption numbering...")
     apply_figure_captions(temp_part_d)
 
-    print("Applying step-list numbering...")
-    step_list_abstract_num_id = get_step_list_abstract_num_id(signature_template_path)
-    apply_step_numbering(temp_part_d, step_manifest, step_list_abstract_num_id)
+    if step_manifest:
+        print("Applying step-list numbering...")
+        step_list_abstract_num_id = get_step_list_abstract_num_id(signature_template_path)
+        apply_step_numbering(temp_part_d, step_manifest, step_list_abstract_num_id)
     resolve_step_references(temp_part_d)
 
     print(f"Part D converted")
