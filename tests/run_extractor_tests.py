@@ -305,6 +305,28 @@ def test_extract_header_footer_metadata():
     check(fields.get("footer_eco_date") == "03/4/2025", f"footer_eco_date parsed, got {fields.get('footer_eco_date')!r}")
 
 
+def test_extract_header_footer_metadata_table_footer():
+    """Newer compiler output (see populate_footer() in
+    lib/dilon_docx_common.py) carries the footer ID line as the first row
+    of a 3-column table instead of tab-separated text in a single
+    paragraph - table cell text isn't part of footer.paragraphs, so this
+    must be read from section.footer.tables instead."""
+    import extract_docx as ex
+    doc = Document()
+    section = doc.sections[0]
+    footer_table = section.footer.add_table(rows=2, cols=3, width=Inches(6))
+    footer_table.rows[0].cells[0].text = "WI-00077 Rev 00"
+    footer_table.rows[0].cells[1].text = "ECO-000046"
+    footer_table.rows[0].cells[2].text = "Revision Date: 03/4/2025"
+    footer_table.rows[1].cells[0].text = "This document is confidential."
+
+    fields = ex.extract_header_footer_metadata(doc)
+    check(fields.get("doc_number") == "WI-00077", f"doc_number parsed from table-based footer, got {fields.get('doc_number')!r}")
+    check(fields.get("current_revision") == "00", f"current_revision parsed from table-based footer, got {fields.get('current_revision')!r}")
+    check(fields.get("footer_eco_number") == "ECO-000046", f"footer_eco_number parsed from table-based footer, got {fields.get('footer_eco_number')!r}")
+    check(fields.get("footer_eco_date") == "03/4/2025", f"footer_eco_date parsed from table-based footer, got {fields.get('footer_eco_date')!r}")
+
+
 def test_extract_header_footer_metadata_split_cells():
     """Real Dilon documents (e.g. WI-00077) split each header row's label
     and value into separate table cells rather than combining them with a
@@ -693,6 +715,7 @@ def main():
     test_extract_signature_fields_mismatched_labels_warns()
     test_extract_revisions()
     test_extract_header_footer_metadata()
+    test_extract_header_footer_metadata_table_footer()
     test_extract_header_footer_metadata_split_cells()
     test_strip_figure_prefix()
     test_paragraph_is_list_item_direct_numpr()

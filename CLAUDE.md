@@ -151,7 +151,7 @@ The base template (repo-root `templates/TEMPLATE_Word_Base.docx`) carries only s
 
 **File:** `skills/dilon-document-writer/MARKDOWN_STYLING_GUIDE.md` (995 lines)
 
-Covers YAML front matter requirements, heading conventions/numbering, table formatting (pipe and grid tables, custom `DilonTable_List`/`DilonTable_Chart` styles), figure/image handling, lists, code blocks, links, notes/callouts, custom paragraph styles via `@@@STYLE@@@` markers, footnote formatting, and a complete style reference table. It also retains a PlantUML diagram-generation reference (section 4.3) for documents that hand-embed PlantUML diagrams, even though this repo no longer ships PlantUML tooling itself.
+Covers YAML front matter requirements, heading conventions/numbering, table formatting (pipe and grid tables, custom `DilonTable_List`/`DilonTable_Chart` styles), figure/image handling (including sizing via Pandoc's `{width=...}`/`{height=...}` image attributes), lists, code blocks, links, notes/callouts, custom paragraph styles via `@@@STYLE@@@` markers, footnote formatting, and a complete style reference table.
 
 ## Key Architectural Patterns
 

@@ -354,9 +354,6 @@ def calculate_checksum(data):
 #### Bash/Shell Commands
 
 ```bash
-# Generate PlantUML diagram
-plantuml -tpng diagram.puml
-
 # Compile markdown to Word document
 python generate_dilon_doc.py input.md output.docx
 

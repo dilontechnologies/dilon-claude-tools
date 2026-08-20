@@ -557,7 +557,7 @@ def populate_header(document, metadata):
     width within the page's available content width (previously
     overflowed it) - see the base template's page setup for margins.
     """
-    from docx.shared import Inches, Pt
+    from docx.shared import Inches, Pt, Twips, Emu
     from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
     from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
     from docx.oxml.ns import qn
@@ -568,8 +568,17 @@ def populate_header(document, metadata):
     header.is_linked_to_previous = False
     _clear_container(header)
 
-    col_widths = [Inches(1.25), Inches(3.0), Inches(0.8), Inches(1.2)]
-    table_width = sum(col_widths, Inches(0))
+    # Logo/Rev/Page column widths match an approved, hand-tuned Dilon Word
+    # document's own header table; the Title/Number column absorbs
+    # whatever width is left so the table always fills the page's full
+    # content width.
+    available_width = section.page_width - section.left_margin - section.right_margin
+    logo_width = Twips(1525)
+    rev_width = Twips(1255)
+    page_num_width = Twips(1625)
+    title_width = Emu(available_width - logo_width - rev_width - page_num_width)
+    col_widths = [logo_width, title_width, rev_width, page_num_width]
+    table_width = Emu(available_width)
     table = header.add_table(rows=1, cols=4, width=table_width)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.autofit = False
@@ -644,18 +653,24 @@ def populate_header(document, metadata):
 
 def populate_footer(document, metadata):
     """
-    Build the running footer (doc_number/rev/ECO/revision-date line +
-    confidentiality boilerplate) directly via python-docx and plain
-    Python string formatting, in place of a docxtpl-rendered Jinja
-    version. Shared by dilon-document-compiler and
+    Build the running footer as a 3-column/2-row table (doc_number/rev |
+    ECO # | revision date, then a single full-width cell for the
+    confidentiality boilerplate) directly via python-docx, in place of a
+    docxtpl-rendered Jinja version. Shared by dilon-document-compiler and
     dilon-document-form-compiler.
+
+    A table (not tab-stopped paragraphs, the previous approach) is used
+    so the three ID-line pieces sit in genuinely equal-width columns
+    regardless of their own text length, matching the header table's
+    already-table-based layout.
 
     ECO number/date come from the latest (last) entry in the front
     matter's `revisions` list, since neither is its own flat top-level
     field.
     """
-    from docx.shared import Inches, Pt
-    from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+    from docx.shared import Pt, Twips
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
 
@@ -667,49 +682,103 @@ def populate_footer(document, metadata):
     revisions = metadata.get('revisions') or []
     latest_revision = revisions[-1] if revisions else {}
 
-    available_width = section.page_width.inches - section.left_margin.inches - section.right_margin.inches
+    # Divided in twips (not EMU): gridCol/tcW widths are themselves
+    # written in twips, so splitting the EMU-based available_width three
+    # ways and only then converting each third back to twips would round
+    # each of the three shares independently and could overshoot the true
+    # available width (observed: 1 twip over). Dividing in twips first
+    # keeps the three columns' sum exactly equal to available_width.
+    available_width_twips = section.page_width.twips - section.left_margin.twips - section.right_margin.twips
+    available_width = Twips(available_width_twips)
 
-    def _set_footer_font(paragraph):
-        for run in paragraph.runs:
-            run.font.size = Pt(9)
+    table = footer.add_table(rows=2, cols=3, width=available_width)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
 
-    def _set_border(paragraph, top=False, bottom=False):
-        p_pr = paragraph._p.get_or_add_pPr()
-        p_bdr = OxmlElement('w:pBdr')
-        for side, enabled in (('top', top), ('bottom', bottom)):
-            if not enabled:
-                continue
-            side_el = OxmlElement(f'w:{side}')
-            side_el.set(qn('w:val'), 'single')
-            side_el.set(qn('w:sz'), '4')
-            side_el.set(qn('w:space'), '4')
-            side_el.set(qn('w:color'), 'auto')
-            p_bdr.append(side_el)
-        p_pr.append(p_bdr)
+    # Equal thirds - available_width_twips isn't always evenly divisible
+    # by 3, so any leftover twip(s) go to the last column so the three
+    # still sum to exactly the full available width.
+    third_twips = available_width_twips // 3
+    col_widths = [
+        Twips(third_twips),
+        Twips(third_twips),
+        Twips(available_width_twips - 2 * third_twips),
+    ]
+    for idx, width in enumerate(col_widths):
+        table.columns[idx].width = width
+        for cell in table.columns[idx].cells:
+            cell.width = width
 
-    id_para = footer.add_paragraph()
-    id_para.paragraph_format.tab_stops.add_tab_stop(Inches(available_width / 2), WD_TAB_ALIGNMENT.CENTER)
-    id_para.paragraph_format.tab_stops.add_tab_stop(Inches(available_width), WD_TAB_ALIGNMENT.RIGHT)
-    id_para.style = document.styles['Footer']
-    id_para.add_run(
-        f"{metadata.get('doc_number', '')} Rev {metadata.get('current_revision', '')}"
-        f"\t{latest_revision.get('eco_number', '')}"
-        f"\tRevision Date: {latest_revision.get('eco_date', '')}"
-    )
-    _set_footer_font(id_para)
-    _set_border(id_para, top=True)
+    tbl_pr = table._element.tblPr
+    # Top/bottom rule lines framing the whole footer, no internal or side
+    # borders - matches the look of the paragraph-border footer this
+    # table replaces (a rule above the ID line, a rule below the notice).
+    borders = OxmlElement('w:tblBorders')
+    for edge, val in (
+        ('top', 'single'), ('bottom', 'single'),
+        ('left', 'nil'), ('right', 'nil'),
+        ('insideH', 'nil'), ('insideV', 'nil'),
+    ):
+        edge_el = OxmlElement(f'w:{edge}')
+        edge_el.set(qn('w:val'), val)
+        if val == 'single':
+            edge_el.set(qn('w:sz'), '4')
+            edge_el.set(qn('w:space'), '4')
+            edge_el.set(qn('w:color'), 'auto')
+        borders.append(edge_el)
+    tbl_pr.append(borders)
 
+    # Tight cell margins (matches the header table) so row 1's height
+    # tracks the font size instead of Word's default ~0.08in cell padding.
+    cell_mar = OxmlElement('w:tblCellMar')
+    for side in ('top', 'left', 'bottom', 'right'):
+        side_el = OxmlElement(f'w:{side}')
+        side_el.set(qn('w:w'), '29')
+        side_el.set(qn('w:type'), 'dxa')
+        cell_mar.append(side_el)
+    tbl_pr.append(cell_mar)
+
+    FOOTER_FONT_SIZE = Pt(9)
+
+    def _add_footer_run(paragraph, text):
+        run = paragraph.add_run(text)
+        run.font.size = FOOTER_FONT_SIZE
+        return run
+
+    # Row 1: doc_number/rev (left) | ECO # (center) | revision date (right)
+    # - height pinned to the font size itself (AT_LEAST so a taller value
+    # never gets clipped, but nothing forces it any taller than that).
+    row1 = table.rows[0]
+    row1.height = FOOTER_FONT_SIZE
+    row1.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+
+    id_cell, eco_cell, date_cell = row1.cells
+    id_para = id_cell.paragraphs[0]
+    id_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    _add_footer_run(id_para, f"{metadata.get('doc_number', '')} Rev {metadata.get('current_revision', '')}")
+
+    eco_para = eco_cell.paragraphs[0]
+    eco_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _add_footer_run(eco_para, latest_revision.get('eco_number', ''))
+
+    date_para = date_cell.paragraphs[0]
+    date_para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _add_footer_run(date_para, f"Revision Date: {latest_revision.get('eco_date', '')}")
+
+    # Row 2: a single cell spanning all 3 columns for the confidentiality
+    # boilerplate - height is left on Word's default AUTO rule, so it
+    # grows only as much as its two lines of text need.
+    notice_cell = table.rows[1].cells[0].merge(table.rows[1].cells[2])
     notice_lines = [
         "This document and information contained within is confidential and proprietary to Dilon Technologies.",
         "All unauthorized use and/or reproduction is prohibited.",
     ]
-    for i, line in enumerate(notice_lines):
-        para = footer.add_paragraph(line)
-        para.style = document.styles['Footer']
-        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_footer_font(para)
-        if i == len(notice_lines) - 1:
-            _set_border(para, bottom=True)
+    notice_para = notice_cell.paragraphs[0]
+    notice_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _add_footer_run(notice_para, notice_lines[0])
+    second_para = notice_cell.add_paragraph()
+    second_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _add_footer_run(second_para, notice_lines[1])
 
 
 def extract_yaml_and_markdown(md_file):

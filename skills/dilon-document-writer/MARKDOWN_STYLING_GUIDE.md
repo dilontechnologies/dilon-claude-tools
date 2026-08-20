@@ -288,27 +288,25 @@ Put the caption text directly in the image's alt-text brackets - do NOT write a 
 ![](diagrams/company_logo.png)
 ```
 
-### 4.2 What the Compiler Does
+### 4.2 Sizing an Image
+
+By default an image is embedded at its native pixel size. To constrain that,
+add a Pandoc image attribute after the path - `{width=...}`, `{height=...}`,
+or both - inside the same trailing `{...}` block as the `#fig:` id, space-separated:
+
+```markdown
+![Complete I2C Bus Topology showing nRF52832 master connected to all peripheral devices.](diagrams/i2c_bus_topology.png){#fig:i2c-bus-topology width=4in}
+```
+
+**Rules:**
+- Accepted units: absolute (`in`, `cm`, `px`, `pt`) or a bare percentage of the page's content width (`width=50%`)
+- Setting only `width` or only `height` scales the other dimension proportionally; setting both stretches the image to exactly that box
+- No unit resolves to pixels (`width=400` means `400px`)
+- This is a native Pandoc feature, not Dilon-specific tooling - nothing in the compiler scripts processes it, so it works the same whether or not the image has a caption or `{#fig:...}` id
+
+### 4.3 What the Compiler Does
 
 The compiled Word document will show something like `Figure 2.1 - Complete I2C Bus Topology showing nRF52832 master connected to all peripheral devices.`, styled with Word's built-in "Caption" style. The "2" comes from the nearest Heading 2 (live, via a `STYLEREF` field); the "1" is a running count that resets at each new Heading 2 (live, via a `SEQ` field) - both computed by Word itself, not baked in as static text, so the numbers stay correct even if the document is later reordered in Word.
-
-### 4.3 PlantUML Diagrams
-
-For architectural diagrams, use PlantUML:
-
-1. Create `.puml` source file in `diagrams/` folder
-2. Generate PNG: `plantuml -tpng diagram.puml`
-3. Reference PNG in markdown with a caption in the brackets, same as any other figure:
-   ```markdown
-   ![Diagram description.](diagrams/diagram_name.png){#fig:diagram-name}
-   ```
-
-**PlantUML Best Practices:**
-- Use `!theme plain` for clean output
-- Set `skinparam backgroundColor white`
-- Use `top to bottom direction` for vertical layouts
-- Place diagrams in `diagrams/` subfolder
-- Commit both `.puml` source and `.png` output
 
 ---
 
@@ -977,7 +975,7 @@ Compile-DilonDoc input.md
 3. **Tables** are styled with "Table Grid" style (grid lines included)
 4. **Headings** are styled according to template (Heading 1, Heading 2, etc.)
 5. **Code blocks** are styled with "Source Code" style
-6. **Images** are embedded at original size
+6. **Images** are embedded at native size, or sized per a `{width=...}`/`{height=...}` attribute (see 4.2)
 7. **Figure captions** are styled with "Caption" style
 8. **All styles** come from `TEMPLATE_Word_Base.docx` reference document
 
@@ -1020,7 +1018,6 @@ Use grid tables when you need multi-paragraph cells or complex block elements:
 - [ ] Tables use pipe format with proper alignment
 - [ ] Code blocks have language identifiers
 - [ ] File/line references use format `filename:line` or `filename:start-end`
-- [ ] All PlantUML diagrams regenerated as PNG
 - [ ] No trailing whitespace or tabs
 - [ ] Document ends with newline
 - [ ] All internal links reference correct section numbers

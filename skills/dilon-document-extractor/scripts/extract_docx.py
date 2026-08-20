@@ -258,7 +258,18 @@ def extract_header_footer_metadata(doc):
                     if value:
                         fields["title"] = value
 
-    footer_text = "\n".join(p.text for p in section.footer.paragraphs if p.text.strip())
+    # Two footer shapes exist across real documents: older/hand-authored
+    # ones carry the ID line as tab-separated text in a single paragraph;
+    # newer compiler output (see populate_footer() in
+    # lib/dilon_docx_common.py) carries it as the first row of a 3-column
+    # table instead - table cell text isn't part of footer.paragraphs, so
+    # both are checked.
+    footer_text_parts = [p.text for p in section.footer.paragraphs if p.text.strip()]
+    for table in section.footer.tables:
+        id_row_texts = [c.text.strip() for c in table.rows[0].cells if c.text.strip()]
+        if id_row_texts:
+            footer_text_parts.append(" ".join(id_row_texts))
+    footer_text = "\n".join(footer_text_parts)
     m = FOOTER_LINE_RE.search(footer_text)
     if m:
         fields.setdefault("doc_number", m.group(1))

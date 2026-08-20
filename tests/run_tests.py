@@ -18,6 +18,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.oxml.ns import qn
+from docx.shared import Inches
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "dilon-document-compiler" / "scripts"))
 import generate_dilon_doc as compiler
@@ -327,7 +328,8 @@ def test_create_signature_table_structure():
         "quality_rep": "QA Rep",
         "department_head": "Dept Head",
     }
-    table = compiler.create_signature_table(metadata)
+    available_width = Inches(6.768055555555556)
+    table = compiler.create_signature_table(metadata, available_width)
 
     check(len(table.rows) == 6, f"signature table has 6 rows, got {len(table.rows)}")
     check(len(table.columns) == 3, f"signature table has 3 columns, got {len(table.columns)}")
@@ -392,7 +394,12 @@ def test_compile_has_no_leading_blank_paragraph():
     ahead of the signature table it inserts, so the compiled document's
     body started with a stray blank paragraph instead of the table
     (same root cause dilon-document-form-compiler had - see
-    strip_leading_empty_paragraphs() in lib/dilon_docx_common.py)."""
+    strip_leading_empty_paragraphs() in lib/dilon_docx_common.py).
+
+    The header-to-body gap on every page (including this one) is governed
+    by TEMPLATE_Word_Base.docx's top margin instead, so no spacer
+    paragraph belongs here - the table should be the body's first
+    content, immediately after the header/footer/signature-table setup."""
     input_md = TEST_OUTPUT_DIR / "compile_test_no_leading_blank.md"
     output_docx = TEST_OUTPUT_DIR / "compile_test_no_leading_blank.docx"
     input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
@@ -424,6 +431,174 @@ def test_compile_has_no_leading_blank_paragraph():
         first_child.tag == qn('w:tbl'),
         f"body's first content element is the signature table, no stray leading blank paragraph, got {first_child.tag!r}",
     )
+
+
+def test_compile_header_signature_revision_widths_and_author_centering():
+    """Regression test for a formatting request: the running header,
+    signature-approval table, and revision-history table must all extend
+    to the page's full content width (previously narrower than the
+    margins, leaving unused space on the right), with their fixed
+    columns matching a hand-tuned reference document's widths exactly and
+    their remaining column absorbing whatever width is left. The
+    Author/Revised-by table on the title page must also be centered."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_column_geometry.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_column_geometry.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for the column-geometry check document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+    section = doc.sections[0]
+    available_width_twips = section.page_width.twips - section.left_margin.twips - section.right_margin.twips
+
+    def grid_dxa(table):
+        grid = table._element.find(qn('w:tblGrid'))
+        return [int(g.get(qn('w:w'))) for g in grid.findall(qn('w:gridCol'))]
+
+    def cell_dxa(table, row_idx):
+        """Per-cell tcW width, not just the tblGrid definition - this is
+        what Word's AutoFit actually renders from when a table isn't
+        pinned to a fixed layout, so a passing grid_dxa() check alone
+        does NOT prove the widths render correctly (see
+        test_apply_table_column_widths_fixed_and_flex for the same
+        distinction on @@@TABLE_COLUMNS@@@-marked tables)."""
+        widths = []
+        for cell in table.rows[row_idx].cells:
+            tc_pr = cell._element.tcPr
+            tc_w = tc_pr.find(qn('w:tcW')) if tc_pr is not None else None
+            widths.append(int(tc_w.get(qn('w:w'))) if tc_w is not None else None)
+        return widths
+
+    def is_fixed_layout(table):
+        tbl_layout = table._element.tblPr.find(qn('w:tblLayout'))
+        return tbl_layout is not None and tbl_layout.get(qn('w:type')) == 'fixed'
+
+    header_table = section.header.tables[0]
+    header_widths = grid_dxa(header_table)
+    check(header_widths[0] == 1525 and header_widths[2] == 1255 and header_widths[3] == 1625,
+          f"header logo/Rev/Page columns match the reference document's widths (got {header_widths})")
+    check(sum(header_widths) == available_width_twips,
+          f"header table fills the full page content width (got {sum(header_widths)}, expected {available_width_twips})")
+    check(cell_dxa(header_table, 0) == header_widths,
+          f"header row's actual per-cell widths match the tblGrid definition, not just the grid (got {cell_dxa(header_table, 0)})")
+    check(is_fixed_layout(header_table), "header table uses a fixed layout, so Word can't AutoFit its columns away")
+
+    def header_row(table):
+        return [c.text for c in table.rows[0].cells]
+
+    signature_table = next(t for t in doc.tables if header_row(t) == ["Group", "Preparer", "Signature"])
+    sig_widths = grid_dxa(signature_table)
+    check(sig_widths[0] == 2330 and sig_widths[2] == 2440,
+          f"signature table Group/Signature columns match the reference document's widths (got {sig_widths})")
+    check(sum(sig_widths) == available_width_twips,
+          f"signature table fills the full page content width (got {sum(sig_widths)}, expected {available_width_twips})")
+    check(cell_dxa(signature_table, 1) == sig_widths,
+          f"signature table's actual per-cell widths match the tblGrid definition, not just the grid (got {cell_dxa(signature_table, 1)})")
+    check(is_fixed_layout(signature_table), "signature table uses a fixed layout, so Word can't AutoFit its columns away")
+
+    revision_table = next(t for t in doc.tables if header_row(t)[0] == "REVISION HISTORY")
+    rev_widths = grid_dxa(revision_table)
+    check(rev_widths[0] == 805 and rev_widths[2] == 1620 and rev_widths[3] == 1535,
+          f"revision table REV#/ECO#/DATE columns match the reference document's widths (got {rev_widths})")
+    check(sum(rev_widths) == available_width_twips,
+          f"revision table fills the full page content width (got {sum(rev_widths)}, expected {available_width_twips})")
+    check(cell_dxa(revision_table, 2) == rev_widths,
+          f"revision table's actual per-cell widths match the tblGrid definition, not just the grid (got {cell_dxa(revision_table, 2)})")
+    check(is_fixed_layout(revision_table), "revision table uses a fixed layout, so Word can't AutoFit its columns away")
+
+    author_table = next(t for t in doc.tables if header_row(t)[0] == "Author/Revised by:")
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    check(author_table.alignment == WD_TABLE_ALIGNMENT.CENTER,
+          f"Author/Revised-by table is centered on the page (got {author_table.alignment})")
+
+
+def test_compile_footer_table_layout():
+    """Regression test: the running footer is a 3-column/2-row table -
+    row 1 is doc_number/rev (left) | ECO # (center) | revision date
+    (right) in three equal-width columns, row 2 is a single cell spanning
+    all 3 columns for the confidentiality notice. The table must fill the
+    full page content width and use a fixed layout (see
+    test_compile_header_signature_revision_widths_and_author_centering's
+    is_fixed_layout for why that matters)."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_footer_table.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_footer_table.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for the footer-table check document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+    section = doc.sections[0]
+    available_width_twips = section.page_width.twips - section.left_margin.twips - section.right_margin.twips
+
+    footer_tables = section.footer.tables
+    check(len(footer_tables) == 1, f"footer contains exactly one table (got {len(footer_tables)})")
+    if not footer_tables:
+        return
+    table = footer_tables[0]
+
+    check(len(table.rows) == 2 and len(table.columns) == 3,
+          f"footer table is 3 columns x 2 rows (got {len(table.columns)}x{len(table.rows)})")
+
+    grid = table._element.find(qn('w:tblGrid'))
+    grid_widths = [int(g.get(qn('w:w'))) for g in grid.findall(qn('w:gridCol'))]
+    check(sum(grid_widths) == available_width_twips,
+          f"footer table fills the full page content width (got {sum(grid_widths)}, expected {available_width_twips})")
+    check(max(grid_widths) - min(grid_widths) <= 2,
+          f"footer table's 3 columns are equal width, up to a rounding twip or two (got {grid_widths})")
+
+    tbl_layout = table._element.tblPr.find(qn('w:tblLayout'))
+    check(tbl_layout is not None and tbl_layout.get(qn('w:type')) == 'fixed',
+          "footer table uses a fixed layout, so Word can't AutoFit its columns away")
+
+    row1_texts = [c.text for c in table.rows[0].cells]
+    check("DD_TST_99999 Rev 00" in row1_texts[0], f"footer row 1 col 1 has the doc_number/rev (got {row1_texts[0]!r})")
+    check(row1_texts[1] == "ECO-000", f"footer row 1 col 2 has the ECO number (got {row1_texts[1]!r})")
+    check("2025-01-01" in row1_texts[2], f"footer row 1 col 3 has the revision date (got {row1_texts[2]!r})")
+
+    row1_alignments = [c.paragraphs[0].alignment for c in table.rows[0].cells]
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    check(row1_alignments == [WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.RIGHT],
+          f"footer row 1 is left/center/right justified across its 3 columns (got {row1_alignments})")
+
+    row2_cells = table.rows[1].cells
+    check(row2_cells[0]._element is row2_cells[1]._element is row2_cells[2]._element,
+          "footer row 2's three grid positions resolve to one merged cell spanning the full width")
+    check("confidential" in row2_cells[0].text and "prohibited" in row2_cells[0].text,
+          f"footer row 2's merged cell carries the confidentiality notice (got {row2_cells[0].text!r})")
 
 
 def test_compile_bom_front_matter():
@@ -1491,6 +1666,8 @@ def main():
     test_create_signature_table_structure()
     test_compile_signature_table_generated_programmatically()
     test_compile_has_no_leading_blank_paragraph()
+    test_compile_header_signature_revision_widths_and_author_centering()
+    test_compile_footer_table_layout()
     test_compile_bom_front_matter()
     test_compile_table_marker_no_blank_line()
     test_compile_adjacent_tables_no_merge()

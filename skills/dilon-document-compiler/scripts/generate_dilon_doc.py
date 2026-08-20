@@ -28,7 +28,7 @@ docs/superpowers/specs/2026-08-17-document-extraction-and-form-tooling-design.md
 import sys
 from pathlib import Path
 from docx import Document
-from docx.shared import Pt, Inches
+from docx.shared import Pt, Inches, Emu
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 
 # Set UTF-8 encoding for Windows console
@@ -64,17 +64,20 @@ from step_numbering import (  # noqa: E402
 )
 
 
-def create_revision_table(revisions):
+def create_revision_table(revisions, available_width):
     """
     Create a formatted revision history table as a Word table object.
 
     Args:
         revisions: List of revision dictionaries with keys: number, description, eco_number, eco_date
+        available_width: content width (page width minus margins), as a
+            python-docx Length, to size the table to - see
+            generate_requirements_document().
 
     Returns:
         python-docx Table object
     """
-    from docx.shared import Pt, RGBColor
+    from docx.shared import Pt, RGBColor, Twips
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
@@ -86,13 +89,19 @@ def create_revision_table(revisions):
     table = temp_doc.add_table(rows=2 + len(revisions), cols=4)
     table.style = 'Table Grid'
 
-    # Set column widths (in inches): REV # is never more than 2 characters
-    # so stays narrow; ECO # stays wide enough for "ECO-000000"; DATE
-    # trimmed; the rest goes to DESCRIPTION.
-    table.columns[0].width = Inches(0.5)   # REV # - max 2 characters
-    table.columns[1].width = Inches(3.9)   # DESCRIPTION - wider
-    table.columns[2].width = Inches(1.0)   # ECO # - fits "ECO-000000"
-    table.columns[3].width = Inches(0.7)   # DATE - narrower
+    # REV #/ECO #/DATE widths match an approved, hand-tuned Dilon Word
+    # document's own revision table; DESCRIPTION absorbs whatever width
+    # is left so the table always fills the page's full content width.
+    # apply_table_column_widths() (not a plain table.columns[idx].width=
+    # assignment, which only sets the tblGrid definition, not per-cell
+    # width or autofit=False - Word's AutoFit then silently recalculates
+    # the visible columns from cell content and ignores it) sets both, so
+    # the widths actually render as specified.
+    apply_table_column_widths(
+        table,
+        [Twips(805).inches, 'x', Twips(1620).inches, Twips(1535).inches],
+        available_width.inches,
+    )
 
     # Title row (row 0) - spans all columns
     title_cell = table.rows[0].cells[0]
@@ -166,7 +175,7 @@ def create_revision_table(revisions):
     return table
 
 
-def create_signature_table(metadata):
+def create_signature_table(metadata, available_width):
     """
     Create a formatted signature-approval table as a Word table object.
 
@@ -178,6 +187,9 @@ def create_signature_table(metadata):
     Args:
         metadata: front-matter dict with department, author,
             regulatory_rep, quality_rep, department_head
+        available_width: content width (page width minus margins), as a
+            python-docx Length, to size the table to - see
+            generate_requirements_document().
 
     Returns:
         python-docx Table object
@@ -185,15 +197,26 @@ def create_signature_table(metadata):
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
+    from docx.shared import Twips
 
     temp_doc = Document()
     table = temp_doc.add_table(rows=6, cols=3)
     table.style = 'Normal Table'
 
-    # Group/Department and Signature narrowed to give Preparer/Name more room.
-    table.columns[0].width = Inches(1.1)
-    table.columns[1].width = Inches(4.5)
-    table.columns[2].width = Inches(1.0)
+    # Group/Department and Signature widths match an approved, hand-tuned
+    # Dilon Word document's own signature table; Preparer/Name absorbs
+    # whatever width is left so the table always fills the page's full
+    # content width. apply_table_column_widths() (not a plain
+    # table.columns[idx].width= assignment, which only sets the tblGrid
+    # definition, not per-cell width or autofit=False - Word's AutoFit
+    # then silently recalculates the visible columns from cell content
+    # and ignores it) sets both, so the widths actually render as
+    # specified.
+    apply_table_column_widths(
+        table,
+        [Twips(2330).inches, 'x', Twips(2440).inches],
+        available_width.inches,
+    )
 
     def set_cell(row_idx, col_idx, text, bold=False, center=True, fill=None):
         cell = table.rows[row_idx].cells[col_idx]
@@ -315,6 +338,7 @@ def build_title_page(document, metadata):
     table = document.add_table(rows=1, cols=2)
     table.columns[0].width = Inches(1.7326388888888888)
     table.columns[1].width = Inches(4.814583333333333)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
     label_cell, value_cell = table.rows[0].cells
     label_run = label_cell.paragraphs[0].add_run('Author/Revised by:')
     label_run.font.bold = True
@@ -435,9 +459,12 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     populate_footer(doc_a, metadata)
     strip_leading_empty_paragraphs(doc_a)
 
+    section = doc_a.sections[0]
+    available_width = Emu(section.page_width - section.left_margin - section.right_margin)
+
     # Build the signature-approval table programmatically (same pattern as
     # Part B's revision table) and insert it into Part A itself.
-    signature_table = create_signature_table(metadata)
+    signature_table = create_signature_table(metadata, available_width)
     _insert_table_before_section_properties(doc_a, signature_table)
 
     temp_part_a = Path(output_path).parent / "_temp_part_a.docx"
@@ -451,7 +478,7 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
         revision_doc = Document()
 
         # Create the table
-        table = create_revision_table(metadata['revisions'])
+        table = create_revision_table(metadata['revisions'], available_width)
 
         # Center the table before adding to document
         table.alignment = WD_ALIGN_PARAGRAPH.CENTER
