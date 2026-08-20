@@ -78,8 +78,23 @@ Each non-blank line is one **row**, rendered as its own bordered Word table (`Ta
 **Row-level annotation** — ` {key=value,...}` trailing the whole line, distinguished from per-pair annotations by curly braces instead of square brackets:
 - `dir=h` (default) or `dir=v` — orientation for **every pair on the row** (a row can't mix horizontal and vertical pairs; put a vertical field on its own line). `h`: label and blank side by side. `v`: label on top, blank below, both spanning the pair's full width.
 - `rows=N` — default blank-cell height (in lines) for every pair on the row; default `1`.
+- `title=true` — makes the row a **title row**: no input/blank cell, just a bold label spanning the row's full width. Truthy values (case-insensitive): `true`, `t`, `1`, `yes`; anything else (including absent) is a normal row. Use it to break a `FieldGrid` block into labeled sub-sections without leaving the grid.
 
 **Block-level max width** — optional `:<width>in` suffix on the opening marker, e.g. `@@@FORM_FIELD:FieldGrid:6.5in@@@`. Defaults to the available page/cell width; clamped (with a warning) if the given value exceeds it.
+
+Title-row specifics:
+- Only the first `|`-separated pair token on a title row is used; any additional tokens are dropped with a printed warning.
+- `pair=` and `label=` on a title row's label token are ignored (with a warning) — there's no percentage split or label/blank split with only one column.
+- `dir=` is accepted on a title row but has no visible effect (nothing to orient) — not a mistake, no warning.
+- `rows=N` still applies: it adds `N - 1` blank paragraphs below the bold label, inside the same cell.
+
+```markdown
+@@@FORM_FIELD:FieldGrid@@@
+Work Order: | Date:
+Assembly Prep {title=true}
+Technician: | Notes:
+@@@END_FORM_FIELD@@@
+```
 
 `FieldGrid` is top-level body content only — it isn't supported inside a markdown table cell (the marker is left as-is with a warning if found there).
 
