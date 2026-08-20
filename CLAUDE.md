@@ -2,7 +2,7 @@
 
 ## Plugin Overview
 
-This is a **self-hosted Claude Code plugin** for Windows environments, providing regulatory-compliant technical documentation workflows at Dilon Technologies. It bundles four Skills rather than exposing MCP tools/resources.
+This is a **self-hosted Claude Code plugin** for Windows environments, providing regulatory-compliant technical documentation workflows at Dilon Technologies. It bundles five Skills rather than exposing MCP tools/resources.
 
 **Plugin Details:**
 - Plugin name: `dilon-tools` (version 2.2.0), defined in `.claude-plugin/plugin.json`
@@ -51,7 +51,7 @@ This is a **self-hosted Claude Code plugin** for Windows environments, providing
 - Invokes `scripts/generate_dilon_form.py <input.md> <output.docx> <base_template>`.
 - Produces a running-header/footer-only Word document (no title page, no signature-approval page, no table of contents) - for forms/travelers meant to be printed and filled out by hand, as opposed to `dilon-document-compiler`'s narrative documents.
 - Expects the same rich Dilon YAML front matter as `dilon-document-compiler` (front-matter fields beyond title/doc_number/current_revision aren't rendered into the form's header, but are kept for consistency with the rest of the front-matter-driven tooling).
-- Supports one form-only markdown marker on top of everything `MARKDOWN_STYLING_GUIDE.md` documents: `@@@FORM_FIELD:FillLine@@@Label@@@END_FORM_FIELD@@@`, which becomes a label followed by a right-aligned, underscore-leadered tab stop filling to the page's or table cell's true available width (`form_fields.py`'s `underscore_until_end_of_line()`).
+- Compiles three form-only markdown markers implemented in `scripts/form_fields.py` - `FillLine` (`underscore_until_end_of_line()`), `FieldGrid`, and `Form_Section_Header` - but doesn't itself document their syntax; that's `dilon-document-form-writer`'s job (mirroring how `dilon-document-compiler` defers markdown-authoring guidance to `dilon-document-writer`).
 
 ### Skill 4: `dilon-document-extractor`
 **Location:** `skills/dilon-document-extractor/` (`SKILL.md`, `scripts/extract_docx.py`, `scripts/extract_pdf.py`, `scripts/check_deps.py`)
@@ -64,6 +64,17 @@ This is a **self-hosted Claude Code plugin** for Windows environments, providing
 - `.pdf` path (`scripts/extract_pdf.py`): lower-fidelity - untagged PDFs carry no reliable style metadata, so no heading-level inference is attempted; emits body text and embedded images with a banner comment.
 - Never hard-fails on ambiguous input: every uncertain classification degrades to an inline `<!-- EXTRACTOR: ... -->` comment instead of raising.
 - Output always requires a cleanup pass: resolve every `EXTRACTOR` comment, sanity-check headings/tables against the source, then hand off to `dilon-document-writer` for remaining prose/structure cleanup.
+
+### Skill 5: `dilon-document-form-writer`
+**Location:** `skills/dilon-document-form-writer/` (`SKILL.md`, `TEMPLATE_Form.md`)
+
+**Dependencies:** none - works without running `install.ps1`.
+
+**Capabilities (per `SKILL.md`):**
+- Creating a new form document: reads `TEMPLATE_Form.md`, gathers the same YAML front-matter fields as `dilon-document-writer` (title/author/department/doc_number/current_revision/regulatory_rep/quality_rep/department_head/initial revision - `doc_number` defaults to the `FO-` form-number convention rather than `dilon-document-writer`'s narrative-doc `DD_XXX_XXXXX`), refuses to overwrite an existing destination file, and writes the new file with the template's worked example (`Form_Section_Header` + `FieldGrid` + `FillLine`) intact.
+- Editing an existing Dilon form: reads `dilon-document-writer`'s `MARKDOWN_STYLING_GUIDE.md` (general conventions still apply to forms), then applies the three form-only markers this skill documents as the single source of truth - `FillLine`, `FieldGrid` (including its `dir=`/`rows=`/`pair=`/`label=`/`title=` annotations), and `Form_Section_Header`.
+- Mirrors the `dilon-document-writer` / `dilon-document-compiler` split: this skill owns markdown authoring and marker syntax for forms; `dilon-document-form-compiler` owns compiling that markdown to Word and doesn't duplicate the syntax reference.
+- Explicitly does not invoke Pandoc or the Python compiler - that's `dilon-document-form-compiler`'s job.
 
 ## Repository Structure
 
@@ -102,12 +113,15 @@ dilon-claude-tools/
 │   │       ├── generate_dilon_form.py # Markdown -> Word compiler (header/footer only)
 │   │       ├── form_fields.py         # @@@FORM_FIELD:FillLine@@@ marker
 │   │       └── check_deps.py          # Preflight dependency checker
-│   └── dilon-document-extractor/
+│   ├── dilon-document-extractor/
+│   │   ├── SKILL.md
+│   │   └── scripts/
+│   │       ├── extract_docx.py        # .docx -> Dilon markdown draft
+│   │       ├── extract_pdf.py         # .pdf -> Dilon markdown draft (lower fidelity)
+│   │       └── check_deps.py          # Preflight dependency checker
+│   └── dilon-document-form-writer/
 │       ├── SKILL.md
-│       └── scripts/
-│           ├── extract_docx.py        # .docx -> Dilon markdown draft
-│           ├── extract_pdf.py         # .pdf -> Dilon markdown draft (lower fidelity)
-│           └── check_deps.py          # Preflight dependency checker
+│       └── TEMPLATE_Form.md           # Starter template for new form documents
 │
 └── tests/
     ├── run_tests.py                   # direct-invocation test suite (writer/compiler)
@@ -141,7 +155,7 @@ Covers YAML front matter requirements, heading conventions/numbering, table form
 
 ## Key Architectural Patterns
 
-1. **Skill Modularity:** Each skill is self-contained (`SKILL.md` + any scripts/docs it needs) and independently installable in concept - `dilon-document-writer` has zero runtime dependencies, `dilon-document-compiler` and `dilon-document-extractor` depend on Python (and Pandoc, for the compiler). The Word reference templates are shared at the repo root since both `dilon-document-compiler` and `dilon-document-extractor` reference their canonical shape.
+1. **Skill Modularity:** Each skill is self-contained (`SKILL.md` + any scripts/docs it needs) and independently installable in concept - `dilon-document-writer` and `dilon-document-form-writer` have zero runtime dependencies, `dilon-document-compiler`, `dilon-document-form-compiler`, and `dilon-document-extractor` depend on Python (and Pandoc, for the compilers). Both document families follow the same authoring/compiling split: `dilon-document-writer`/`dilon-document-form-writer` own markdown authoring and marker syntax, `dilon-document-compiler`/`dilon-document-form-compiler` own compiling to Word without duplicating that syntax reference. The Word reference templates are shared at the repo root since both `dilon-document-compiler` and `dilon-document-extractor` reference their canonical shape.
 2. **Preflight Validation:** The compiler skill checks dependencies (`check_deps.py`) before attempting work, rather than failing partway through.
 3. **Explicit Arguments:** The compiler script is always invoked with all three arguments spelled out (input, output, base template) rather than relying on internal defaults.
 4. **Template Inheritance:** Word styles cascade from the base template through to the assembled document; header, footer, signature table, revision table, and title page are all generated programmatically in Python against that template's style definitions rather than being template-baked.
@@ -161,5 +175,7 @@ Covers YAML front matter requirements, heading conventions/numbering, table form
 **For `dilon-document-extractor`:**
 - Python >= 3.8
 - Python packages: `python-docx`, `pyyaml`, `pymupdf`
+
+**For `dilon-document-form-writer`:** none.
 
 `install.ps1` (repo root, run as Administrator) installs Python/Pandoc via winget if missing, installs the pip packages above (including `pymupdf`), and installs a `Compile-DilonDoc` / `dilonc` PowerShell alias for compiling documents outside of Claude Code.
