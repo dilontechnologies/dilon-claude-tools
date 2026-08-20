@@ -289,6 +289,80 @@ def test_field_grid_permutations_compile():
         check(value_cell_text == "Cell Line:\t", f"table-cell FillLine rendered correctly, got {value_cell_text!r}")
 
 
+FIELD_GRID_TITLE_ROW_MARKDOWN = (
+    '---\n'
+    'title: "Field Grid Title Row Test"\n'
+    'author: "Test Suite"\n'
+    'department: "Engineering"\n'
+    'doc_number: "FO-77778"\n'
+    'current_revision: "00"\n'
+    'regulatory_rep: "Test Rep"\n'
+    'quality_rep: "Test QA"\n'
+    'department_head: "Test Head"\n'
+    'revisions:\n'
+    '  - number: "00"\n'
+    '    description: "Initial test"\n'
+    '    eco_number: "ECO-000"\n'
+    '    eco_date: "2025-01-01"\n'
+    '---\n'
+    '\n'
+    '@@@FORM_FIELD:FieldGrid@@@\n'
+    'Work Order: | Date:\n'
+    'Assembly Prep {title=true}\n'
+    'Technician: | Notes:\n'
+    '@@@END_FORM_FIELD@@@\n'
+)
+
+
+def test_field_grid_title_row_mixed_with_normal_rows_compiles():
+    input_md = TEST_OUTPUT_DIR / "field_grid_title_row.md"
+    output_docx = TEST_OUTPUT_DIR / "field_grid_title_row.docx"
+    input_md.write_text(FIELD_GRID_TITLE_ROW_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(FORM_COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(BASE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "field grid title row markdown compiles cleanly")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(output_docx.exists(), "field_grid_title_row.docx created on disk")
+    if not output_docx.exists():
+        return
+
+    doc = Document(output_docx)
+    grid_tables = [t for t in doc.tables if t.style is not None and t.style.name == "Table Grid"]
+    check(len(grid_tables) == 3, f"3 declared rows produce 3 separate row-tables, found {len(grid_tables)}")
+    if len(grid_tables) != 3:
+        return
+
+    work_order_table, title_table, technician_table = grid_tables
+
+    check(len(work_order_table.columns) == 4, f"row before the title row still renders normally, got {len(work_order_table.columns)} columns")
+    check(work_order_table.rows[0].cells[0].paragraphs[0].text == "Work Order:", "row before the title row keeps its label")
+
+    check(len(title_table.columns) == 1, f"title row renders as 1 column, found {len(title_table.columns)}")
+    title_cell = title_table.rows[0].cells[0]
+    check(title_cell.paragraphs[0].text == "Assembly Prep", f"title row's label text, got {title_cell.paragraphs[0].text!r}")
+    check(
+        len(title_cell.paragraphs[0].runs) == 1 and title_cell.paragraphs[0].runs[0].bold is True,
+        "title row's label is rendered as a single bold run",
+    )
+
+    check(len(technician_table.columns) == 4, f"row after the title row still renders normally, got {len(technician_table.columns)} columns")
+    check(technician_table.rows[0].cells[0].paragraphs[0].text == "Technician:", "row after the title row keeps its label")
+
+
 FO_00127_REPLICA_MARKDOWN = (
     '---\n'
     'title: "Detector Head Assembly Traveler"\n'
@@ -745,6 +819,20 @@ def test_resolve_label_width():
     check(ff.resolve_label_width({}, 10.0, 'v') == (None, None), "dir=v with no label= still returns (None, None)")
 
 
+def test_resolve_title_flag():
+    import form_fields as ff
+    check(ff.resolve_title_flag({}) is False, "absent title= is not a title row")
+    check(ff.resolve_title_flag({'title': 'true'}) is True, "title=true is a title row")
+    check(ff.resolve_title_flag({'title': 'True'}) is True, "title= truthy match is case-insensitive")
+    check(ff.resolve_title_flag({'title': '1'}) is True, "title=1 is a title row")
+    check(ff.resolve_title_flag({'title': 'yes'}) is True, "title=yes is a title row")
+    check(ff.resolve_title_flag({'title': 'YES'}) is True, "title=YES is a title row (case-insensitive)")
+    check(ff.resolve_title_flag({'title': 'false'}) is False, "title=false is not a title row")
+    check(ff.resolve_title_flag({'title': '0'}) is False, "title=0 is not a title row")
+    check(ff.resolve_title_flag({'title': 't'}) is False, "title=t is NOT a title row (only true/1/yes are truthy)")
+    check(ff.resolve_title_flag({'title': 'nope'}) is False, "unrecognized title= value is not a title row")
+
+
 def test_build_field_grid_row_table_horizontal():
     import form_fields as ff
     doc = Document()
@@ -782,6 +870,71 @@ def test_build_field_grid_row_table_is_centered():
     row = {'pairs': [("A:", {})], 'annotations': {}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
     check(table.alignment == WD_TABLE_ALIGNMENT.CENTER, f"row-table is centered, got {table.alignment}")
+
+
+def test_build_field_grid_row_table_title_row():
+    import form_fields as ff
+    doc = Document()
+    row = {'pairs': [("Assembly Prep", {})], 'annotations': {'title': 'true'}}
+    table = ff.build_field_grid_row_table(doc, row, 6.0)
+
+    check(table.style.name == "Table Grid", f"title row-table uses the Table Grid style, got {table.style.name!r}")
+    check(len(table.columns) == 1, f"title row produces exactly 1 column, found {len(table.columns)}")
+    check(abs(table.columns[0].width.inches - 6.0) < 0.05, f"title row's single column spans the full row width, got {table.columns[0].width.inches}in")
+    cell = table.rows[0].cells[0]
+    check(len(cell.paragraphs) == 1, f"title row has exactly 1 paragraph (no blank cell/lines), found {len(cell.paragraphs)}")
+    check(cell.paragraphs[0].text == "Assembly Prep", f"title row's label text, got {cell.paragraphs[0].text!r}")
+    check(len(cell.paragraphs[0].runs) == 1, f"title row's label is a single run, found {len(cell.paragraphs[0].runs)}")
+    if cell.paragraphs[0].runs:
+        check(cell.paragraphs[0].runs[0].bold is True, "title row's label run is bold")
+
+
+def test_build_field_grid_row_table_title_row_ignores_pair_and_label_annotations():
+    import form_fields as ff
+    doc = Document()
+    row = {'pairs': [("Assembly Prep", {'pair': '60', 'label': '70'})], 'annotations': {'title': 'true'}}
+    table = ff.build_field_grid_row_table(doc, row, 6.0)
+
+    check(len(table.columns) == 1, f"title row ignores pair= and stays 1 column, found {len(table.columns)}")
+    check(abs(table.columns[0].width.inches - 6.0) < 0.05, f"title row ignores pair= and still spans the full row width, got {table.columns[0].width.inches}in")
+    cell = table.rows[0].cells[0]
+    check(cell.paragraphs[0].text == "Assembly Prep", f"title row ignores label=, single cell text is unaffected, got {cell.paragraphs[0].text!r}")
+
+
+def test_build_field_grid_row_table_title_row_rows_override():
+    import form_fields as ff
+    doc = Document()
+    row = {'pairs': [("Assembly Prep", {})], 'annotations': {'title': 'true', 'rows': '3'}}
+    table = ff.build_field_grid_row_table(doc, row, 6.0)
+
+    cell = table.rows[0].cells[0]
+    check(len(cell.paragraphs) == 3, f"title row rows=3 adds 2 blank paragraphs below the bold label, found {len(cell.paragraphs)}")
+    check(cell.paragraphs[0].text == "Assembly Prep", f"first paragraph keeps the bold label, got {cell.paragraphs[0].text!r}")
+    for blank_paragraph in cell.paragraphs[1:]:
+        check(blank_paragraph.text == "", f"extra title-row paragraph is blank, got {blank_paragraph.text!r}")
+
+
+def test_build_field_grid_row_table_title_row_multiple_tokens_uses_first():
+    import form_fields as ff
+    doc = Document()
+    row = {'pairs': [("Assembly Prep", {}), ("Dropped:", {})], 'annotations': {'title': 'true'}}
+    table = ff.build_field_grid_row_table(doc, row, 6.0)
+
+    check(len(table.columns) == 1, f"title row with multiple pair tokens still produces 1 column, found {len(table.columns)}")
+    cell = table.rows[0].cells[0]
+    check(cell.paragraphs[0].text == "Assembly Prep", f"title row uses only the first pair token's label, got {cell.paragraphs[0].text!r}")
+
+
+def test_build_field_grid_row_table_title_row_dir_has_no_visible_effect():
+    import form_fields as ff
+    doc = Document()
+    row_h = {'pairs': [("Assembly Prep", {})], 'annotations': {'title': 'true', 'dir': 'h'}}
+    table_h = ff.build_field_grid_row_table(doc, row_h, 6.0)
+    check(len(table_h.columns) == 1, f"title row with dir=h still renders as 1 column, found {len(table_h.columns)}")
+
+    row_v = {'pairs': [("Assembly Prep", {})], 'annotations': {'title': 'true', 'dir': 'v'}}
+    table_v = ff.build_field_grid_row_table(doc, row_v, 6.0)
+    check(len(table_v.columns) == 1, f"title row with dir=v still renders as 1 column, found {len(table_v.columns)}")
 
 
 def test_insert_field_grid_replaces_marker_with_row_tables():
@@ -1007,14 +1160,21 @@ def main():
     test_resolve_pair_widths_overshoot_falls_back()
     test_resolve_pair_widths_nonpositive_remainder_falls_back()
     test_resolve_label_width()
+    test_resolve_title_flag()
     test_build_field_grid_row_table_horizontal()
     test_build_field_grid_row_table_vertical_with_rows()
     test_build_field_grid_row_table_is_centered()
+    test_build_field_grid_row_table_title_row()
+    test_build_field_grid_row_table_title_row_ignores_pair_and_label_annotations()
+    test_build_field_grid_row_table_title_row_rows_override()
+    test_build_field_grid_row_table_title_row_multiple_tokens_uses_first()
+    test_build_field_grid_row_table_title_row_dir_has_no_visible_effect()
     test_insert_field_grid_replaces_marker_with_row_tables()
     test_insert_field_grid_max_width()
     test_field_grid_marker_inside_table_cell_warns_and_skips()
     test_protect_field_grid_line_breaks()
     test_field_grid_permutations_compile()
+    test_field_grid_title_row_mixed_with_normal_rows_compiles()
     test_apply_form_fields_form_section_header_numbers_sequentially()
     test_apply_form_fields_form_section_header_missing_style_degrades()
     test_form_section_header_marker_inside_table_cell_warns_and_skips()
