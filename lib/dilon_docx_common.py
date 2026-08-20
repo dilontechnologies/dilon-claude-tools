@@ -445,6 +445,37 @@ def apply_figure_captions(docx_file):
     return count
 
 
+def center_image_paragraphs(docx_file):
+    """
+    Center every paragraph that contains an inline image, captioned or
+    not.
+
+    A captioned figure's image lands in a "Captioned Figure"-styled
+    paragraph, but an UNcaptioned image (`![](path.png)`, no alt text -
+    see apply_figure_captions()) lands in a plain "Normal"-styled
+    paragraph indistinguishable, by style alone, from an ordinary text
+    paragraph. So this detects "contains an image" structurally (a
+    DrawingML <a:blip> descendant) rather than by paragraph style, which
+    covers both cases with one pass.
+    """
+    from docx.oxml.ns import qn
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc = Document(docx_file)
+
+    count = 0
+    for para in doc.paragraphs:
+        if para._p.findall('.//' + qn('a:blip')):
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            count += 1
+
+    if count:
+        doc.save(docx_file)
+        print(f"  Centered {count} image paragraph(s)")
+
+    return count
+
+
 def set_update_fields_on_open(docx_file):
     """
     Force Word to recalculate all fields (STYLEREF/SEQ figure numbers, TOC
@@ -741,6 +772,12 @@ def populate_footer(document, metadata):
     FOOTER_FONT_SIZE = Pt(9)
 
     def _add_footer_run(paragraph, text):
+        # The 'Normal' style's own default spacing (6pt before + 6pt
+        # after every paragraph) would otherwise pad out each footer
+        # line - zeroed here so the table hugs the text as tightly as
+        # the row-height settings above intend.
+        paragraph.paragraph_format.space_before = Pt(0)
+        paragraph.paragraph_format.space_after = Pt(0)
         run = paragraph.add_run(text)
         run.font.size = FOOTER_FONT_SIZE
         return run
@@ -842,6 +879,43 @@ def ensure_blank_line_after_table_markers(markdown_text):
     return _TABLE_MARKER_RUN.sub(_insert_blank_line_if_needed, markdown_text)
 
 
+_IMAGE_ONLY_LINE = re.compile(
+    r'^[ \t]*!\[[^\]\n]*\]\([^)\n]*\)(?:\{[^}\n]*\})?[ \t]*$'
+)
+
+
+def ensure_blank_line_between_images(markdown_text):
+    """
+    Ensure a blank line separates two consecutive image-only markdown
+    lines (e.g. two figures declared back-to-back with no prose between
+    them).
+
+    Pandoc's implicit-figures extension only promotes an image to a
+    captioned figure when its paragraph contains nothing but that one
+    image (MARKDOWN_STYLING_GUIDE.md SS4.1's "caption in the alt text"
+    convention relies on this). Two image lines with no blank line
+    between them are, per ordinary Markdown paragraph rules, the SAME
+    paragraph - so neither satisfies "just one image" and Pandoc silently
+    drops figure treatment for BOTH: no caption, no {#fig:...} bookmark,
+    no numbering. Normalizing here (before Pandoc ever sees the markdown)
+    means the natural habit of stacking figures one after another keeps
+    working, mirroring ensure_blank_line_after_table_markers() above for
+    the equivalent problem with @@@TABLE_STYLE@@@/@@@TABLE_COLUMNS@@@
+    markers.
+    """
+    lines = markdown_text.split('\n')
+    result = []
+    for i, line in enumerate(lines):
+        result.append(line)
+        if (
+            i + 1 < len(lines)
+            and _IMAGE_ONLY_LINE.match(line)
+            and _IMAGE_ONLY_LINE.match(lines[i + 1])
+        ):
+            result.append('')
+    return '\n'.join(result)
+
+
 def render_jinja(markdown_text, metadata):
     """
     Pre-render a markdown body's {{field}} references against the same
@@ -876,6 +950,7 @@ def markdown_to_docx(markdown_text, output_file, reference_doc=None, resource_di
             the form compiler passes False.
     """
     markdown_text = ensure_blank_line_after_table_markers(markdown_text)
+    markdown_text = ensure_blank_line_between_images(markdown_text)
 
     # Create temporary markdown file
     temp_md = Path(output_file).parent / "_temp_content.md"

@@ -41,11 +41,13 @@ sys.path.insert(0, str(_REPO_ROOT / "lib"))
 from dilon_docx_common import (  # noqa: E402
     apply_styles,
     apply_figure_captions,
+    center_image_paragraphs,
     markdown_to_docx,
     extract_yaml_and_markdown,
     set_update_fields_on_open,
     compose_documents,
     ensure_blank_line_after_table_markers,
+    ensure_blank_line_between_images,
     parse_column_widths,
     apply_table_column_widths,
     render_jinja,
@@ -521,6 +523,9 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     # Convert Pandoc's implicit-figure captions into auto-numbered Word captions
     print("Applying figure caption numbering...")
     apply_figure_captions(temp_part_d)
+
+    print("Centering image paragraphs...")
+    center_image_paragraphs(temp_part_d)
 
     if step_manifest:
         print("Applying step-list numbering...")

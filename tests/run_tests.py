@@ -189,6 +189,43 @@ def test_ensure_blank_line_idempotent_when_already_blank():
           "already-blank-line marker stack is left unchanged (no extra blank line inserted between stacked markers)")
 
 
+def test_ensure_blank_line_between_images_inserts_when_missing():
+    result = compiler.ensure_blank_line_between_images(
+        '![First.](a.png){#fig:a}\n![Second.](b.png){#fig:b}\n'
+    )
+    check(result == '![First.](a.png){#fig:a}\n\n![Second.](b.png){#fig:b}\n',
+          "two back-to-back image-only lines get a blank line inserted between them")
+
+
+def test_ensure_blank_line_between_images_three_in_a_row():
+    result = compiler.ensure_blank_line_between_images(
+        '![A.](a.png)\n![B.](b.png)\n![C.](c.png)\n'
+    )
+    check(result == '![A.](a.png)\n\n![B.](b.png)\n\n![C.](c.png)\n',
+          "a run of 3+ back-to-back images gets a blank line inserted between every pair")
+
+
+def test_ensure_blank_line_between_images_idempotent_when_already_blank():
+    already_blank = '![First.](a.png)\n\n![Second.](b.png)\n'
+    result = compiler.ensure_blank_line_between_images(already_blank)
+    check(result == already_blank,
+          "already-blank-line-separated images are left unchanged")
+
+
+def test_ensure_blank_line_between_images_leaves_non_image_lines_alone():
+    text = '![Figure.](a.png)\nSome prose right after it.\n'
+    result = compiler.ensure_blank_line_between_images(text)
+    check(result == text,
+          "an image line followed by ordinary prose (not another image-only line) is left unchanged")
+
+
+def test_ensure_blank_line_between_images_ignores_inline_image_with_text():
+    text = '![Figure.](a.png) plus trailing text on the same line\n![Second.](b.png)\n'
+    result = compiler.ensure_blank_line_between_images(text)
+    check(result == text,
+          "a line with an image PLUS other text isn't image-only, so no blank line is forced in")
+
+
 def test_parse_column_widths_valid_with_flex():
     check(compiler.parse_column_widths('1.5,x,1,1', 4) == [1.5, 'x', 1.0, 1.0],
           "parse_column_widths accepts one 'x' entry among numeric widths")
@@ -1148,6 +1185,68 @@ def test_figure_auto_numbering():
 
     check('<w:updateFields w:val="true"/>' in settings, "document is set to recalculate fields (figure numbers) on open")
 
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    image_paragraphs = [p for p in doc.paragraphs if p._p.findall('.//' + qn('a:blip'))]
+    check(len(image_paragraphs) == 2, f"both the labeled and unlabeled image end up in their own paragraph (got {len(image_paragraphs)})")
+    check(all(p.alignment == WD_ALIGN_PARAGRAPH.CENTER for p in image_paragraphs),
+          f"every image paragraph is centered, captioned or not (got {[p.alignment for p in image_paragraphs]})")
+
+
+def test_figure_auto_numbering_consecutive_images_no_blank_line():
+    """Regression test: two figures declared back-to-back with no blank
+    line between them (a natural way to author consecutive figures) used
+    to silently lose ALL figure treatment for BOTH images - Markdown
+    merges adjacent non-blank lines into one paragraph, so neither image
+    was alone in its paragraph, and Pandoc's implicit-figures extension
+    only promotes a solo image to a captioned figure. Fixed by
+    ensure_blank_line_between_images() in lib/dilon_docx_common.py."""
+    images_dir = TEST_OUTPUT_DIR / "consecutive_figure_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "first.png").write_bytes(make_test_png())
+    (images_dir / "second.png").write_bytes(make_test_png())
+
+    markdown = SAMPLE_MARKDOWN + (
+        '\n## First Section\n\n'
+        '![First figure.](consecutive_figure_images/first.png){#fig:consecutive-first}\n'
+        '![Second figure.](consecutive_figure_images/second.png){#fig:consecutive-second}\n'
+    )
+
+    input_md = TEST_OUTPUT_DIR / "compile_test_consecutive_figures.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_consecutive_figures.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for back-to-back (no blank line) figures")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "back-to-back figures both get caption treatment (skipped: compile failed)")
+        return
+
+    doc = Document(output_docx)
+    caption_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Caption']
+    check(len(caption_paragraphs) == 2,
+          f"both back-to-back figures end up styled 'Caption', not merged into one plain paragraph (got {len(caption_paragraphs)})")
+
+    with zipfile.ZipFile(output_docx) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('w:name="fig:consecutive-first"' in xml, "the first of the two back-to-back figures still gets its {#fig:...} bookmark")
+    check('w:name="fig:consecutive-second"' in xml, "the second of the two back-to-back figures still gets its {#fig:...} bookmark")
+    check(xml.count('<a:blip') == 2, f"both images are still embedded (got {xml.count('<a:blip')})")
+
 
 def test_heading_auto_numbering():
     """Render test: headings written WITHOUT manual numbers (per the
@@ -1649,6 +1748,11 @@ def main():
     test_ensure_blank_line_stacked_style_then_columns()
     test_ensure_blank_line_stacked_columns_then_style()
     test_ensure_blank_line_idempotent_when_already_blank()
+    test_ensure_blank_line_between_images_inserts_when_missing()
+    test_ensure_blank_line_between_images_three_in_a_row()
+    test_ensure_blank_line_between_images_idempotent_when_already_blank()
+    test_ensure_blank_line_between_images_leaves_non_image_lines_alone()
+    test_ensure_blank_line_between_images_ignores_inline_image_with_text()
     test_parse_column_widths_valid_with_flex()
     test_parse_column_widths_valid_all_numeric()
     test_parse_column_widths_case_insensitive_flex()
@@ -1680,6 +1784,7 @@ def main():
     test_compile_body_jinja_substitution()
     test_heading_auto_numbering()
     test_figure_auto_numbering()
+    test_figure_auto_numbering_consecutive_images_no_blank_line()
     test_get_step_list_abstract_num_id_found()
     test_get_step_list_abstract_num_id_missing_style()
     test_create_num_instance_first_allocation()
