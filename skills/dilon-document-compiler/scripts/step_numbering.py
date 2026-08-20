@@ -9,12 +9,16 @@ dilon-document-form-compiler (forms have no procedural-steps concept).
 """
 
 import re
+import sys
 import zipfile
 from pathlib import Path
 
 from lxml import etree
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+from dilon_docx_common import add_complex_field
 
 W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 
@@ -255,9 +259,13 @@ _STEP_LABEL_RE = re.compile(r'\{#step:([\w-]+)\}')
 def preprocess_step_references(markdown_text):
     """
     Replaces every [](#step:label) - an EMPTY-text link to a #step: id -
-    with a plain-text STEPREF:<label> sentinel Pandoc will pass through
-    untouched, for resolve_step_references() to later turn into a live
-    Word cross-reference field. A reference with real link text, e.g.
+    with a STEPREF:<label> sentinel, delimited on both sides by U+E000
+    (Private Use Area, never occurs in authored markdown) so an
+    immediately-adjacent word (e.g. "[](#step:x)Insert the boards" with
+    no space) can't be swallowed into the label's [\\w-]+ capture.
+    Pandoc passes the sentinel through untouched, for
+    resolve_step_references() to later turn into a live Word
+    cross-reference field. A reference with real link text, e.g.
     [see this step](#step:label), is intentionally left untouched - only
     the empty-text form is auto-resolved.
 
@@ -277,7 +285,7 @@ def preprocess_step_references(markdown_text):
         if count > 1:
             print(f"  Warning: {{#step:{label}}} declared more than once; the first occurrence wins for any [](#step:{label}) reference")
 
-    return _STEP_REF_RE.sub(lambda m: f'STEPREF:{m.group(1)}', markdown_text)
+    return _STEP_REF_RE.sub(lambda m: f'STEPREF:{m.group(1)}', markdown_text)
 
 
 _STEP_SENTINEL_RE = re.compile(r'STEP(\d+)')
@@ -348,3 +356,63 @@ def apply_step_numbering(docx_file, manifest, abstract_num_id):
     if matched:
         doc.save(docx_file)
         print(f"  Applied native step numbering to {matched} paragraph(s) across {len(key_to_num_id)} sequence(s)")
+
+
+_STEP_REF_SENTINEL_RE = re.compile('STEPREF:([\\w-]+)')
+
+
+def resolve_step_references(docx_file):
+    """
+    Finds every STEPREF:<label> sentinel (from
+    preprocess_step_references()) in docx_file and replaces it with a
+    live Word cross-reference field (REF <bookmark> \\r \\h - the same
+    field Word's own Insert -> Cross-reference -> Numbered item inserts)
+    targeting the {#step:label} bookmark Pandoc already created. A
+    sentinel whose label has no matching bookmark anywhere in the
+    document degrades to visible plain text
+    "[missing step reference: <label>]" rather than failing the compile.
+    If two bookmarks share the same name, the first one found in
+    document order wins.
+    """
+    from docx import Document
+    doc = Document(docx_file)
+    body = doc.element.body
+
+    bookmark_names = {
+        el.get(qn('w:name'))
+        for el in body.iter(qn('w:bookmarkStart'))
+    }
+
+    resolved = 0
+    missing = 0
+
+    for para in doc.paragraphs:
+        match = _STEP_REF_SENTINEL_RE.search(para.text)
+        if not match:
+            continue
+
+        label = match.group(1)
+        bookmark_name = f'step:{label}'
+        before_text = para.text[:match.start()]
+        after_text = para.text[match.end():]
+
+        for run in list(para.runs):
+            run._element.getparent().remove(run._element)
+
+        if before_text:
+            para.add_run(before_text)
+
+        if bookmark_name in bookmark_names:
+            add_complex_field(para, f'REF {bookmark_name} \\r \\h', '1')
+            resolved += 1
+        else:
+            para.add_run(f'[missing step reference: {label}]')
+            print(f"  Warning: step reference to unknown label '{label}'; left as visible plain text")
+            missing += 1
+
+        if after_text:
+            para.add_run(after_text)
+
+    if resolved or missing:
+        doc.save(docx_file)
+        print(f"  Resolved {resolved} step reference(s), {missing} missing")

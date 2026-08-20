@@ -1250,6 +1250,37 @@ def test_apply_step_numbering_skips_gracefully_without_abstract_id():
     check(any('STEP' in p.text for p in doc.paragraphs), "with no abstract_num_id, the file is left untouched (sentinel still present) rather than crashing")
 
 
+def test_resolve_step_references_creates_ref_field():
+    from docx import Document
+    md = "- [](#step:insert-carrier-boards)Insert []{#step:insert-carrier-boards}the boards."
+    new_md = step_numbering.preprocess_step_references(md)
+    docx_path = TEST_OUTPUT_DIR / "step_ref_test.docx"
+    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    step_numbering.resolve_step_references(docx_path)
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('w:name="step:insert-carrier-boards"' in xml, "the {#step:label} anchor produces a real bookmark")
+    check('REF step:insert-carrier-boards \\r \\h' in xml, "the reference resolves to a live REF ... \\r \\h field targeting that bookmark")
+    check('STEPREF' not in xml, "no reference sentinel remains in the output")
+
+
+def test_resolve_step_references_missing_label_degrades_to_plain_text():
+    md = "See [](#step:does-not-exist) for details."
+    new_md = step_numbering.preprocess_step_references(md)
+    docx_path = TEST_OUTPUT_DIR / "step_ref_missing_test.docx"
+    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    step_numbering.resolve_step_references(docx_path)  # should not raise
+
+    from docx import Document
+    doc = Document(docx_path)
+    full_text = '\n'.join(p.text for p in doc.paragraphs)
+    check('[missing step reference: does-not-exist]' in full_text, "a reference to a nonexistent label degrades to visible plain text")
+    check('STEPREF' not in full_text, "the sentinel itself is gone even in the degraded case")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1328,6 +1359,8 @@ def main():
     test_apply_step_numbering_styles_and_links_paragraphs()
     test_apply_step_numbering_reuses_numid_for_continued_sequence()
     test_apply_step_numbering_skips_gracefully_without_abstract_id()
+    test_resolve_step_references_creates_ref_field()
+    test_resolve_step_references_missing_label_degrades_to_plain_text()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")

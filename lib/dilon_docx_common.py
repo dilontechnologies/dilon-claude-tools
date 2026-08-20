@@ -477,7 +477,7 @@ def _clear_container(container):
         container._element.remove(child)
 
 
-def _add_complex_field(paragraph, instr, cached_text):
+def add_complex_field(paragraph, instr, cached_text):
     """
     Append a complex Word field (begin/instrText/separate/cached-result/
     end run sequence) to a paragraph. Used for PAGE/NUMPAGES fields, which
@@ -634,10 +634,10 @@ def populate_header(document, metadata):
 
     page_field_para = page_cell.add_paragraph()
     page_field_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _add_complex_field(page_field_para, 'page \\* arabic', '1')
+    add_complex_field(page_field_para, 'page \\* arabic', '1')
     mid_run = page_field_para.add_run(' of ')
     mid_run.font.bold = True
-    _add_complex_field(page_field_para, 'numpages ', '1')
+    add_complex_field(page_field_para, 'numpages ', '1')
     for run in page_field_para.runs:
         run.font.bold = True
 
