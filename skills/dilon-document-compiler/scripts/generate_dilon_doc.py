@@ -51,6 +51,7 @@ from dilon_docx_common import (  # noqa: E402
     render_jinja,
     populate_header,
     populate_footer,
+    strip_leading_empty_paragraphs,
 )
 
 
@@ -421,6 +422,7 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     doc_a = Document(signature_template_path)
     populate_header(doc_a, metadata)
     populate_footer(doc_a, metadata)
+    strip_leading_empty_paragraphs(doc_a)
 
     # Build the signature-approval table programmatically (same pattern as
     # Part B's revision table) and insert it into Part A itself.

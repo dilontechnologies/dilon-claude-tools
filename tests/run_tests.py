@@ -384,6 +384,47 @@ def test_compile_signature_table_generated_programmatically():
     check(["Engineering", "Test Head", "Electronic"] in rows_text, "department head row rendered from front matter")
 
 
+def test_compile_has_no_leading_blank_paragraph():
+    """TEMPLATE_Word_Base.docx's body always carries one empty paragraph
+    before its sectPr (every real Word file needs at least one paragraph
+    if it has no other body content). Part A used to keep that paragraph
+    ahead of the signature table it inserts, so the compiled document's
+    body started with a stray blank paragraph instead of the table
+    (same root cause dilon-document-form-compiler had - see
+    strip_leading_empty_paragraphs() in lib/dilon_docx_common.py)."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_no_leading_blank.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_no_leading_blank.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for the no-leading-blank check document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(output_docx.exists(), "compile_test_no_leading_blank.docx created on disk")
+    if not output_docx.exists():
+        return
+
+    doc = Document(output_docx)
+    first_child = doc.element.body[0]
+    check(
+        first_child.tag == qn('w:tbl'),
+        f"body's first content element is the signature table, no stray leading blank paragraph, got {first_child.tag!r}",
+    )
+
+
 def test_compile_bom_front_matter():
     """Regression test: a UTF-8 BOM at the start of the input markdown
     (e.g. from PowerShell's Set-Content -Encoding UTF8) must not cause the
@@ -1038,6 +1079,7 @@ def main():
     test_compile_valid_document()
     test_create_signature_table_structure()
     test_compile_signature_table_generated_programmatically()
+    test_compile_has_no_leading_blank_paragraph()
     test_compile_bom_front_matter()
     test_compile_table_marker_no_blank_line()
     test_compile_adjacent_tables_no_merge()
