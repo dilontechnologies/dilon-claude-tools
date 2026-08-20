@@ -54,6 +54,15 @@ from dilon_docx_common import (  # noqa: E402
     strip_leading_empty_paragraphs,
 )
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from step_numbering import (  # noqa: E402
+    preprocess_step_references,
+    preprocess_steps_markdown,
+    get_step_list_abstract_num_id,
+    apply_step_numbering,
+    resolve_step_references,
+)
+
 
 def create_revision_table(revisions):
     """
@@ -414,6 +423,8 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     # Extract YAML metadata and Markdown body
     metadata, markdown_body = extract_yaml_and_markdown(markdown_path)
     markdown_body = render_jinja(markdown_body, metadata)
+    markdown_body = preprocess_step_references(markdown_body)
+    markdown_body, step_manifest = preprocess_steps_markdown(markdown_body)
 
     print(f"Metadata extracted: {list(metadata.keys())}")
 
@@ -483,6 +494,11 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     # Convert Pandoc's implicit-figure captions into auto-numbered Word captions
     print("Applying figure caption numbering...")
     apply_figure_captions(temp_part_d)
+
+    print("Applying step-list numbering...")
+    step_list_abstract_num_id = get_step_list_abstract_num_id(signature_template_path)
+    apply_step_numbering(temp_part_d, step_manifest, step_list_abstract_num_id)
+    resolve_step_references(temp_part_d)
 
     print(f"Part D converted")
 

@@ -1281,6 +1281,67 @@ def test_resolve_step_references_missing_label_degrades_to_plain_text():
     check('STEPREF' not in full_text, "the sentinel itself is gone even in the degraded case")
 
 
+WI_STYLE_STEPS_MARKDOWN = (
+    '\n## Carrier Board Assembly Procedure\n\n'
+    '@@@STEPS@@@\n'
+    '- Wear clean gloves.\n'
+    '- Simple dirt such as lint or light dust can be blown away before wiping.\n'
+    '  - Hold the board by the edges. []{#step:hold-board-by-edges}\n'
+    '@@@END_STEPS@@@\n\n'
+    'NOTE: Clean the entire crystal but give special attention to the polished end.\n\n'
+    '@@@STEPS: continue@@@\n'
+    '- Visually inspect both the crystal and the photomultiplier for defects.\n'
+    '- Set the cleaned crystals aside on a clean lint free cloth.\n'
+    '@@@END_STEPS@@@\n\n'
+    'As described in [](#step:hold-board-by-edges), always support the board by its edges.\n'
+)
+
+
+def test_compile_step_numbering_end_to_end():
+    """Integration test matching the design spec's 'docxcompose survival'
+    testing requirement: a document with a step list interrupted by a
+    NOTE, continued afterward, plus a cross-reference, compiled through
+    the exact real pipeline - numbering.xml entries and the reference
+    field must survive the full A/B/C/D docxcompose merge."""
+    markdown = SAMPLE_MARKDOWN + WI_STYLE_STEPS_MARKDOWN
+    input_md = TEST_OUTPUT_DIR / "compile_test_step_numbering.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_step_numbering.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a document with @@@STEPS@@@ blocks")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "step numbering survives the full compile pipeline (skipped: compile failed)")
+        return
+
+    doc = Document(output_docx)
+    step_texts = {"Wear clean gloves.", "Simple dirt such as lint or light dust can be blown away before wiping.",
+                  "Hold the board by the edges. ", "Visually inspect both the crystal and the photomultiplier for defects.",
+                  "Set the cleaned crystals aside on a clean lint free cloth."}
+    step_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List']
+    check(len(step_paragraphs) == 5, f"all 5 steps across both blocks get the 'Dilon Step List' style (got {len(step_paragraphs)})")
+    check(all('STEP' not in p.text for p in doc.paragraphs), "no sentinel text remains anywhere in the compiled document")
+
+    num_ids = set()
+    for p in step_paragraphs:
+        num_id_el = p._p.find('.//' + qn('w:numPr') + '/' + qn('w:numId'))
+        check(num_id_el is not None, f"step paragraph {p.text!r} carries a numId")
+        if num_id_el is not None:
+            num_ids.add(num_id_el.get(qn('w:val')))
+    check(len(num_ids) == 1, f"the interrupted-by-a-NOTE 'continue' block reuses the SAME numId as the first block (got {num_ids})")
+
+    with zipfile.ZipFile(output_docx) as z:
+        check("word/numbering.xml" in z.namelist(), "compiled document contains a word/numbering.xml part")
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('w:name="step:hold-board-by-edges"' in xml, "the step's {#step:label} anchor survives as a real bookmark")
+    check('REF step:hold-board-by-edges \\r \\h' in xml, "the cross-reference resolves to a live REF field")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1361,6 +1422,7 @@ def main():
     test_apply_step_numbering_skips_gracefully_without_abstract_id()
     test_resolve_step_references_creates_ref_field()
     test_resolve_step_references_missing_label_degrades_to_plain_text()
+    test_compile_step_numbering_end_to_end()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")
