@@ -1189,6 +1189,67 @@ def test_preprocess_step_references_duplicate_label_does_not_raise():
     check(result is not None, "a duplicate {#step:label} declaration degrades to a warning, not a crash")
 
 
+def test_apply_step_numbering_styles_and_links_paragraphs():
+    from docx import Document
+    md = "@@@STEPS@@@\n- First\n  - Sub\n- Third\n@@@END_STEPS@@@\n"
+    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_apply_test.docx"
+    markdown_to_docx = compiler.markdown_to_docx
+    markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_step_numbering(docx_path, manifest, abstract_id)
+
+    doc = Document(docx_path)
+    step_paragraphs = [p for p in doc.paragraphs if p.text.strip() in ("First", "Sub", "Third")]
+    check(len(step_paragraphs) == 3, f"exactly 3 step paragraphs remain after sentinel cleanup (got {len(step_paragraphs)})")
+    check(all(p.style.name == 'Dilon Step List' for p in step_paragraphs), "every step paragraph carries the 'Dilon Step List' style")
+    check(all('STEP' not in p.text for p in step_paragraphs), "no sentinel text remains in any step paragraph's text")
+
+    num_ids = []
+    for p in step_paragraphs:
+        num_id_el = p._p.find('.//' + qn('w:numPr') + '/' + qn('w:numId'))
+        check(num_id_el is not None, f"paragraph {p.text!r} has a numId applied")
+        num_ids.append(num_id_el.get(qn('w:val')))
+    check(len(set(num_ids)) == 1, f"all 3 steps (same block) share one numId (got {num_ids})")
+
+
+def test_apply_step_numbering_reuses_numid_for_continued_sequence():
+    from docx import Document
+    md = (
+        "@@@STEPS: id=cleaning@@@\n- A\n@@@END_STEPS@@@\n"
+        "@@@STEPS: continue=cleaning@@@\n- B\n@@@END_STEPS@@@\n"
+    )
+    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_continue_test.docx"
+    markdown_to_docx = compiler.markdown_to_docx
+    markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_step_numbering(docx_path, manifest, abstract_id)
+
+    doc = Document(docx_path)
+    a_para = next(p for p in doc.paragraphs if p.text.strip() == "A")
+    b_para = next(p for p in doc.paragraphs if p.text.strip() == "B")
+    a_num = a_para._p.find('.//' + qn('w:numPr') + '/' + qn('w:numId')).get(qn('w:val'))
+    b_num = b_para._p.find('.//' + qn('w:numPr') + '/' + qn('w:numId')).get(qn('w:val'))
+    check(a_num == b_num, f"continued sequence reuses the same numId (got A={a_num}, B={b_num})")
+
+
+def test_apply_step_numbering_skips_gracefully_without_abstract_id():
+    from docx import Document
+    md = "@@@STEPS@@@\n- First\n@@@END_STEPS@@@\n"
+    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_no_abstract_test.docx"
+    markdown_to_docx = compiler.markdown_to_docx
+    markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    step_numbering.apply_step_numbering(docx_path, manifest, None)  # should not raise
+
+    doc = Document(docx_path)
+    check(any('STEP' in p.text for p in doc.paragraphs), "with no abstract_num_id, the file is left untouched (sentinel still present) rather than crashing")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1264,6 +1325,9 @@ def main():
     test_preprocess_step_references_empty_link_becomes_sentinel()
     test_preprocess_step_references_leaves_real_link_text_untouched()
     test_preprocess_step_references_duplicate_label_does_not_raise()
+    test_apply_step_numbering_styles_and_links_paragraphs()
+    test_apply_step_numbering_reuses_numid_for_continued_sequence()
+    test_apply_step_numbering_skips_gracefully_without_abstract_id()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")

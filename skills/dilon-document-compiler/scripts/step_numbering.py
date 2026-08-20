@@ -278,3 +278,73 @@ def preprocess_step_references(markdown_text):
             print(f"  Warning: {{#step:{label}}} declared more than once; the first occurrence wins for any [](#step:{label}) reference")
 
     return _STEP_REF_RE.sub(lambda m: f'STEPREF:{m.group(1)}', markdown_text)
+
+
+_STEP_SENTINEL_RE = re.compile(r'STEP(\d+)')
+
+
+def apply_step_numbering(docx_file, manifest, abstract_num_id):
+    """
+    Applies the 'Dilon Step List' style + native Word numbering (numId
+    per resolved sequence_key, ilvl per nesting depth) to every paragraph
+    in docx_file whose text carries a STEP<idx> sentinel (from
+    preprocess_steps_markdown()), then strips the sentinel out of that
+    paragraph's visible text. Two blocks resolved to the same
+    sequence_key get mapped to the SAME numId, which is what makes
+    "continue" a real, native, live-updating continuation - Word's
+    numbering engine counts by shared numId, not by paragraph adjacency.
+
+    Skips entirely (with a warning already printed by
+    get_step_list_abstract_num_id()) if abstract_num_id is None - the
+    template isn't set up yet. Does nothing if manifest is empty (no
+    @@@STEPS@@@ blocks in this document).
+    """
+    if abstract_num_id is None or not manifest:
+        return
+
+    from docx import Document
+    doc = Document(docx_file)
+    numbering_element = doc.part.numbering_part.element
+
+    key_to_num_id = {}
+    matched = 0
+
+    for para in doc.paragraphs:
+        match = _STEP_SENTINEL_RE.search(para.text)
+        if not match:
+            continue
+
+        idx = int(match.group(1))
+        entry = manifest[idx]
+        sequence_key = entry['sequence_key']
+        depth = entry['depth']
+
+        if sequence_key not in key_to_num_id:
+            key_to_num_id[sequence_key] = create_num_instance(numbering_element, abstract_num_id)
+        num_id = key_to_num_id[sequence_key]
+
+        para.style = doc.styles['Dilon Step List']
+        p_pr = para._p.get_or_add_pPr()
+        # Remove any numPr Pandoc's own default list conversion already added.
+        existing_num_pr = p_pr.find(qn('w:numPr'))
+        if existing_num_pr is not None:
+            p_pr.remove(existing_num_pr)
+        num_pr = OxmlElement('w:numPr')
+        ilvl_el = OxmlElement('w:ilvl')
+        ilvl_el.set(qn('w:val'), str(depth))
+        num_id_el = OxmlElement('w:numId')
+        num_id_el.set(qn('w:val'), str(num_id))
+        num_pr.append(ilvl_el)
+        num_pr.append(num_id_el)
+        p_pr.append(num_pr)
+
+        cleaned_text = _STEP_SENTINEL_RE.sub('', para.text)
+        for run in list(para.runs):
+            run._element.getparent().remove(run._element)
+        para.add_run(cleaned_text)
+
+        matched += 1
+
+    if matched:
+        doc.save(docx_file)
+        print(f"  Applied native step numbering to {matched} paragraph(s) across {len(key_to_num_id)} sequence(s)")
