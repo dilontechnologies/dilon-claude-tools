@@ -241,7 +241,7 @@ When creating custom table styles in the reference template:
 **Multi-line Cells:**
 - Pipe tables support single-line cells only
 - **ISSUE**: `<br>` tags do NOT work in pipe table cells when converting to Word
-- For multi-line content in table cells, you MUST use grid tables (see Section 14)
+- For multi-line content in table cells, you MUST use grid tables (see Section 16)
 - Example that does NOT work:
   ```markdown
   | Field | Description |
@@ -380,9 +380,96 @@ Paragraph after definition list.
 
 ---
 
-## 6. Code and Technical Content
+## 6. Numbered Step Lists
 
-### 6.1 Inline Code
+Work-instruction procedures need steps that number themselves
+automatically - added, removed, or reordered without ever hand-renumbering
+- and that can be referenced elsewhere in the same document by a number
+that's always correct. Use `@@@STEPS@@@` for this instead of a plain
+bulleted or ordered list.
+
+```markdown
+@@@STEPS@@@
+- Wear clean gloves.
+- Simple dirt such as lint or light dust can be blown away before wiping.
+  - Hold the board by the edges of the board when cleaning.
+  - Wipe with IPA and a lint-free cloth.
+@@@END_STEPS@@@
+```
+
+**Rules:**
+- Plain bullets only - never type a number. The compiler applies Word's
+  own native numbering (dotted-decimal: `1`, `1.1`, `1.1.1`, ...); the
+  number is never baked text, so it's always correct even if the document
+  is later edited by hand in Word.
+- Nesting is indentation, 2 spaces per level - same convention as any
+  other nested list (Section 5.1).
+- `@@@STEPS@@@` alone starts a new sequence at 1.
+- `@@@STEPS: id=<name>@@@` starts a new **named** sequence.
+- `@@@STEPS: continue@@@` resumes whichever sequence - named or unnamed -
+  most recently ran, even after prose, a figure, or a `NOTE:` in between.
+  This is the common case: a procedure interrupted by an explanatory
+  paragraph or photo, then picking back up.
+- `@@@STEPS: continue=<name>@@@` resumes a specific named sequence
+  explicitly, anywhere later in the document, even after a *different*
+  sequence ran in between.
+
+**Referencing a step:**
+
+Give the step an anchor, the same way a figure gets `{#fig:label}`:
+
+```markdown
+- Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
+```
+
+Reference it elsewhere with an **empty-text** link - the compiler fills in
+the current number automatically, so it can never go stale:
+
+```markdown
+As described in [](#step:hold-board-by-edges), always support the board by its edges.
+```
+
+This renders as, e.g., "As described in Step 2.1, always support the
+board by its edges" - a live Word field, not typed text. Supplying real
+link text instead (`[see the earlier step](#step:hold-board-by-edges)`)
+is respected as-is, same as a figure or section cross-reference.
+
+**Worked example** - a procedure interrupted by a note and a photo, then
+continued, with a later reference back to it:
+
+```markdown
+@@@STEPS@@@
+- Wear clean gloves.
+- Simple dirt such as lint or light dust can be blown away before wiping.
+  - Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
+@@@END_STEPS@@@
+
+NOTE: Clean the entire crystal but give special attention to ensure the
+polished end is free of dust, as that is the bonding surface.
+
+@@@STEPS: continue@@@
+- Visually inspect both the crystal and the photomultiplier for any
+  physical defects or anomalies such as scratches, chips, or cracks.
+- Set the cleaned crystals aside on a clean lint free cloth for
+  installation later.
+@@@END_STEPS@@@
+
+As described in [](#step:hold-board-by-edges), always support the board
+by its edges - never by its face.
+```
+
+**Scope**: `@@@STEPS@@@` is document-internal only - it's for referencing
+a step from elsewhere in the *same* work instruction. There's no way to
+cite a specific step number from a different document (a Traveler, a
+CAPA, etc.); reference the work instruction by its document number
+instead, the way `FO-00127, Detector Head Assembly Traveler` already
+does in Section 9.
+
+---
+
+## 7. Code and Technical Content
+
+### 7.1 Inline Code
 
 Use **single backticks** for inline code (code within a paragraph):
 
@@ -405,7 +492,7 @@ Register ```CTRL_REG1``` has address ```0x20```.
 ```
 (Triple backticks are for code blocks, not inline code)
 
-### 6.2 Code Blocks
+### 7.2 Code Blocks
 
 Use **triple backticks** with optional language identifier for multi-line code blocks:
 
@@ -454,7 +541,7 @@ void ee24aa02_read_buf(uint8_t address, uint8_t *buffer, size_t length) {
 ```
 ````
 
-### 6.3 Register/Bit Field Notation
+### 7.3 Register/Bit Field Notation
 
 Use inline code for addresses, registers, bit fields:
 
@@ -466,9 +553,9 @@ Use inline code for addresses, registers, bit fields:
 
 ---
 
-## 7. Emphasis and Formatting
+## 8. Emphasis and Formatting
 
-### 7.1 Bold
+### 8.1 Bold
 
 Use double asterisks for **bold**:
 
@@ -481,7 +568,7 @@ Use bold for:
 - Field names in descriptions
 - Key terms on first mention
 
-### 7.2 Italic
+### 8.2 Italic
 
 Use single asterisks for *italic*:
 
@@ -493,7 +580,7 @@ Use italic for:
 - Emphasis
 - Document references
 
-### 7.3 Bold + Italic
+### 8.3 Bold + Italic
 
 Use triple asterisks for ***bold italic***:
 
@@ -503,15 +590,15 @@ Use triple asterisks for ***bold italic***:
 
 ---
 
-## 8. Links and References
+## 9. Links and References
 
-### 8.1 External Links
+### 9.1 External Links
 
 ```markdown
 [Link text](https://example.com)
 ```
 
-### 8.2 Internal Cross-References
+### 9.2 Internal Cross-References
 
 Reference sections by number using hyperlinks:
 
@@ -533,10 +620,10 @@ For table styling, see [Section 3.2](#table-formatting-in-word-output).
 
 The definition list format is explained in [Section 4.3](#definition-lists).
 
-Code examples can be found in [Section 6](#code-and-technical-content).
+Code examples can be found in [Section 7](#code-and-technical-content).
 ```
 
-### 8.3 Figure Cross-References
+### 9.3 Figure Cross-References
 
 Figures use the `{#fig:label}` id from Section 4.1, with the same link syntax as section cross-references:
 
@@ -546,7 +633,7 @@ See [the figure](#fig:i2c-bus-topology) for the complete bus topology.
 
 This produces a real hyperlink to the figure - unlike section cross-references, the link text isn't tied to a number that could drift, since it's just pointing at the image itself.
 
-### 8.4 Code References
+### 9.4 Code References
 
 Reference specific files and line numbers:
 
@@ -558,15 +645,15 @@ Format: `filename:start_line-end_line` or `filename:line_number`
 
 ---
 
-## 9. Notes and Callouts
+## 10. Notes and Callouts
 
-### 9.1 Notes
+### 10.1 Notes
 
 ```markdown
 **Note**: This is an informational note.
 ```
 
-### 9.2 Important/Warning
+### 10.2 Important/Warning
 
 ```markdown
 **IMPORTANT**: Critical information that must be followed.
@@ -574,7 +661,7 @@ Format: `filename:start_line-end_line` or `filename:line_number`
 **WARNING**: Safety or regulatory warning.
 ```
 
-### 9.3 Block Quotes
+### 10.3 Block Quotes
 
 For longer notes or quoted text:
 
@@ -585,9 +672,9 @@ For longer notes or quoted text:
 
 ---
 
-## 10. Spacing and Line Breaks
+## 11. Spacing and Line Breaks
 
-### 10.1 Paragraph Spacing
+### 11.1 Paragraph Spacing
 
 - **One blank line** between paragraphs
 - **Two blank lines** after figure captions
@@ -596,7 +683,7 @@ For longer notes or quoted text:
 - **One blank line** before and after code blocks
 - **One blank line** before and after tables
 
-### 10.2 Section Breaks
+### 11.2 Section Breaks
 
 Use horizontal rules sparingly (Pandoc will add page breaks):
 
@@ -606,9 +693,9 @@ Use horizontal rules sparingly (Pandoc will add page breaks):
 
 ---
 
-## 11. Special Pandoc Features
+## 12. Special Pandoc Features
 
-### 11.1 Math Equations (if needed)
+### 12.1 Math Equations (if needed)
 
 Inline math: `$E = mc^2$`
 
@@ -619,7 +706,7 @@ V_{out} = \frac{DAC_{code}}{4096} \times V_{REF}
 $$
 ```
 
-### 11.2 Footnotes
+### 12.2 Footnotes
 
 ```markdown
 Main text with a footnote.
@@ -655,13 +742,13 @@ This sentence needs a footnote.[^1]
 
 ---
 
-## 12. Custom Paragraph Styles
+## 13. Custom Paragraph Styles
 
 For content that requires specific formatting beyond Pandoc's automatic styling, you can apply custom paragraph styles using `@@@STYLE@@@` markers.
 
 **Form-only marker:** Documents compiled with the `dilon-document-form-compiler` skill (forms/travelers meant to be printed and filled out by hand) support one additional marker on top of everything in this guide: `@@@FORM_FIELD:FillLine@@@Label@@@END_FORM_FIELD@@@`, which becomes a label followed by a right-aligned, underscore-leadered fill-in blank. See that skill's `SKILL.md` for details - it does not apply to documents compiled with `dilon-document-compiler`.
 
-### 12.1 Syntax
+### 13.1 Syntax
 
 **IMPORTANT**: All custom paragraph styling requires both `@@@STYLE:StyleName@@@` START marker and `@@@END_STYLE@@@` END marker.
 
@@ -692,7 +779,7 @@ Content paragraph 2
 @@@END_STYLE@@@
 ```
 
-### 12.2 How It Works
+### 13.2 How It Works
 
 1. The compiler uses a **state machine** to scan the Word document after Pandoc conversion
 2. When it finds `@@@STYLE:StyleName@@@` at the start of a paragraph, it enters "searching for end" state
@@ -711,7 +798,7 @@ Content paragraph 2
 5. Apply the specified style to all remaining paragraphs
 6. Reset and continue searching for next block
 
-### 12.3 Marker Rules
+### 13.3 Marker Rules
 
 **START Marker (`@@@STYLE:StyleName@@@`):**
 - Must be at the **beginning** of a paragraph (first non-whitespace text)
@@ -731,7 +818,7 @@ Content paragraph 2
 - ✅ Multiple paragraphs between markers (0 to 100+ paragraphs)
 - ✅ Markers in documentation examples (inside backticks) are preserved
 
-### 12.4 Common Use Cases
+### 13.4 Common Use Cases
 
 **IMPORTANT**: Code blocks with triple backticks automatically receive styling from Pandoc. Use native markdown code blocks for actual code:
 
@@ -783,7 +870,7 @@ REQ-001: System SHALL initialize within 100ms of power-on
 @@@END_STYLE@@@
 ```
 
-### 12.5 Creating Custom Styles
+### 13.5 Creating Custom Styles
 
 To add a new custom style for use with `@@@STYLE@@@` markers:
 
@@ -803,7 +890,7 @@ To add a new custom style for use with `@@@STYLE@@@` markers:
 
 **Note**: Style names are case-sensitive and must match exactly.
 
-### 12.6 Documenting the Markers
+### 13.6 Documenting the Markers
 
 To show the marker syntax in documentation (like this guide), place the markers inside inline code backticks:
 
@@ -815,7 +902,7 @@ The markers will be preserved in backticks and displayed to the user as document
 
 ---
 
-## 13. Document Structure Template
+## 14. Document Structure Template
 
 ```markdown
 ---
@@ -869,9 +956,9 @@ Content goes here.
 
 ---
 
-## 13. Conversion to Word
+## 15. Conversion to Word
 
-### 13.1 Using the Compiler
+### 15.1 Using the Compiler
 
 ```bash
 python generate_dilon_doc.py input.md output.docx
@@ -882,7 +969,7 @@ Or using PowerShell alias:
 Compile-DilonDoc input.md
 ```
 
-### 13.2 What Happens During Conversion
+### 15.2 What Happens During Conversion
 
 1. **YAML front matter** is parsed and used to populate templates
 2. **Markdown body** is converted to Word via Pandoc
@@ -895,7 +982,7 @@ Compile-DilonDoc input.md
 
 ---
 
-## 14. Advanced: Grid Tables (For Complex Content)
+## 16. Advanced: Grid Tables (For Complex Content)
 
 Use grid tables when you need multi-paragraph cells or complex block elements:
 
@@ -924,7 +1011,7 @@ Use grid tables when you need multi-paragraph cells or complex block elements:
 
 ---
 
-## 15. Checklist Before Generating Document
+## 17. Checklist Before Generating Document
 
 - [ ] YAML front matter complete and accurate
 - [ ] No manual numbers typed into heading text (Word auto-numbers Heading 2/3/4)
@@ -939,7 +1026,7 @@ Use grid tables when you need multi-paragraph cells or complex block elements:
 
 ---
 
-## 16. Common Mistakes to Avoid
+## 18. Common Mistakes to Avoid
 
 ❌ **Don't** use HTML in tables (use pipe tables or grid tables instead)
 ❌ **Don't** manually add grid lines or borders to markdown tables
@@ -955,7 +1042,7 @@ Use grid tables when you need multi-paragraph cells or complex block elements:
 
 ---
 
-## 17. Style Reference
+## 19. Style Reference
 
 | Element | Markdown Syntax | Word Style Applied |
 |---------|----------------|-------------------|
@@ -978,7 +1065,7 @@ Use grid tables when you need multi-paragraph cells or complex block elements:
 
 ---
 
-## 18. Required Template Styles
+## 20. Required Template Styles
 
 Ensure these styles are properly defined in `TEMPLATE_Word_Base.docx`:
 
