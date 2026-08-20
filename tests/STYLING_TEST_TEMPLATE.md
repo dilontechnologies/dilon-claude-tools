@@ -207,6 +207,98 @@ Ordered list with nested bullets:
 **Slave Device**
 :   A device that responds to requests from the master device.
 
+## Numbered Step List Examples
+
+A forward reference, resolved before its target step is even declared
+below - proving the reference is a live field keyed on the step's
+bookmark, not on document order: see [](#step:hold-board-by-edges) in
+the "Cross-References" section below.
+
+### Basic Sequence with Nesting
+
+Plain bullets only - no manually-typed numbers. Word applies native
+dotted-decimal numbering itself:
+
+@@@STEPS@@@
+- Wear clean gloves before handling any board.
+- Simple dirt such as lint or light dust can be blown away before wiping.
+  - Hold the board by the edges. []{#step:hold-board-by-edges}
+  - Wipe with **IPA** and a lint-free cloth.
+@@@END_STEPS@@@
+
+### Interrupted Sequence with `continue`
+
+A procedure interrupted by prose, then picked back up with a bare
+`continue` - which resumes numbering from step 2 above, not restart at 1:
+
+NOTE: Clean the entire crystal but give special attention to ensure the
+polished end is free of dust, as that is the bonding surface.
+
+@@@STEPS: continue@@@
+- Visually inspect both the crystal and the photomultiplier for any physical defects or anomalies such as scratches, chips, or cracks.
+- Set the cleaned crystals aside on a clean lint-free cloth for installation later.
+@@@END_STEPS@@@
+
+### Digit-Adjacent Step Text
+
+A step whose text starts with a number - a common shape in real work
+instructions ("5 minutes", "10 mA") that must not corrupt the step's own
+internal numbering:
+
+@@@STEPS: id=curing@@@
+- Apply epoxy to the mounting surface.
+- 5 minutes of curing time is required before proceeding.
+- 24 AWG wire only - do not substitute a heavier gauge.
+@@@END_STEPS@@@
+
+### Named, Non-Adjacent Sequences
+
+Two independently-numbered named sequences, with an unrelated sequence
+running in between, followed by resuming the *first* named sequence by
+name - proving `continue=<name>` finds the right sequence regardless of
+what ran most recently:
+
+@@@STEPS: id=inspection@@@
+- Inspect the housing for visible cracks.
+- Check that all mounting screws are present.
+@@@END_STEPS@@@
+
+@@@STEPS: continue=curing@@@
+- Torque the mounting screws to 4 in-lb.
+@@@END_STEPS@@@
+
+@@@STEPS: continue=inspection@@@
+- Confirm the serial number label is legible.
+@@@END_STEPS@@@
+
+### Cross-References
+
+Give a step an anchor with `[]{#step:label}` (as done above on "Hold the
+board by the edges"), then reference it elsewhere with an **empty-text**
+link - the number fills in live, so it stays correct even if steps are
+added or removed above it:
+
+As described in [](#step:hold-board-by-edges), always support the board
+by its edges, not its face - see also [](#step:hold-board-by-edges) for
+the same step referenced a second time in one sentence.
+
+Supplying real link text instead of an empty one is left completely
+untouched, exactly like a figure or section cross-reference: see
+[the board-handling step](#step:hold-board-by-edges) above.
+
+### Syntax Shown as a Documentation Example
+
+The `@@@STEPS@@@` marker syntax itself, shown inside a fenced code block
+for documentation purposes, must render as plain example text - not be
+converted into a real numbered list:
+
+```markdown
+@@@STEPS@@@
+- Example step one
+- Example step two
+@@@END_STEPS@@@
+```
+
 ## Figures and Images
 
 ### Figure with Caption
@@ -573,31 +665,31 @@ This document has undergone the following revisions:
 
 None of the headings in this section have a number typed into their markdown text. The Word templates link the Heading 2/3/4 styles to an automatic multilevel list, so Word generates the "N." / "N.M" / "N.M.P" numbers itself, purely from each heading's position in the document. The expected number is called out after each heading below so it can be checked against what Word actually renders; if a number doesn't match (or is missing/doubled), the template's numbering setup has a problem.
 
-This is the 15th major (`##`) section in the document, so it should render as **15.**
+This is the 16th major (`##`) section in the document, so it should render as **16.**
 
 ### First Subsection
 
-Expected Word auto-number: **15.1**
+Expected Word auto-number: **16.1**
 
 #### First Nested Item
 
-Expected Word auto-number: **15.1.1**
+Expected Word auto-number: **16.1.1**
 
 #### Second Nested Item
 
-Expected Word auto-number: **15.1.2** — proves the sub-subsection counter increments across siblings under the same subsection.
+Expected Word auto-number: **16.1.2** — proves the sub-subsection counter increments across siblings under the same subsection.
 
 ### Second Subsection
 
-Expected Word auto-number: **15.2**
+Expected Word auto-number: **16.2**
 
 #### First Nested Item
 
-Expected Word auto-number: **15.2.1** — reuses the heading title "First Nested Item" from the previous subsection on purpose: the counter must reset to 1 here rather than continuing as 15.1.3.
+Expected Word auto-number: **16.2.1** — reuses the heading title "First Nested Item" from the previous subsection on purpose: the counter must reset to 1 here rather than continuing as 16.1.3.
 
 ### Third Subsection
 
-Expected Word auto-number: **15.3**
+Expected Word auto-number: **16.3**
 
 This subsection has no `####` children, proving a subsection doesn't need nested headings for the numbering to stay correct going into the next major section.
 
@@ -611,6 +703,7 @@ This test document demonstrates all styling elements defined in the Markdown Sty
 - ✅ Grid tables for complex content
 - ✅ Figures with proper captions
 - ✅ All list types (unordered, ordered, definition)
+- ✅ Numbered step lists (`@@@STEPS@@@`) - nesting, interrupted `continue`, named/non-adjacent sequences, and cross-references
 - ✅ Code blocks with multiple language identifiers
 - ✅ Inline code and register notation
 - ✅ Bold, italic, and bold+italic text
@@ -643,10 +736,18 @@ Check the following in the generated Word document:
 - [ ] Revision history table with all entries
 - [ ] Table of contents with correct page numbers
 - [ ] All headings styled correctly (Heading 1, 2, 3)
-- [ ] Headings show single, correctly-nested auto-numbers ("15.", "15.1", "15.1.1") in the "Automatic Section Numbering Verification" section — no missing or doubled numbers
+- [ ] Headings show single, correctly-nested auto-numbers ("16.", "16.1", "16.1.1") in the "Automatic Section Numbering Verification" section — no missing or doubled numbers
 - [ ] Tables display correct column alignment (left, center, right)
 - [ ] Figures display correctly with italicized, centered "Figure N.M - Description" captions - no manually-typed numbers, no missing/doubled numbers
 - [ ] Ctrl+click on "the figure" in the "Figure with Caption" note jumps to that figure
+- [ ] "Numbered Step List Examples" steps show native, correctly-nested dotted-decimal numbers (`1.`, `1.1`, `1.2`) - no manually-typed digits
+- [ ] The "Interrupted Sequence with `continue`" steps continue from 2 (not restart at 1) despite the intervening NOTE
+- [ ] The "Digit-Adjacent Step Text" steps render correctly - no corrupted/skipped numbers from the "5 minutes"/"24 AWG" text
+- [ ] The two named sequences ("inspection" and "curing") each number independently, and resuming "curing" via `continue=curing` picks up where it left off despite "inspection" running in between
+- [ ] Ctrl+click on any of the three empty-text step references to "hold the board by the edges" (including the forward reference above "Basic Sequence with Nesting") jumps to that step, and each displays the correct live step number
+- [ ] "the board-handling step" (real link text) renders as a plain hyperlink, not a live step-number field
+- [ ] The `@@@STEPS@@@` syntax shown in the fenced code block under "Syntax Shown as a Documentation Example" renders as plain code text - not converted into a real numbered list
+- [ ] "IPA" in the first nested step renders bold
 - [ ] Code blocks use "Source Code" style
 - [ ] Bold and italic text render correctly
 - [ ] Footnotes appear at bottom of pages
