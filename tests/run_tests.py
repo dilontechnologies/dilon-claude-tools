@@ -21,6 +21,7 @@ from docx.oxml.ns import qn
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "dilon-document-compiler" / "scripts"))
 import generate_dilon_doc as compiler
+import step_numbering
 
 REPO_ROOT = Path(__file__).parent.parent
 TEST_OUTPUT_DIR = Path(__file__).parent / "test-output"
@@ -1034,6 +1035,62 @@ def test_heading_auto_numbering():
           f"Heading 2/3/4 all link to the SAME numbering list, not separate ones (got {num_ids})")
 
 
+def test_get_step_list_abstract_num_id_found():
+    """SIGNATURE_TEMPLATE must have the 'Dilon Step List' style + sample
+    paragraph built per the spec's Template Requirement section."""
+    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
+    check(abstract_id is not None, "finds an abstractNumId for 'Dilon Step List' in the real template")
+
+
+def test_get_step_list_abstract_num_id_missing_style():
+    empty_template = TEST_OUTPUT_DIR / "step_numbering_no_style_template.docx"
+    from docx import Document
+    Document().save(empty_template)
+    abstract_id = step_numbering.get_step_list_abstract_num_id(empty_template)
+    check(abstract_id is None, "returns None (not an exception) when the template has no 'Dilon Step List' style")
+
+
+def test_create_num_instance_first_allocation():
+    from docx import Document
+    doc = Document(SIGNATURE_TEMPLATE)
+    numbering_element = doc.part.numbering_part.element
+    existing_ids = {int(n.get(qn('w:numId'))) for n in numbering_element.findall(qn('w:num'))}
+    new_id = step_numbering.create_num_instance(numbering_element, "1")
+    check(new_id not in existing_ids, f"allocates a numId ({new_id}) that didn't already exist")
+    check(new_id == max(existing_ids, default=0) + 1, f"allocates max(existing)+1 (got {new_id}, existing max {max(existing_ids, default=0)})")
+
+
+def test_create_num_instance_sequential_allocations_dont_collide():
+    from docx import Document
+    doc = Document(SIGNATURE_TEMPLATE)
+    numbering_element = doc.part.numbering_part.element
+    first = step_numbering.create_num_instance(numbering_element, "1")
+    second = step_numbering.create_num_instance(numbering_element, "1")
+    check(first != second, f"two sequential allocations never collide (got {first}, {second})")
+
+
+def test_create_num_instance_writes_start_override():
+    """Word continues a level's counter across separate numId instances
+    that share the same abstractNumId, unless a startOverride forces a
+    restart (confirmed against the real template: our throwaway sample
+    paragraph's numId=67 bled its count of 1 into a freshly-allocated
+    numId sharing abstractNumId=50, rendering 2/3/4 instead of 1/2/3). A
+    new step-list sequence must always start at 1 regardless of what else
+    used the same abstract list earlier in the document."""
+    from docx import Document
+    doc = Document(SIGNATURE_TEMPLATE)
+    numbering_element = doc.part.numbering_part.element
+    new_id = step_numbering.create_num_instance(numbering_element, "1")
+
+    num_el = next(n for n in numbering_element.findall(qn('w:num')) if n.get(qn('w:numId')) == str(new_id))
+    lvl_override = num_el.find(qn('w:lvlOverride'))
+    check(lvl_override is not None, "new numId carries a lvlOverride")
+    if lvl_override is not None:
+        start_override = lvl_override.find(qn('w:startOverride'))
+        check(start_override is not None and start_override.get(qn('w:val')) == '1',
+              "lvlOverride forces the level to start at 1")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1092,6 +1149,11 @@ def main():
     test_compile_body_jinja_substitution()
     test_heading_auto_numbering()
     test_figure_auto_numbering()
+    test_get_step_list_abstract_num_id_found()
+    test_get_step_list_abstract_num_id_missing_style()
+    test_create_num_instance_first_allocation()
+    test_create_num_instance_sequential_allocations_dont_collide()
+    test_create_num_instance_writes_start_override()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")
