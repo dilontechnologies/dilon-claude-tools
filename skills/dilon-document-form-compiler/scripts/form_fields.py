@@ -219,6 +219,55 @@ def resolve_label_width(pair_annotations, pair_width, row_dir):
     return label_width, blank_width
 
 
+def resolve_title_flag(row_annotations):
+    """Resolve a row's title= annotation to a bool. Truthy values
+    (case-insensitive): 'true', '1', 'yes'. Anything else, including
+    absent, is not a title row."""
+    return row_annotations.get('title', '').strip().lower() in ('true', '1', 'yes')
+
+
+def _build_field_grid_title_row_table(document, pairs, row_rows, row_width):
+    """
+    Build a title row: a 1-row, 1-column Word table spanning the full
+    row width, containing only the first pair's label as a bold run.
+    Any additional `|`-separated pair tokens are dropped (warned). A
+    `pair=`/`label=` annotation on the label token is ignored (warned)
+    - there's no percentage split or label/blank split with only one
+    column. `rows=` (row-level or the label's own override) still adds
+    blank paragraphs below the bold label, inside the same cell.
+    """
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+
+    if len(pairs) > 1:
+        print(
+            f"  FieldGrid: title row has {len(pairs)} pair tokens - "
+            f"only the first ({pairs[0][0]!r}) is used, the rest are dropped"
+        )
+
+    label_text, pair_annotations = pairs[0]
+    if 'pair' in pair_annotations:
+        print("  FieldGrid: pair= ignored on a title row (nothing to split a percentage across with only one column)")
+    if 'label' in pair_annotations:
+        print("  FieldGrid: label= ignored on a title row (no label/blank split to control)")
+
+    pair_rows = resolve_pair_rows(pair_annotations, row_rows)
+
+    table = document.add_table(rows=1, cols=1)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
+
+    cell = table.rows[0].cells[0]
+    cell.width = Inches(row_width)
+    table.columns[0].width = Inches(row_width)
+    run = cell.paragraphs[0].add_run(label_text)
+    run.bold = True
+    for _ in range(pair_rows - 1):
+        cell.add_paragraph()
+
+    return table
+
+
 def build_field_grid_row_table(document, row, row_width):
     """
     Build one FieldGrid row as a standalone 1-row Word table, added to
@@ -229,12 +278,19 @@ def build_field_grid_row_table(document, row, row_width):
         ({'pairs': [...], 'annotations': {...}}).
     row_width: total available width (inches) for this row.
 
+    A row with a truthy title= annotation is delegated to
+    _build_field_grid_title_row_table() instead - see its docstring.
+
     Returns the created Table object.
     """
     from docx.enum.table import WD_TABLE_ALIGNMENT
 
     pairs = row['pairs']
     direction, row_rows = resolve_row_settings(row['annotations'])
+
+    if resolve_title_flag(row['annotations']):
+        return _build_field_grid_title_row_table(document, pairs, row_rows, row_width)
+
     pair_widths = resolve_pair_widths(pairs, row_width)
 
     num_cols = len(pairs) if direction == 'v' else len(pairs) * 2
