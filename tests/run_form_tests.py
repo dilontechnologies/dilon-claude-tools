@@ -1112,6 +1112,52 @@ def test_form_section_header_compiles_through_full_pipeline():
     check("Section 2 - Final Inspection" in all_text, f"second section numbered and titled correctly, got {all_text!r}")
 
 
+def test_form_compile_has_no_leading_blank_paragraph():
+    input_md = TEST_OUTPUT_DIR / "no_leading_blank.md"
+    output_docx = TEST_OUTPUT_DIR / "no_leading_blank.docx"
+    input_md.write_text(
+        '---\n'
+        'title: "No Leading Blank Test"\n'
+        'doc_number: "FO-55555"\n'
+        'current_revision: "00"\n'
+        '---\n'
+        '\n'
+        '@@@FORM_FIELD:Form_Section_Header@@@First Section@@@END_FORM_FIELD@@@\n'
+        '\n'
+        '@@@FORM_FIELD:FillLine@@@Work Order:@@@END_FORM_FIELD@@@\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(FORM_COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(BASE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "no-leading-blank markdown compiles cleanly")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(output_docx.exists(), "no_leading_blank.docx created on disk")
+    if not output_docx.exists():
+        return
+
+    doc = Document(output_docx)
+    check(len(doc.paragraphs) > 0, "compiled document has at least one paragraph")
+    if doc.paragraphs:
+        check(
+            doc.paragraphs[0].text == "Section 1 - First Section",
+            f"first paragraph is the document's real first content, no stray leading blank line carried over from the base template's Part A, got {doc.paragraphs[0].text!r}",
+        )
+
+
 def generate_form_stub(output_path, **overrides):
     """Python port of the dilon-document-form-writer stub-generation
     logic (lives in SKILL.md as plain instructions for Claude; ported
@@ -1310,6 +1356,7 @@ def main():
     test_apply_form_fields_form_section_header_missing_style_degrades()
     test_form_section_header_marker_inside_table_cell_warns_and_skips()
     test_form_section_header_compiles_through_full_pipeline()
+    test_form_compile_has_no_leading_blank_paragraph()
     test_form_stub_custom_params()
     test_form_stub_default_params()
     test_form_stub_refuses_overwrite()

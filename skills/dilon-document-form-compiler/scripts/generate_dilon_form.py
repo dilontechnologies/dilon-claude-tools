@@ -28,6 +28,7 @@ from dilon_docx_common import (  # noqa: E402
     set_update_fields_on_open,
     populate_header,
     populate_footer,
+    strip_leading_empty_paragraphs,
 )
 
 try:
@@ -75,6 +76,7 @@ def generate_form_document(markdown_path, output_path, form_template_path=None):
     doc_a = Document(form_template_path)
     populate_header(doc_a, metadata)
     populate_footer(doc_a, metadata)
+    strip_leading_empty_paragraphs(doc_a)
     temp_part_a = Path(output_path).parent / "_temp_form_a.docx"
     doc_a.save(temp_part_a)
 

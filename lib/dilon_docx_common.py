@@ -515,6 +515,34 @@ def _add_complex_field(paragraph, instr, cached_text):
     paragraph._p.append(_fld_char('end'))
 
 
+def strip_leading_empty_paragraphs(document):
+    """
+    Remove empty paragraphs from the very start of `document`'s body,
+    stopping at the first table, non-empty paragraph, or sectPr.
+
+    A docx's body always needs at least one paragraph if it has no other
+    content, so TEMPLATE_Word_Base.docx - despite being header/footer/
+    styles-only by design - carries one empty paragraph before its
+    sectPr as a structural artifact of being a real Word file.
+    compose_documents() builds the merged document as
+    Composer(Document(doc_paths[0])), which keeps doc_paths[0]'s body
+    content as-is - so leaving that empty paragraph in Part A produced a
+    stray leading blank line at the top of every compiled document. Call
+    this on Part A right after populate_header()/populate_footer(),
+    before saving it for compose_documents() to use as its base.
+    """
+    from docx.oxml.ns import qn
+
+    body = document._element.body
+    for child in list(body):
+        if child.tag != qn('w:p'):
+            break
+        text = ''.join(node.text or '' for node in child.iter(qn('w:t')))
+        if text.strip():
+            break
+        body.remove(child)
+
+
 def populate_header(document, metadata):
     """
     Build the running header (logo | Title/Number | Rev | Page N of M)
