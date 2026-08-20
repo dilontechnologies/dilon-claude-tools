@@ -123,3 +123,126 @@ def create_num_instance(numbering_element, abstract_num_id):
     numbering_element.append(num_el)
 
     return new_num_id
+
+
+_STEPS_BLOCK_RE = re.compile(
+    r'@@@STEPS(?::\s*([^\n@]*?)\s*)?@@@\n(.*?)\n@@@END_STEPS@@@',
+    re.DOTALL,
+)
+_BULLET_LINE_RE = re.compile(r'^(?P<indent>[ \t]*)-[ \t]+(?P<text>.*)$')
+
+
+class StepBlockError(ValueError):
+    """Raised for a malformed @@@STEPS@@@ block; preprocess_steps_markdown
+    catches this and leaves the block completely untouched in the output,
+    per the design's warn-and-degrade convention."""
+
+
+def _parse_attribute(attr_text):
+    attr_text = (attr_text or '').strip()
+    if not attr_text:
+        return ('new', None)
+    if attr_text == 'continue':
+        return ('continue', None)
+    match = re.match(r'^continue\s*=\s*(\S+)$', attr_text)
+    if match:
+        return ('continue_named', match.group(1))
+    match = re.match(r'^id\s*=\s*(\S+)$', attr_text)
+    if match:
+        return ('new_named', match.group(1))
+    raise StepBlockError(f"unrecognized @@@STEPS@@@ attribute: {attr_text!r}")
+
+
+def _parse_bullet_lines(block_body):
+    """Returns [(depth, text), ...], one per bullet line. 2-space
+    indentation per nesting level, matching MARKDOWN_STYLING_GUIDE.md's
+    existing nested-list convention. Raises StepBlockError for any
+    non-blank, non-bullet line (including a wrapped continuation line with
+    no leading '-') or an empty block."""
+    lines = []
+    for raw_line in block_body.split('\n'):
+        if not raw_line.strip():
+            continue
+        match = _BULLET_LINE_RE.match(raw_line)
+        if not match:
+            raise StepBlockError(f"non-bullet line inside @@@STEPS@@@ block: {raw_line!r}")
+        indent = match.group('indent').replace('\t', '  ')
+        if len(indent) % 2 != 0:
+            raise StepBlockError(f"odd indentation ({len(indent)} spaces) inside @@@STEPS@@@ block: {raw_line!r}")
+        lines.append((len(indent) // 2, match.group('text')))
+    if not lines:
+        raise StepBlockError("@@@STEPS@@@ block has no bullet items")
+    return lines
+
+
+def preprocess_steps_markdown(markdown_text):
+    """
+    Resolves every @@@STEPS...@@@ ... @@@END_STEPS@@@ block in document
+    order: strips the wrapper markers, tags each bullet line with an
+    invisible STEP<idx> sentinel, and returns
+    (new_markdown_text, manifest) where manifest[idx] is
+    {'sequence_key': str, 'depth': int} for the step line carrying
+    sentinel index idx.
+
+    A block that fails to parse (StepBlockError) is left completely
+    untouched in the output, markers included - apply_step_numbering()
+    later only ever looks for sentinels, so an unprocessed block's
+    literal @@@STEPS@@@ text just passes through Pandoc as plain
+    paragraph text. This is the documented warn-and-degrade fallback.
+    """
+    manifest = []
+    most_recent_key = None
+    named_keys_seen = set()
+    unnamed_counter = 0
+    output_parts = []
+    cursor = 0
+    warnings = []
+
+    for match in _STEPS_BLOCK_RE.finditer(markdown_text):
+        output_parts.append(markdown_text[cursor:match.start()])
+        cursor = match.end()
+
+        try:
+            kind, name = _parse_attribute(match.group(1))
+            bullet_lines = _parse_bullet_lines(match.group(2))
+        except StepBlockError as exc:
+            warnings.append(str(exc))
+            output_parts.append(match.group(0))
+            continue
+
+        if kind == 'new':
+            unnamed_counter += 1
+            sequence_key = f'__unnamed_{unnamed_counter}__'
+        elif kind == 'new_named':
+            if name in named_keys_seen:
+                warnings.append(f"@@@STEPS: id={name}@@@ declared more than once; treating as a fresh sequence")
+            named_keys_seen.add(name)
+            sequence_key = name
+        elif kind == 'continue':
+            if most_recent_key is None:
+                warnings.append("@@@STEPS: continue@@@ has nothing earlier to continue; starting fresh")
+                unnamed_counter += 1
+                sequence_key = f'__unnamed_{unnamed_counter}__'
+            else:
+                sequence_key = most_recent_key
+        else:  # continue_named
+            if name not in named_keys_seen:
+                warnings.append(f"@@@STEPS: continue={name}@@@ names a sequence that was never declared; starting fresh")
+                named_keys_seen.add(name)
+            sequence_key = name
+
+        most_recent_key = sequence_key
+
+        rebuilt_lines = []
+        for depth, text in bullet_lines:
+            idx = len(manifest)
+            manifest.append({'sequence_key': sequence_key, 'depth': depth})
+            rebuilt_lines.append('  ' * depth + f'- STEP{idx}{text}')
+        output_parts.append('\n'.join(rebuilt_lines))
+
+    output_parts.append(markdown_text[cursor:])
+
+    for warning in warnings:
+        print(f"  Warning: {warning}")
+
+    return ''.join(output_parts), manifest

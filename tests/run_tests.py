@@ -1091,6 +1091,80 @@ def test_create_num_instance_writes_start_override():
               "lvlOverride forces the level to start at 1")
 
 
+def test_preprocess_steps_unnamed_block():
+    md = "@@@STEPS@@@\n- First\n- Second\n@@@END_STEPS@@@\n"
+    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
+    check(len(manifest) == 2, f"2 steps recorded (got {len(manifest)})")
+    check(manifest[0]['sequence_key'] == manifest[1]['sequence_key'], "both steps in one unnamed block share a sequence key")
+    check(manifest[0]['depth'] == 0 and manifest[1]['depth'] == 0, "both steps are depth 0")
+    check('@@@STEPS@@@' not in new_md and '@@@END_STEPS@@@' not in new_md, "wrapper markers are stripped")
+    check('STEP0' in new_md and 'STEP1' in new_md, "each step line carries its own sentinel")
+
+
+def test_preprocess_steps_nesting():
+    md = "@@@STEPS@@@\n- First\n  - Sub of first\n- Second\n@@@END_STEPS@@@\n"
+    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
+    check([m['depth'] for m in manifest] == [0, 1, 0], f"depths reflect nesting (got {[m['depth'] for m in manifest]})")
+
+
+def test_preprocess_steps_named_block():
+    md = "@@@STEPS: id=cleaning@@@\n- A\n@@@END_STEPS@@@\n"
+    _, manifest = step_numbering.preprocess_steps_markdown(md)
+    check(manifest[0]['sequence_key'] == 'cleaning', f"named block resolves to its declared name (got {manifest[0]['sequence_key']!r})")
+
+
+def test_preprocess_steps_bare_continue_resumes_most_recent_unnamed():
+    md = (
+        "@@@STEPS@@@\n- A\n@@@END_STEPS@@@\n"
+        "Some interrupting prose.\n"
+        "@@@STEPS: continue@@@\n- B\n@@@END_STEPS@@@\n"
+    )
+    _, manifest = step_numbering.preprocess_steps_markdown(md)
+    check(manifest[0]['sequence_key'] == manifest[1]['sequence_key'], "bare continue resumes the most recently active (unnamed) sequence")
+
+
+def test_preprocess_steps_bare_continue_resumes_most_recent_named():
+    md = (
+        "@@@STEPS: id=cleaning@@@\n- A\n@@@END_STEPS@@@\n"
+        "@@@STEPS: continue@@@\n- B\n@@@END_STEPS@@@\n"
+    )
+    _, manifest = step_numbering.preprocess_steps_markdown(md)
+    check(manifest[0]['sequence_key'] == 'cleaning' and manifest[1]['sequence_key'] == 'cleaning',
+          "bare continue resumes the most recently active sequence even when it was named")
+
+
+def test_preprocess_steps_continue_named_across_other_sequences():
+    md = (
+        "@@@STEPS: id=cleaning@@@\n- A\n@@@END_STEPS@@@\n"
+        "@@@STEPS: id=curing@@@\n- X\n@@@END_STEPS@@@\n"
+        "@@@STEPS: continue=cleaning@@@\n- B\n@@@END_STEPS@@@\n"
+    )
+    _, manifest = step_numbering.preprocess_steps_markdown(md)
+    check(manifest[0]['sequence_key'] == 'cleaning' and manifest[2]['sequence_key'] == 'cleaning',
+          "continue=<name> resumes that specific sequence even after a different one ran in between")
+    check(manifest[1]['sequence_key'] == 'curing', "the intervening named sequence keeps its own distinct key")
+
+
+def test_preprocess_steps_unknown_continue_named_starts_fresh():
+    md = "@@@STEPS: continue=nonexistent@@@\n- A\n@@@END_STEPS@@@\n"
+    _, manifest = step_numbering.preprocess_steps_markdown(md)
+    check(len(manifest) == 1, "an unknown continue=<name> still produces a usable (freshly-started) sequence, not a crash")
+
+
+def test_preprocess_steps_bare_continue_with_nothing_to_continue():
+    md = "@@@STEPS: continue@@@\n- A\n@@@END_STEPS@@@\n"
+    _, manifest = step_numbering.preprocess_steps_markdown(md)
+    check(len(manifest) == 1, "a bare continue with nothing earlier still produces a usable (freshly-started) sequence, not a crash")
+
+
+def test_preprocess_steps_malformed_block_passes_through_unmodified():
+    md = "@@@STEPS@@@\nThis is not a bullet list.\n@@@END_STEPS@@@\n"
+    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
+    check(len(manifest) == 0, "a malformed block contributes nothing to the manifest")
+    check('@@@STEPS@@@' in new_md and 'This is not a bullet list.' in new_md,
+          "a malformed block is left completely untouched (markers included) rather than crashing")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1154,6 +1228,15 @@ def main():
     test_create_num_instance_first_allocation()
     test_create_num_instance_sequential_allocations_dont_collide()
     test_create_num_instance_writes_start_override()
+    test_preprocess_steps_unnamed_block()
+    test_preprocess_steps_nesting()
+    test_preprocess_steps_named_block()
+    test_preprocess_steps_bare_continue_resumes_most_recent_unnamed()
+    test_preprocess_steps_bare_continue_resumes_most_recent_named()
+    test_preprocess_steps_continue_named_across_other_sequences()
+    test_preprocess_steps_unknown_continue_named_starts_fresh()
+    test_preprocess_steps_bare_continue_with_nothing_to_continue()
+    test_preprocess_steps_malformed_block_passes_through_unmodified()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")
