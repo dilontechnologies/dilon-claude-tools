@@ -274,7 +274,7 @@ Put the caption text directly in the image's alt-text brackets - do NOT write a 
 - Image path is relative to the markdown file
 - Caption text goes **inside the brackets** (the image's alt text) - do NOT type a manual `*Figure N.M: ...*` line after the image
 - **Do NOT type a figure number.** The compiler converts the caption into a Word-native `Figure N.M - Description` caption, chapter-numbered off the nearest Heading 2, exactly like the automatic section numbering described in Section 2
-- The optional `{#fig:some-label}` after the image assigns it a stable id for cross-referencing (see 8.2) - use a `fig:` prefix and kebab-case, e.g. `{#fig:i2c-bus-topology}`
+- The optional `{#fig:some-label}` after the image assigns it a stable id for cross-referencing (see 9.3) - use a `fig:` prefix and kebab-case, e.g. `{#fig:i2c-bus-topology}`
 - Omit both the caption text and the `{#fig:...}` id (`![](path.png)`) for a purely decorative image that should NOT get a figure number - the compiler only numbers images that have caption text
 - Caption should be concise but descriptive; no trailing period is added automatically, so include one if you want it
 
@@ -631,38 +631,56 @@ Use triple asterisks for ***bold italic***:
 
 ### 9.2 Internal Cross-References
 
-Reference sections by number using hyperlinks:
+Section headings can carry a custom id for cross-referencing, same as figures and steps:
 
 ```markdown
-See [Section 3.5](#grid-table-for-complex-content) for details on the MAX17263 fuel gauge.
+## My Heading {#sec:my-heading}
 ```
 
-**Rules:**
-- Pandoc automatically generates identifiers for each heading
-- Identifier format: lowercase, spaces replaced with hyphens, special characters removed
-- Link syntax: `[Link text](#heading-identifier)`
-- Example heading `### Grid Table (For Complex Content)` → identifier `#grid-table-for-complex-content`
-- For custom identifiers, use: `## My Heading {#custom-id}`
-- The link text (e.g. `Section 3.5`) is literal text you type - it will only match the number Word actually renders if the section's position in the document doesn't change afterward
+Reference it elsewhere with an **empty-text** link - the compiler fills in the current section number automatically, so it can never go stale:
+
+```markdown
+See [](#sec:my-heading) for details on the MAX17263 fuel gauge.
+```
+
+This renders as, e.g., "See Section 3.5 for details..." - a live Word
+field, not typed text. Supplying real link text instead
+(`[the fuel gauge section](#sec:my-heading)`) is respected as-is - a
+plain hyperlink to that heading, not a live number.
+
+A reference to a `sec:` id that doesn't exist anywhere in the document
+fails compilation with an error. Every `{#sec:label}` id must be unique
+across the document.
+
+Pandoc's own auto-generated heading identifiers (lowercase, hyphenated
+- see the example below) still work for a plain hyperlink with real
+link text; only an id using the `sec:` prefix, referenced with empty
+link text, gets the live-number treatment.
 
 **Examples:**
 ```markdown
 For table styling, see [Section 3.2](#table-formatting-in-word-output).
 
-The definition list format is explained in [Section 4.3](#definition-lists).
-
-Code examples can be found in [Section 7](#code-and-technical-content).
+See [](#sec:fuel-gauge-calibration) for the calibration procedure.
 ```
 
 ### 9.3 Figure Cross-References
 
-Figures use the `{#fig:label}` id from Section 4.1, with the same link syntax as section cross-references:
+Reference a figure's `{#fig:label}` id (Section 4.1) with an
+**empty-text** link, the same pattern as sections and steps:
 
 ```markdown
-See [the figure](#fig:i2c-bus-topology) for the complete bus topology.
+See [](#fig:i2c-bus-topology) for the complete bus topology.
 ```
 
-This produces a real hyperlink to the figure - unlike section cross-references, the link text isn't tied to a number that could drift, since it's just pointing at the image itself.
+This renders as, e.g., "See Figure 2.1 for the complete bus
+topology..." - a live, hyperlinked Word field. Supplying real link
+text instead (`[the bus topology diagram](#fig:i2c-bus-topology)`) is
+respected as-is - a plain hyperlink to the image itself, not a live
+number.
+
+A reference to a `fig:` label that doesn't exist anywhere in the
+document fails compilation with an error.
 
 ### 9.4 Code References
 
