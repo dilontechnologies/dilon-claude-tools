@@ -1173,17 +1173,22 @@ def populate_header(document, metadata):
     # no indent/tab needed, unlike the hanging-indent + leading-tab
     # combo the original template used, which left the "Number:" line
     # landing at Word's default tab stop instead of the true left edge)
+    header_text_style = document.styles['Header Text']
+
     title_cell = row.cells[1]
     title_para = title_cell.paragraphs[0]
+    title_para.style = header_text_style
     title_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
     title_para.add_run(f"Title: {metadata.get('title', '')}")
     number_para = title_cell.add_paragraph()
+    number_para.style = header_text_style
     number_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
     number_para.add_run(f"Number: {metadata.get('doc_number', '')}")
 
     # Cell 2: Rev
     rev_cell = row.cells[2]
     rev_para = rev_cell.paragraphs[0]
+    rev_para.style = header_text_style
     rev_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     rev_run = rev_para.add_run(f"Rev {metadata.get('current_revision', '')}")
     rev_run.font.bold = True
@@ -1191,11 +1196,13 @@ def populate_header(document, metadata):
     # Cell 3: Page N of M (live PAGE/NUMPAGES fields)
     page_cell = row.cells[3]
     page_label_para = page_cell.paragraphs[0]
+    page_label_para.style = header_text_style
     page_label_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     page_label_run = page_label_para.add_run('Page')
     page_label_run.font.bold = True
 
     page_field_para = page_cell.add_paragraph()
+    page_field_para.style = header_text_style
     page_field_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     add_complex_field(page_field_para, 'page \\* arabic', '1')
     mid_run = page_field_para.add_run(' of ')
@@ -1292,13 +1299,13 @@ def populate_footer(document, metadata):
         cell_mar.append(side_el)
     _insert_tbl_pr_child(tbl_pr, cell_mar)
 
+    # Matches the 'Footer Text' custom style's own 9pt size - kept as a
+    # separate constant since row1.height below needs it too.
     FOOTER_FONT_SIZE = Pt(9)
 
     def _add_footer_run(paragraph, text):
-        paragraph.style = document.styles['Footer']
-        run = paragraph.add_run(text)
-        run.font.size = FOOTER_FONT_SIZE
-        return run
+        paragraph.style = document.styles['Footer Text']
+        return paragraph.add_run(text)
 
     # Row 1: doc_number/rev (left) | ECO # (center) | revision date (right)
     # - height pinned to the font size itself (AT_LEAST so a taller value
