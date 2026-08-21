@@ -812,6 +812,132 @@ def narrow_section_bookmarks(docx_file):
     return count
 
 
+_REFERENCE_MARKER_RE = re.compile(r'\[\]\(#(fig|sec|step):([\w-]+)\)')
+
+
+def preprocess_reference_markers(markdown_text):
+    """
+    Replaces every [](#TYPE:label) - TYPE one of fig/sec/step - with an
+    XREF:TYPE:label sentinel, so Pandoc never sees an empty-text link
+    (which would otherwise become a hyperlink with nothing visible to
+    click). A link with real text, e.g. [see figure](#fig:label), and
+    an id whose prefix isn't one of the three registered types (e.g. an
+    arbitrary heading auto-id used for an ordinary hyperlink) are both
+    left completely untouched - only the empty-text, registered-type
+    form is intercepted.
+    """
+    return _REFERENCE_MARKER_RE.sub(lambda m: f'XREF:{m.group(1)}:{m.group(2)}', markdown_text)
+
+
+_XREF_SENTINEL_RE = re.compile(r'XREF:(fig|sec|step):([\w-]+)')
+
+
+class ReferenceResolutionError(ValueError):
+    """Raised when a [](#TYPE:label) reference has no matching
+    {#TYPE:label} anchor, or when the same {#TYPE:label} label is
+    declared more than once, for any type passed to
+    resolve_reference_markers()."""
+
+
+def resolve_reference_markers(docx_file, type_resolvers):
+    """
+    Finds every XREF:TYPE:label sentinel (from
+    preprocess_reference_markers()) in docx_file and replaces it with
+    whatever type_resolvers[TYPE](paragraph, bookmark_name) appends to
+    the paragraph at that point - one callback per reference type,
+    letting each type own its own field-building logic (fig/sec below;
+    step's lives in step_numbering.py and is passed in by the caller,
+    since steps are compiler-only) while sharing one sentinel scan, one
+    bookmark-duplicate check, and one halt-on-error path.
+
+    Raises ReferenceResolutionError listing every sentinel with no
+    matching bookmark and every bookmark name declared more than once,
+    across every type present in type_resolvers - not narrowed to one
+    type at a time - rather than resolving what it can and leaving the
+    rest silently broken.
+    """
+    from docx.oxml.ns import qn
+
+    doc = Document(docx_file)
+    body = doc.element.body
+
+    prefixes = tuple(f'{t}:' for t in type_resolvers)
+    bookmark_names = {}
+    duplicates = set()
+    for el in body.iter(qn('w:bookmarkStart')):
+        name = el.get(qn('w:name'))
+        if not (name and name.startswith(prefixes)):
+            continue
+        if name in bookmark_names:
+            duplicates.add(name)
+        bookmark_names[name] = True
+
+    if duplicates:
+        raise ReferenceResolutionError(
+            "duplicate anchor(s): " + ", ".join(repr(d) for d in sorted(duplicates))
+        )
+
+    missing = []
+    resolved = 0
+
+    for para in doc.paragraphs:
+        matches = list(_XREF_SENTINEL_RE.finditer(para.text))
+        if not matches:
+            continue
+
+        original_text = para.text
+        for run in list(para.runs):
+            run._element.getparent().remove(run._element)
+
+        cursor = 0
+        for match in matches:
+            before_text = original_text[cursor:match.start()]
+            if before_text:
+                para.add_run(before_text)
+
+            ref_type, label = match.group(1), match.group(2)
+            bookmark_name = f'{ref_type}:{label}'
+            if bookmark_name in bookmark_names and ref_type in type_resolvers:
+                type_resolvers[ref_type](para, bookmark_name)
+                resolved += 1
+            else:
+                missing.append(bookmark_name)
+
+            cursor = match.end()
+
+        trailing_text = original_text[cursor:]
+        if trailing_text:
+            para.add_run(trailing_text)
+
+    if missing:
+        raise ReferenceResolutionError(
+            "no matching anchor for: " + ", ".join(repr(m) for m in missing)
+        )
+
+    if resolved:
+        doc.save(docx_file)
+        print(f"  Resolved {resolved} cross-reference(s)")
+    return resolved
+
+
+def resolve_fig_reference(para, bookmark_name):
+    """type_resolvers['fig'] callback: a plain hyperlinked REF against
+    the narrowed "Figure N.M" bookmark (apply_figure_captions()) - no
+    \\r needed, since the bookmark wraps literal text and our own
+    STYLEREF/SEQ field runs directly, not a native list item's own
+    rendered marker."""
+    add_complex_field(para, f'REF {bookmark_name} \\h', '1')
+
+
+def resolve_sec_reference(para, bookmark_name):
+    """type_resolvers['sec'] callback: literal "Section " + a
+    hyperlinked REF \\r against the narrowed heading-paragraph bookmark
+    (narrow_section_bookmarks()) - \\r extracts the heading's own live,
+    natively-rendered outline number."""
+    para.add_run('Section ')
+    add_complex_field(para, f'REF {bookmark_name} \\r \\h', '1')
+
+
 def center_image_paragraphs(docx_file):
     """
     Center every paragraph that contains an inline image, captioned or

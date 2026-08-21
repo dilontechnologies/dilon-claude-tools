@@ -1321,6 +1321,70 @@ def test_narrow_section_bookmarks_ignores_headings_without_sec_id():
     check(count == 0, f"a heading with no {{#sec:...}} id is left alone (got count={count})")
 
 
+def test_preprocess_reference_markers_converts_recognized_types():
+    md = "See [](#fig:a) and [](#sec:b) and [](#step:c)."
+    result = dilon_docx_common.preprocess_reference_markers(md)
+    check(result == "See XREF:fig:a and XREF:sec:b and XREF:step:c.", f"all three types convert to sentinels (got {result!r})")
+
+
+def test_preprocess_reference_markers_leaves_real_link_text_and_unknown_types_untouched():
+    md = "[see the figure](#fig:a) and [](#other:x)"
+    result = dilon_docx_common.preprocess_reference_markers(md)
+    check(result == md, "non-empty link text and an unrecognized type prefix are both left alone")
+
+
+def test_resolve_reference_markers_dispatches_by_type():
+    images_dir = TEST_OUTPUT_DIR / "xref_dispatch_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    md = (
+        "## Section One {#sec:intro}\n\n"
+        "![A caption.](xref_dispatch_images/test.png){#fig:pic}\n\n"
+        "See XREF:fig:pic and XREF:sec:intro.\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "xref_dispatch_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE, resource_dir=TEST_OUTPUT_DIR)
+    dilon_docx_common.apply_figure_captions(docx_path)
+    dilon_docx_common.narrow_section_bookmarks(docx_path)
+
+    resolved = dilon_docx_common.resolve_reference_markers(docx_path, {
+        'fig': dilon_docx_common.resolve_fig_reference,
+        'sec': dilon_docx_common.resolve_sec_reference,
+    })
+    check(resolved == 2, f"both sentinels resolved (got {resolved})")
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('REF fig:pic \\h' in xml, "fig resolves to a plain hyperlinked REF (no \\r - it's not a native list item)")
+    check('Section ' in xml and 'REF sec:intro \\r \\h' in xml, "sec resolves to literal 'Section ' + a hyperlinked REF \\r")
+    check('XREF' not in xml, "no sentinel remains")
+
+
+def test_resolve_reference_markers_missing_anchor_raises():
+    md = "See XREF:fig:does-not-exist."
+    docx_path = TEST_OUTPUT_DIR / "xref_missing_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    try:
+        dilon_docx_common.resolve_reference_markers(docx_path, {'fig': dilon_docx_common.resolve_fig_reference})
+        check(False, "a reference to a nonexistent anchor raises ReferenceResolutionError")
+    except dilon_docx_common.ReferenceResolutionError as exc:
+        check("does-not-exist" in str(exc), f"the error names the missing label (got: {exc})")
+
+
+def test_resolve_reference_markers_duplicate_anchor_raises():
+    md = "## One {#sec:dup}\n\nText.\n\n## Two {#sec:dup}\n\nSee XREF:sec:dup.\n"
+    docx_path = TEST_OUTPUT_DIR / "xref_duplicate_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    try:
+        dilon_docx_common.resolve_reference_markers(docx_path, {'sec': dilon_docx_common.resolve_sec_reference})
+        check(False, "two {#sec:dup} anchors raises ReferenceResolutionError")
+    except dilon_docx_common.ReferenceResolutionError as exc:
+        check("dup" in str(exc), f"the error names the duplicated label (got: {exc})")
+
+
 def test_heading_auto_numbering():
     """Render test: headings written WITHOUT manual numbers (per the
     updated MARKDOWN_STYLING_GUIDE.md convention) must come out of Pandoc
@@ -1987,6 +2051,11 @@ def main():
     test_apply_figure_captions_narrowing_is_noop_without_fig_id()
     test_narrow_section_bookmarks_shrinks_to_heading_only()
     test_narrow_section_bookmarks_ignores_headings_without_sec_id()
+    test_preprocess_reference_markers_converts_recognized_types()
+    test_preprocess_reference_markers_leaves_real_link_text_and_unknown_types_untouched()
+    test_resolve_reference_markers_dispatches_by_type()
+    test_resolve_reference_markers_missing_anchor_raises()
+    test_resolve_reference_markers_duplicate_anchor_raises()
     test_get_step_list_abstract_num_id_found()
     test_get_step_list_abstract_num_id_missing_style()
     test_create_num_instance_first_allocation()
