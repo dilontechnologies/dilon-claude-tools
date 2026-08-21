@@ -1618,81 +1618,21 @@ def test_apply_section_scoped_step_numbering_preserves_inline_formatting():
     check(len(bold_runs) == 1 and bold_runs[0].text == 'IPA', "bold formatting on 'IPA' survives")
 
 
-def test_resolve_step_references_resolves_multiple_in_same_paragraph():
-    """Regression test: resolve_step_references used .search() (first
-    match only) instead of scanning every sentinel in a paragraph, so a
-    sentence referencing two steps left the second reference's sentinel
-    literally visible and unresolved in the compiled document."""
-    md = "See [](#step:a) and []{#step:a} and []{#step:b} and [](#step:b) for details."
-    new_md = step_numbering.preprocess_step_references(md)
-    docx_path = TEST_OUTPUT_DIR / "step_ref_multi_test.docx"
-    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+def test_resolve_step_reference_builds_composite_field():
+    md = "## Section One\n\n@@@STEPS@@@\n\n#. Hold the board. []{#step:x}\n\n@@@END_STEPS@@@\n\nSee [](#step:x).\n"
+    md = dilon_docx_common.preprocess_reference_markers(md)
+    docx_path = TEST_OUTPUT_DIR / "step_resolver_callback_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
-    step_numbering.resolve_step_references(docx_path)
+    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
+    dilon_docx_common.resolve_reference_markers(docx_path, {'step': step_numbering.resolve_step_reference})
 
     with zipfile.ZipFile(docx_path) as z:
         xml = z.read('word/document.xml').decode('utf-8')
-    check('REF step:a \\r \\h' in xml, "the first reference resolves to a live REF field")
-    check('REF step:b \\r \\h' in xml, "the second reference in the same paragraph ALSO resolves (not left as a dangling sentinel)")
-    check('STEPREF' not in xml, "no reference sentinel remains for either reference")
-
-
-def test_resolve_step_references_creates_ref_field():
-    from docx import Document
-    md = "- [](#step:insert-carrier-boards)Insert []{#step:insert-carrier-boards}the boards."
-    new_md = step_numbering.preprocess_step_references(md)
-    docx_path = TEST_OUTPUT_DIR / "step_ref_test.docx"
-    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
-
-    step_numbering.resolve_step_references(docx_path)
-
-    with zipfile.ZipFile(docx_path) as z:
-        xml = z.read('word/document.xml').decode('utf-8')
-    check('w:name="step:insert-carrier-boards"' in xml, "the {#step:label} anchor produces a real bookmark")
-    check('REF step:insert-carrier-boards \\r \\h' in xml, "the reference resolves to a live REF ... \\r \\h field targeting that bookmark")
-    check('STEPREF' not in xml, "no reference sentinel remains in the output")
-
-
-def test_resolve_step_references_builds_composite_field():
-    md = "## Section One\n\n[](#step:x) See [](#step:x) for details. []{#step:x}"
-    new_md = step_numbering.preprocess_step_references(md)
-    docx_path = TEST_OUTPUT_DIR / "step_ref_composite_test.docx"
-    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
-
-    step_numbering.resolve_step_references(docx_path)
-
-    with zipfile.ZipFile(docx_path) as z:
-        xml = z.read('word/document.xml').decode('utf-8')
-    check('STYLEREF 2 \\s' in xml, "the section-number half of the composite is a live STYLEREF field")
-    check('REF step:x \\r \\h' in xml, "the step-number half is a live, hyperlinked REF \\r field")
-    check('Step ' in xml and '-' in xml, "the literal 'Step ' and '-' text is present around the two fields")
-    check('STEPREF' not in xml, "no sentinel remains")
-
-
-def test_resolve_step_references_missing_label_raises():
-    md = "See [](#step:does-not-exist) for details."
-    new_md = step_numbering.preprocess_step_references(md)
-    docx_path = TEST_OUTPUT_DIR / "step_ref_missing_test.docx"
-    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
-
-    try:
-        step_numbering.resolve_step_references(docx_path)
-        check(False, "a reference to a nonexistent step label raises StepReferenceError")
-    except step_numbering.StepReferenceError as exc:
-        check("does-not-exist" in str(exc), f"the error names the missing label (got: {exc})")
-
-
-def test_resolve_step_references_duplicate_anchor_raises():
-    md = "[]{#step:dup} First. []{#step:dup} Second."
-    new_md = step_numbering.preprocess_step_references(md)
-    docx_path = TEST_OUTPUT_DIR / "step_ref_duplicate_test.docx"
-    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
-
-    try:
-        step_numbering.resolve_step_references(docx_path)
-        check(False, "two {#step:dup} anchors raises StepReferenceError")
-    except step_numbering.StepReferenceError as exc:
-        check("dup" in str(exc), f"the error names the duplicated label (got: {exc})")
+    check('STYLEREF 2 \\s' in xml, "the section-number half is present")
+    check('REF step:x \\r \\h' in xml, "the step-number half is present")
+    check('Step ' in xml, "the literal 'Step ' prefix is present")
 
 
 STEP_REDESIGN_MARKDOWN = (
@@ -2069,11 +2009,7 @@ def main():
     test_apply_section_scoped_step_numbering_unclosed_block_raises()
     test_apply_section_scoped_step_numbering_skips_gracefully_without_abstract_id()
     test_apply_section_scoped_step_numbering_preserves_inline_formatting()
-    test_resolve_step_references_creates_ref_field()
-    test_resolve_step_references_builds_composite_field()
-    test_resolve_step_references_missing_label_raises()
-    test_resolve_step_references_duplicate_anchor_raises()
-    test_resolve_step_references_resolves_multiple_in_same_paragraph()
+    test_resolve_step_reference_builds_composite_field()
     test_compile_section_scoped_step_numbering_end_to_end()
     test_compile_duplicate_step_anchor_fails_clearly()
     test_validate_list_nesting_depth_passes_at_three_levels()

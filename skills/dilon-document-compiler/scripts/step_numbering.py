@@ -278,168 +278,20 @@ def apply_section_scoped_step_numbering(docx_file, abstract_num_id):
     return numbered
 
 
-_CODE_FENCE_RE = re.compile(
-    r'^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[ \t]*$',
-    re.DOTALL | re.MULTILINE,
-)
-
-
-def _code_fence_ranges(markdown_text):
+def resolve_step_reference(para, bookmark_name):
     """
-    Returns [(start, end), ...] character spans covering every fenced
-    (```/~~~) code block in markdown_text, so callers can skip a
-    [](#step:...) reference or {#step:label} anchor that only appears
-    inside a code fence as documentation/example text (e.g.
-    MARKDOWN_STYLING_GUIDE.md's own worked example) instead of treating
-    it as a real marker to process. Matches apply_styles()'s existing
-    precedent (lib/dilon_docx_common.py) of skipping 'Verbatim'-styled
-    paragraphs for the same reason.
+    type_resolvers['step'] callback for
+    dilon_docx_common.resolve_reference_markers(): literal "Step " +
+    a live STYLEREF (nearest Heading 2's own section number) + literal
+    "-" + a hyperlinked REF \\r against the step's own bookmark (\\r
+    extracts the step's natively-rendered list number - unlike fig/sec,
+    step's bookmark is already exactly where it needs to be, authored
+    as a tight inline {#step:label} anchor, so no narrowing pass is
+    needed for this type).
     """
-    return [m.span() for m in _CODE_FENCE_RE.finditer(markdown_text)]
+    para.add_run('Step ')
+    add_field_simple_run(para, ' STYLEREF 2 \\s ', '1')
+    para.add_run('-')
+    add_complex_field(para, f'REF {bookmark_name} \\r \\h', '1')
 
 
-def _inside_any_span(spans, pos):
-    return any(start <= pos < end for start, end in spans)
-
-
-_STEP_REF_RE = re.compile(r'\[\]\(#step:([\w-]+)\)')
-_STEP_LABEL_RE = re.compile(r'\{#step:([\w-]+)\}')
-
-
-def preprocess_step_references(markdown_text):
-    """
-    Replaces every [](#step:label) - an EMPTY-text link to a #step: id -
-    with a STEPREF:<label> sentinel, delimited on both sides by U+E000
-    (Private Use Area, never occurs in authored markdown) so an
-    immediately-adjacent word (e.g. "[](#step:x)Insert the boards" with
-    no space) can't be swallowed into the label's [\\w-]+ capture.
-    Pandoc passes the sentinel through untouched, for
-    resolve_step_references() to later turn into a live Word
-    cross-reference field. A reference with real link text, e.g.
-    [see this step](#step:label), is intentionally left untouched - only
-    the empty-text form is auto-resolved.
-
-    The step's own {#step:label} anchor - e.g. []{#step:label} inline in
-    the step's bullet text - needs no preprocessing at all: it's already
-    valid Pandoc bracketed-span-with-id syntax, and Pandoc's docx writer
-    turns it into a real bookmark on its own (Task 6 verifies this). This
-    function does still scan for it, once, only to warn if the same
-    label is declared more than once (first occurrence wins, per the
-    design's error-handling rule) - this is the one pass both halves of
-    the reference syntax already share over the whole document body.
-    """
-    fence_spans = _code_fence_ranges(markdown_text)
-
-    label_counts = {}
-    for label_match in _STEP_LABEL_RE.finditer(markdown_text):
-        if _inside_any_span(fence_spans, label_match.start()):
-            continue
-        label = label_match.group(1)
-        label_counts[label] = label_counts.get(label, 0) + 1
-    for label, count in label_counts.items():
-        if count > 1:
-            print(f"  Warning: {{#step:{label}}} declared more than once; the first occurrence wins for any [](#step:{label}) reference")
-
-    def _replace_ref(m):
-        if _inside_any_span(fence_spans, m.start()):
-            return m.group(0)
-        return f'STEPREF:{m.group(1)}'
-
-    return _STEP_REF_RE.sub(_replace_ref, markdown_text)
-
-
-_STEP_REF_SENTINEL_RE = re.compile('STEPREF:([\\w-]+)')
-
-
-class StepReferenceError(ValueError):
-    """Raised when a [](#step:label) reference has no matching
-    {#step:label} anchor, or when the same {#step:label} label is
-    declared more than once - both halt compilation rather than
-    degrading to visible placeholder text, per this codebase's
-    halt-on-broken-reference convention."""
-
-
-def resolve_step_references(docx_file):
-    """
-    Finds every STEPREF:<label> sentinel (from
-    preprocess_step_references(), unchanged) in docx_file and replaces
-    it with a composite live field:
-
-        "Step " + STYLEREF 2 \\s + "-" + REF step:<label> \\r \\h
-
-    - literal "Step ", then the nearest enclosing Heading 2's own live
-    section number, then a literal "-", then the step's own natively-
-    rendered list number as a hyperlinked cross-reference. This is
-    built fresh here rather than reusing a single REF field, because
-    the section prefix and the step's own number come from two
-    different live sources (STYLEREF off the heading vs. REF \\r off
-    the step's own bookmark) that can't be expressed as one field.
-
-    A sentinel whose label has no matching {#step:label} bookmark
-    anywhere in the document, or a label declared more than once,
-    raises StepReferenceError listing every offending label - this
-    replaces the old warn-and-degrade-to-plain-text behavior.
-    """
-    from docx import Document
-    doc = Document(docx_file)
-    body = doc.element.body
-
-    bookmark_names = {}
-    duplicates = set()
-    for el in body.iter(qn('w:bookmarkStart')):
-        name = el.get(qn('w:name'))
-        if not (name and name.startswith('step:')):
-            continue
-        if name in bookmark_names:
-            duplicates.add(name)
-        bookmark_names[name] = True
-
-    if duplicates:
-        raise StepReferenceError(
-            "duplicate {#step:...} anchor(s): "
-            + ", ".join(repr(d.split(':', 1)[1]) for d in sorted(duplicates))
-        )
-
-    missing = []
-    resolved = 0
-
-    for para in doc.paragraphs:
-        matches = list(_STEP_REF_SENTINEL_RE.finditer(para.text))
-        if not matches:
-            continue
-
-        original_text = para.text
-        for run in list(para.runs):
-            run._element.getparent().remove(run._element)
-
-        cursor = 0
-        for match in matches:
-            before_text = original_text[cursor:match.start()]
-            if before_text:
-                para.add_run(before_text)
-
-            label = match.group(1)
-            bookmark_name = f'step:{label}'
-            if bookmark_name in bookmark_names:
-                para.add_run('Step ')
-                add_field_simple_run(para, ' STYLEREF 2 \\s ', '1')
-                para.add_run('-')
-                add_complex_field(para, f'REF {bookmark_name} \\r \\h', '1')
-                resolved += 1
-            else:
-                missing.append(label)
-
-            cursor = match.end()
-
-        trailing_text = original_text[cursor:]
-        if trailing_text:
-            para.add_run(trailing_text)
-
-    if missing:
-        raise StepReferenceError(
-            "no matching {#step:...} anchor for: " + ", ".join(repr(m) for m in missing)
-        )
-
-    if resolved:
-        doc.save(docx_file)
-        print(f"  Resolved {resolved} step reference(s)")

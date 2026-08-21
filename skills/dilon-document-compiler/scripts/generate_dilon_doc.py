@@ -54,6 +54,12 @@ from dilon_docx_common import (  # noqa: E402
     validate_list_nesting_depth,
     ListContinuationError,
     ListNestingError,
+    preprocess_reference_markers,
+    resolve_reference_markers,
+    narrow_section_bookmarks,
+    ReferenceResolutionError,
+    resolve_fig_reference,
+    resolve_sec_reference,
     parse_column_widths,
     apply_table_column_widths,
     render_jinja,
@@ -64,13 +70,11 @@ from dilon_docx_common import (  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from step_numbering import (  # noqa: E402
-    preprocess_step_references,
     ensure_blank_line_around_steps_markers,
     get_step_list_abstract_num_id,
     apply_section_scoped_step_numbering,
-    resolve_step_references,
+    resolve_step_reference,
     StepBlockError,
-    StepReferenceError,
 )
 
 
@@ -457,7 +461,7 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     # Extract YAML metadata and Markdown body
     metadata, markdown_body = extract_yaml_and_markdown(markdown_path)
     markdown_body = render_jinja(markdown_body, metadata)
-    markdown_body = preprocess_step_references(markdown_body)
+    markdown_body = preprocess_reference_markers(markdown_body)
     markdown_body = ensure_blank_line_around_steps_markers(markdown_body)
     markdown_body = ensure_blank_line_after_list_continue_markers(markdown_body)
 
@@ -553,8 +557,14 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
         step_list_abstract_num_id = get_step_list_abstract_num_id(signature_template_path)
         print("Applying step-list numbering...")
         apply_section_scoped_step_numbering(temp_part_d, step_list_abstract_num_id)
-        resolve_step_references(temp_part_d)
-    except (StepBlockError, StepReferenceError) as exc:
+
+        narrow_section_bookmarks(temp_part_d)
+        resolve_reference_markers(temp_part_d, {
+            'fig': resolve_fig_reference,
+            'sec': resolve_sec_reference,
+            'step': resolve_step_reference,
+        })
+    except (StepBlockError, ReferenceResolutionError) as exc:
         print(f"Error: {exc}")
         sys.exit(1)
 
