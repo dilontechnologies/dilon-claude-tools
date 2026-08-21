@@ -1593,6 +1593,28 @@ def test_apply_section_scoped_step_numbering_unclosed_block_raises():
         check("END_STEPS" in str(exc), f"the error mentions the missing closing marker (got: {exc})")
 
 
+def test_apply_section_scoped_step_numbering_open_block_across_section_boundary_raises():
+    """Regression test: a @@@STEPS@@@ left open when a new ## heading
+    starts used to silently split into two separately-numbered
+    sequences (the paragraphs after the heading getting a fresh numId
+    keyed to the new section) instead of halting - a plausible
+    authoring slip (forgetting @@@END_STEPS@@@) that must not produce
+    silently wrong step numbers."""
+    md = (
+        "## Section One\n\n@@@STEPS@@@\n\n#. First\n#. Second\n\n"
+        "## Section Two\n\n#. Third\n\n@@@END_STEPS@@@\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_open_across_section_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
+    try:
+        step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
+        check(False, "an @@@STEPS@@@ left open across a ## section boundary raises StepBlockError")
+    except step_numbering.StepBlockError as exc:
+        check("section heading" in str(exc), f"the error mentions the section boundary (got: {exc})")
+
+
 def test_apply_section_scoped_step_numbering_skips_gracefully_without_abstract_id():
     md = "@@@STEPS@@@\n\n#. First\n\n@@@END_STEPS@@@\n"
     docx_path = TEST_OUTPUT_DIR / "step_numbering_no_abstract_test.docx"
@@ -2104,6 +2126,7 @@ def main():
     test_apply_section_scoped_step_numbering_reuses_numid_within_section()
     test_apply_section_scoped_step_numbering_restarts_across_sections()
     test_apply_section_scoped_step_numbering_unclosed_block_raises()
+    test_apply_section_scoped_step_numbering_open_block_across_section_boundary_raises()
     test_apply_section_scoped_step_numbering_skips_gracefully_without_abstract_id()
     test_apply_section_scoped_step_numbering_preserves_inline_formatting()
     test_resolve_step_reference_builds_composite_field()

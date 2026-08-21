@@ -232,6 +232,8 @@ def apply_section_scoped_step_numbering(docx_file, abstract_num_id):
         stripped = para.text.strip()
 
         if para.style is not None and para.style.name and para.style.name.startswith('Heading 2'):
+            if inside_steps:
+                raise StepBlockError("@@@STEPS@@@ has no matching @@@END_STEPS@@@ before the next section heading")
             section_index += 1
             continue
 

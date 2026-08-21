@@ -29,6 +29,12 @@ python scripts/generate_dilon_form.py <input.md> <output.docx> <base_template>
 
 After the script exits, verify the output file now exists. Report the script's stdout/stderr to the user on failure; report the output path on success.
 
+Compilation halts (non-zero exit, clear error message) rather than producing a silently-broken document for:
+- An ordered (`#.`) list nested more than three levels deep
+- A `@@@CONTINUE:#list:name@@@` marker whose `name` has no matching `[]{#list:name}` anchor, or a `[]{#list:name}` anchor declared more than once
+
+(Forms have no `@@@STEPS@@@`/`[](#fig:x)`/`[](#sec:x)`/`[](#step:x)` support - those are `dilon-document-compiler`-only, per its own `SKILL.md`.)
+
 ## Form-specific markdown
 
 Syntax for the three form-only markers (`FillLine`, `FieldGrid`, `Form_Section_Header`) is documented in the `dilon-document-form-writer` skill, along with everything else that applies to a form's markdown (headings, tables, YAML front matter, `@@@STYLE@@@`/`@@@TABLE_STYLE@@@`/`@@@TABLE_COLUMNS@@@`, body-level `{{field}}` substitution). Read there before authoring or editing a form's markdown — this skill only compiles it, it doesn't explain or validate marker syntax.

@@ -436,7 +436,7 @@ this instead of a plain `#.` list.
 
 **Referencing a step:**
 
-Give the step an anchor, the same way a figure gets `{#fig:label}`:
+Give the step an anchor with a bracketed-span id - `[]{#step:label}`, not a bare `{#step:label}` (a step is a list item, not a heading or an image, so it needs the same bracketed-span form as `{#list:name}` in Section 5.3, not the bare trailing-attribute form headings and images use):
 
 ```markdown
 #. Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}

@@ -734,8 +734,10 @@ def resolve_list_continuations(docx_file):
 
         label = match.group(1)
         bookmark_name = f'list:{label}'
+        if bookmark_name in duplicates:
+            continue
         owner_p = bookmark_owner.get(bookmark_name)
-        if bookmark_name in duplicates or owner_p is None:
+        if owner_p is None:
             missing.append(label)
             continue
 

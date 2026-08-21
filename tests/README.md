@@ -38,8 +38,10 @@ compiler coverage for:
 - Section-scoped `@@@STEPS@@@` numbering: automatic continuation across
   multiple blocks within one `##` section, restart at a new section,
   and a composite `Step <section>-<n>` cross-reference field
-  (`[](#step:label)`), including duplicate-anchor and missing-anchor
-  failure cases (`StepBlockError`/`StepReferenceError`)
+  (`[](#step:label)`); a malformed `@@@STEPS@@@`/`@@@END_STEPS@@@`
+  pairing (unclosed, nested, or left open across a `##` section
+  boundary) halts compilation with `StepBlockError` - duplicate/missing
+  `{#step:label}` anchors are covered by the generalized framework below
 - A generalized `[](#fig:label)`/`[](#sec:label)`/`[](#step:label)`
   cross-reference framework (`preprocess_reference_markers()`/
   `resolve_reference_markers()` in `lib/dilon_docx_common.py`, driven
