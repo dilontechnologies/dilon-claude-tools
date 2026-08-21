@@ -22,6 +22,7 @@ FORM_FIELD_RE = re.compile(
 )
 
 FORM_SECTION_HEADER_STYLE_NAME = "Form Section Header"
+FIELD_GRID_TEXT_STYLE_NAME = "Compact"
 
 BRACKET_ANNOTATION_RE = re.compile(r'^(.*?)\[([^\[\]]+)\]\s*$')
 
@@ -226,6 +227,18 @@ def resolve_title_flag(row_annotations):
     return row_annotations.get('title', '').strip().lower() in ('true', '1', 'yes')
 
 
+def _field_grid_text_style(document):
+    """Return the 'Compact' paragraph style FieldGrid cell text is set
+    in, or None (with a printed warning) if the base template doesn't
+    define it - degrades to the default paragraph style rather than
+    failing the compile."""
+    try:
+        return document.styles[FIELD_GRID_TEXT_STYLE_NAME]
+    except KeyError:
+        print(f"  FieldGrid: style {FIELD_GRID_TEXT_STYLE_NAME!r} not found in the template - leaving default styling")
+        return None
+
+
 def _build_field_grid_title_row_table(document, pairs, row_rows, row_width):
     """
     Build a title row: a 1-row, 1-column Word table spanning the full
@@ -251,6 +264,7 @@ def _build_field_grid_title_row_table(document, pairs, row_rows, row_width):
         print("  FieldGrid: label= ignored on a title row (no label/blank split to control)")
 
     pair_rows = resolve_pair_rows(pair_annotations, row_rows)
+    compact_style = _field_grid_text_style(document)
 
     table = document.add_table(rows=1, cols=1)
     table.style = 'Table Grid'
@@ -260,10 +274,15 @@ def _build_field_grid_title_row_table(document, pairs, row_rows, row_width):
     cell = table.rows[0].cells[0]
     cell.width = Inches(row_width)
     table.columns[0].width = Inches(row_width)
-    run = cell.paragraphs[0].add_run(label_text)
+    label_para = cell.paragraphs[0]
+    if compact_style is not None:
+        label_para.style = compact_style
+    run = label_para.add_run(label_text)
     run.bold = True
     for _ in range(pair_rows - 1):
-        cell.add_paragraph()
+        para = cell.add_paragraph()
+        if compact_style is not None:
+            para.style = compact_style
 
     return table
 
@@ -292,6 +311,7 @@ def build_field_grid_row_table(document, row, row_width):
         return _build_field_grid_title_row_table(document, pairs, row_rows, row_width)
 
     pair_widths = resolve_pair_widths(pairs, row_width)
+    compact_style = _field_grid_text_style(document)
 
     num_cols = len(pairs) if direction == 'v' else len(pairs) * 2
     table = document.add_table(rows=1, cols=num_cols)
@@ -307,9 +327,14 @@ def build_field_grid_row_table(document, row, row_width):
             cell = table.rows[0].cells[col_idx]
             cell.width = Inches(pair_width)
             table.columns[col_idx].width = Inches(pair_width)
-            cell.paragraphs[0].add_run(label_text)
+            label_para = cell.paragraphs[0]
+            if compact_style is not None:
+                label_para.style = compact_style
+            label_para.add_run(label_text)
             for _ in range(pair_rows):
-                cell.add_paragraph()
+                para = cell.add_paragraph()
+                if compact_style is not None:
+                    para.style = compact_style
             col_idx += 1
         else:
             label_width, blank_width = resolve_label_width(pair_annotations, pair_width, direction)
@@ -319,9 +344,17 @@ def build_field_grid_row_table(document, row, row_width):
             blank_cell.width = Inches(blank_width)
             table.columns[col_idx].width = Inches(label_width)
             table.columns[col_idx + 1].width = Inches(blank_width)
-            label_cell.paragraphs[0].add_run(label_text)
+            label_para = label_cell.paragraphs[0]
+            if compact_style is not None:
+                label_para.style = compact_style
+            label_para.add_run(label_text)
+            blank_para = blank_cell.paragraphs[0]
+            if compact_style is not None:
+                blank_para.style = compact_style
             for _ in range(pair_rows - 1):
-                blank_cell.add_paragraph()
+                para = blank_cell.add_paragraph()
+                if compact_style is not None:
+                    para.style = compact_style
             col_idx += 2
 
     return table

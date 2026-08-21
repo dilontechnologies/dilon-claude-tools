@@ -1001,6 +1001,34 @@ def _clear_container(container):
         container._element.remove(child)
 
 
+_TBL_PR_CHILD_ORDER = (
+    'w:tblStyle', 'w:tblpPr', 'w:tblOverlap', 'w:bidiVisual',
+    'w:tblStyleRowBandSize', 'w:tblStyleColBandSize', 'w:tblW', 'w:jc',
+    'w:tblCellSpacing', 'w:tblInd', 'w:tblBorders', 'w:shd', 'w:tblLayout',
+    'w:tblCellMar', 'w:tblLook', 'w:tblCaption', 'w:tblDescription',
+    'w:tblPrChange',
+)
+
+
+def _insert_tbl_pr_child(tbl_pr, child):
+    """Insert a w:tblPr child (e.g. w:tblBorders, w:tblCellMar) at its
+    schema-mandated position (CT_TblPrBase's xsd:sequence), rather than
+    appending it at the end. tbl_pr.append() puts new elements after
+    ones python-docx already added (e.g. w:tblLayout from
+    table.autofit=False, w:tblLook from add_table()'s default), which
+    produces an out-of-order tblPr that Word silently drops (e.g. the
+    borders defined in a misordered w:tblBorders never render) instead
+    of rejecting outright."""
+    order_index = {tag.split(':')[-1]: i for i, tag in enumerate(_TBL_PR_CHILD_ORDER)}
+    child_pos = order_index[child.tag.split('}')[-1]]
+    for existing in tbl_pr:
+        existing_pos = order_index.get(existing.tag.split('}')[-1], len(_TBL_PR_CHILD_ORDER))
+        if existing_pos > child_pos:
+            existing.addprevious(child)
+            return
+    tbl_pr.append(child)
+
+
 def add_complex_field(paragraph, instr, cached_text):
     """
     Append a complex Word field (begin/instrText/separate/cached-result/
@@ -1116,14 +1144,14 @@ def populate_header(document, metadata):
         edge_el.set(qn('w:space'), '0')
         edge_el.set(qn('w:color'), 'auto')
         borders.append(edge_el)
-    tbl_pr.append(borders)
+    _insert_tbl_pr_child(tbl_pr, borders)
     cell_mar = OxmlElement('w:tblCellMar')
     for side in ('top', 'left', 'bottom', 'right'):
         side_el = OxmlElement(f'w:{side}')
         side_el.set(qn('w:w'), '29')
         side_el.set(qn('w:type'), 'dxa')
         cell_mar.append(side_el)
-    tbl_pr.append(cell_mar)
+    _insert_tbl_pr_child(tbl_pr, cell_mar)
 
     row = table.rows[0]
     row.height = Inches(945 / 1440)
@@ -1250,7 +1278,7 @@ def populate_footer(document, metadata):
             edge_el.set(qn('w:space'), '4')
             edge_el.set(qn('w:color'), 'auto')
         borders.append(edge_el)
-    tbl_pr.append(borders)
+    _insert_tbl_pr_child(tbl_pr, borders)
 
     # Tight cell margins (matches the header table) so row 1's height
     # tracks the font size instead of Word's default ~0.08in cell padding.
@@ -1260,17 +1288,12 @@ def populate_footer(document, metadata):
         side_el.set(qn('w:w'), '29')
         side_el.set(qn('w:type'), 'dxa')
         cell_mar.append(side_el)
-    tbl_pr.append(cell_mar)
+    _insert_tbl_pr_child(tbl_pr, cell_mar)
 
     FOOTER_FONT_SIZE = Pt(9)
 
     def _add_footer_run(paragraph, text):
-        # The 'Normal' style's own default spacing (6pt before + 6pt
-        # after every paragraph) would otherwise pad out each footer
-        # line - zeroed here so the table hugs the text as tightly as
-        # the row-height settings above intend.
-        paragraph.paragraph_format.space_before = Pt(0)
-        paragraph.paragraph_format.space_after = Pt(0)
+        paragraph.style = document.styles['Footer']
         run = paragraph.add_run(text)
         run.font.size = FOOTER_FONT_SIZE
         return run
