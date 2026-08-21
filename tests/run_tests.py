@@ -1765,6 +1765,47 @@ def test_compile_broken_reference_fails_clearly():
           "the failure message names the missing label")
 
 
+def test_compile_duplicate_sec_anchor_fails_clearly():
+    markdown = SAMPLE_MARKDOWN + (
+        '\n## One {#sec:dup}\n\nText.\n\n## Two {#sec:dup}\n\nSee [](#sec:dup).\n'
+    )
+    input_md = TEST_OUTPUT_DIR / "compile_test_duplicate_sec_anchor.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_duplicate_sec_anchor.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode != 0, "compiler exits non-zero for a duplicate {#sec:x} anchor")
+    check("dup" in result.stderr.lower() or "dup" in result.stdout.lower(),
+          "the failure message names the duplicated label")
+
+
+def test_compile_duplicate_fig_anchor_fails_clearly():
+    images_dir = TEST_OUTPUT_DIR / "dup_fig_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "a.png").write_bytes(make_test_png())
+    (images_dir / "b.png").write_bytes(make_test_png())
+
+    markdown = SAMPLE_MARKDOWN + (
+        '\n![First.](dup_fig_images/a.png){#fig:dup}\n\n'
+        '![Second.](dup_fig_images/b.png){#fig:dup}\n\n'
+        'See [](#fig:dup).\n'
+    )
+    input_md = TEST_OUTPUT_DIR / "compile_test_duplicate_fig_anchor.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_duplicate_fig_anchor.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode != 0, "compiler exits non-zero for a duplicate {#fig:x} anchor")
+    check("dup" in result.stderr.lower() or "dup" in result.stdout.lower(),
+          "the failure message names the duplicated label")
+
+
 def test_validate_list_nesting_depth_passes_at_three_levels():
     md = (
         "#. Top\n"
@@ -2070,6 +2111,8 @@ def main():
     test_compile_duplicate_step_anchor_fails_clearly()
     test_compile_full_cross_reference_set_end_to_end()
     test_compile_broken_reference_fails_clearly()
+    test_compile_duplicate_sec_anchor_fails_clearly()
+    test_compile_duplicate_fig_anchor_fails_clearly()
     test_validate_list_nesting_depth_passes_at_three_levels()
     test_validate_list_nesting_depth_rejects_four_levels()
     test_validate_list_nesting_depth_ignores_bullet_lists()

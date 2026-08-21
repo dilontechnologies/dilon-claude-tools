@@ -40,9 +40,18 @@ compiler coverage for:
   and a composite `Step <section>-<n>` cross-reference field
   (`[](#step:label)`), including duplicate-anchor and missing-anchor
   failure cases (`StepBlockError`/`StepReferenceError`)
-`STYLING_TEST_TEMPLATE.md`'s own "List Examples" and "Numbered Step
-List Examples" sections exercise the same features for manual
-Word-side (Ctrl+click, F9) verification.
+- A generalized `[](#fig:label)`/`[](#sec:label)`/`[](#step:label)`
+  cross-reference framework (`preprocess_reference_markers()`/
+  `resolve_reference_markers()` in `lib/dilon_docx_common.py`, driven
+  by a per-type registry): figure and section bookmarks are narrowed
+  post-conversion (`apply_figure_captions()`/`narrow_section_bookmarks()`)
+  so a `REF` field against them can't pull in unrelated caption/body
+  text, and an unresolved or duplicate `fig:`/`sec:`/`step:` anchor
+  halts compilation with `ReferenceResolutionError`/`StepBlockError`
+  rather than degrading silently
+`STYLING_TEST_TEMPLATE.md`'s own "List Examples", "Numbered Step
+List Examples", and "Figures and Images" sections exercise the same
+features for manual Word-side (Ctrl+click, F9) verification.
 
 ## Running Tests
 

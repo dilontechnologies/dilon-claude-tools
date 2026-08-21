@@ -231,7 +231,9 @@ An interrupting paragraph describing what comes next.
 A forward reference, resolved before its target step is even declared
 below - proving the reference is a live field keyed on the step's
 bookmark, not on document order: see [](#step:hold-board-by-edges) in
-the "Cross-References" section below.
+the "Cross-References" section below. The same is true for figures and
+sections: see [](#fig:i2c-bus-topology) and [](#sec:figures-and-images)
+below, both resolved here even though neither target has appeared yet.
 
 ### Basic Sequence with Nesting
 
@@ -290,7 +292,8 @@ the same step referenced a second time in one sentence.
 
 Supplying real link text instead of an empty one is left completely
 untouched, exactly like a figure or section cross-reference: see
-[the board-handling step](#step:hold-board-by-edges) above.
+[the board-handling step](#step:hold-board-by-edges) above, or
+[the Figures and Images section](#sec:figures-and-images) below.
 
 ### Syntax Shown as a Documentation Example
 
@@ -320,13 +323,17 @@ of how far the previous section's steps counted:
 
 @@@END_STEPS@@@
 
-## Figures and Images
+## Figures and Images {#sec:figures-and-images}
+
+This section itself carries a `{#sec:figures-and-images}` id, matching
+the forward reference above: see [](#sec:figures-and-images) for an
+empty-text live reference back to this same section.
 
 ### Figure with Caption
 
 ![Complete I2C Bus Topology showing nRF52832 master connected to all peripheral devices.](diagrams/placeholder_diagram.png){#fig:i2c-bus-topology}
 
-**Note**: The caption above is auto-numbered by the compiler - no number was typed in the markdown. See [the figure](#fig:i2c-bus-topology) for an example of a working figure cross-reference.
+**Note**: The caption above is auto-numbered by the compiler - no number was typed in the markdown. See [the figure](#fig:i2c-bus-topology) for an example of a working figure cross-reference, or [](#fig:i2c-bus-topology) for the same figure referenced with an empty-text link (renders as a live "Figure N.M").
 
 ### Second Figure Example
 
@@ -758,6 +765,9 @@ Check the following in the generated Word document:
 - [ ] Tables display correct column alignment (left, center, right)
 - [ ] Figures display correctly with italicized, centered "Figure N.M - Description" captions - no manually-typed numbers, no missing/doubled numbers
 - [ ] Ctrl+click on "the figure" in the "Figure with Caption" note jumps to that figure
+- [ ] Ctrl+click on both empty-text figure references (the forward reference in "Numbered Step List Examples" and the one in the "Figure with Caption" note) jumps to that figure, each showing the correct live "Figure N.M" text
+- [ ] Ctrl+click on both empty-text section references to "Figures and Images" (the forward reference above, and the self-reference in that section's own intro) jumps to that section, each showing the correct live "Section N" text
+- [ ] "the Figures and Images section" (real link text, under "Cross-References") renders as a plain hyperlink, not a live section-number field
 - [ ] "Ordered Lists" renders auto-numbered (no hand-typed digits) via the "Dilon Step List" style, visually consistent with the step lists below
 - [ ] "Three-level nested ordered list" shows correct dotted-decimal numbering (`1.`, `1.1.`, `1.1.1.`) at all three levels
 - [ ] "Interrupted and continued ordered list" continues from 3 (not restart at 1) across the interrupting paragraph

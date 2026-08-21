@@ -36,8 +36,8 @@ After the script exits, verify the output file now exists. Report the script's s
 Compilation halts (non-zero exit, clear error message) rather than producing a silently-broken document for:
 - An ordered (`#.`) list nested more than three levels deep
 - A `@@@CONTINUE:#list:name@@@` marker whose `name` has no matching `[]{#list:name}` anchor, or a `[]{#list:name}` anchor declared more than once
-- A `[](#step:label)` reference with no matching `{#step:label}` anchor, or a `{#step:label}` anchor declared more than once
 - A malformed `@@@STEPS@@@`/`@@@END_STEPS@@@` pairing (unclosed or nested)
+- A `[](#fig:label)`, `[](#sec:label)`, or `[](#step:label)` reference with no matching `{#fig:label}`/`{#sec:label}`/`{#step:label}` anchor anywhere in the document, or such an anchor declared more than once
 
 ## Input format reference
 
