@@ -1295,6 +1295,32 @@ def test_apply_figure_captions_narrowing_is_noop_without_fig_id():
     check('bookmarkStart' not in xml, "no bookmark is fabricated for a figure with no {#fig:...} id")
 
 
+def test_narrow_section_bookmarks_shrinks_to_heading_only():
+    md = "## Section One {#sec:one}\n\nSome body text.\n\n## Section Two {#sec:two}\n\nMore body text.\n"
+    docx_path = TEST_OUTPUT_DIR / "sec_bookmark_narrow_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    count = dilon_docx_common.narrow_section_bookmarks(docx_path)
+    check(count == 2, f"both section bookmarks are narrowed (got {count})")
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    one_start = xml.find('w:name="sec:one"')
+    body_text_pos = xml.find('Some body text.')
+    check(one_start != -1 and body_text_pos != -1, "both markers present")
+    one_end_search_region = xml[one_start:body_text_pos]
+    check('bookmarkEnd' in one_end_search_region, "sec:one's bookmarkEnd now closes before the section's body text")
+
+
+def test_narrow_section_bookmarks_ignores_headings_without_sec_id():
+    md = "## Plain Heading\n\nBody text.\n"
+    docx_path = TEST_OUTPUT_DIR / "sec_bookmark_no_id_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    count = dilon_docx_common.narrow_section_bookmarks(docx_path)
+    check(count == 0, f"a heading with no {{#sec:...}} id is left alone (got count={count})")
+
+
 def test_heading_auto_numbering():
     """Render test: headings written WITHOUT manual numbers (per the
     updated MARKDOWN_STYLING_GUIDE.md convention) must come out of Pandoc
@@ -1959,6 +1985,8 @@ def main():
     test_figure_auto_numbering_consecutive_images_no_blank_line()
     test_apply_figure_captions_narrows_bookmark_to_number_only()
     test_apply_figure_captions_narrowing_is_noop_without_fig_id()
+    test_narrow_section_bookmarks_shrinks_to_heading_only()
+    test_narrow_section_bookmarks_ignores_headings_without_sec_id()
     test_get_step_list_abstract_num_id_found()
     test_get_step_list_abstract_num_id_missing_style()
     test_create_num_instance_first_allocation()

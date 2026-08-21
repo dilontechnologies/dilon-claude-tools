@@ -778,6 +778,40 @@ def resolve_list_continuations(docx_file):
     return resolved
 
 
+def narrow_section_bookmarks(docx_file):
+    """
+    Narrows every sec:label bookmark (from `## Heading {#sec:label}`)
+    from Pandoc's default whole-section span down to wrapping only the
+    heading paragraph itself - verified empirically against
+    TEMPLATE_Word_Base.docx that Pandoc's own bookmark for a heading id
+    spans from the heading through the end of that section's content,
+    which would pull an entire section's body text into a REF field
+    otherwise. See spec SS7.
+    """
+    from docx.oxml.ns import qn
+
+    doc = Document(docx_file)
+    body = doc.element.body
+
+    count = 0
+    for para in doc.paragraphs:
+        style_name = para.style.name if para.style else None
+        if not (style_name and style_name.startswith('Heading')):
+            continue
+
+        bookmark_start_el = _find_bookmark_start_before(para._p, 'sec:')
+        if bookmark_start_el is None:
+            continue
+
+        _narrow_bookmark(body, bookmark_start_el, para._p, para._p)
+        count += 1
+
+    if count:
+        doc.save(docx_file)
+        print(f"  Narrowed {count} section bookmark(s) to their heading paragraph")
+    return count
+
+
 def center_image_paragraphs(docx_file):
     """
     Center every paragraph that contains an inline image, captioned or
