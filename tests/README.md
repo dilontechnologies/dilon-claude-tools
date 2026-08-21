@@ -25,6 +25,20 @@ Python validation script that validates generated outputs:
 ### `STYLING_TEST_TEMPLATE.md` / `STYLING_TEST_TEMPLATE.docx`
 Example template files used to test styling and compilation features.
 
+**Note:** `run_tests.py` has grown well beyond the 6-check summary below
+- it now also directly unit-tests helpers in `lib/dilon_docx_common.py`
+and `skills/dilon-document-compiler/scripts/step_numbering.py` (figure/
+step numbering, `@@@STEPS@@@` handling), and includes end-to-end
+compiler coverage for:
+- `#.` ordered lists, restyled onto the shared "Dilon Step List" style
+- Three-level ordered-list nesting cap (a 4th level fails compilation
+  with a clear error)
+- List continuation (`[]{#list:name}` / `@@@CONTINUE:#list:name@@@`),
+  including missing-anchor and duplicate-anchor failure cases
+`STYLING_TEST_TEMPLATE.md`'s own "List Examples" and "Numbered Step
+List Examples" sections exercise the same features for manual
+Word-side (Ctrl+click, F9) verification.
+
 ## Running Tests
 
 Run all tests from the repository root:

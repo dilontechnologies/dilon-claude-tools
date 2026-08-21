@@ -172,23 +172,42 @@ Nested unordered list:
 
 ### Ordered Lists
 
-Simple numbered list:
+Simple auto-numbered list:
 
-1. First step
-2. Second step
-3. Third step
+#. First step
+#. Second step
+#. Third step
 
-Ordered list with nested bullets:
+Auto-numbered list with nested bullets:
 
-1. Initialize I2C bus
-   - Set clock frequency to 400 kHz
-   - Enable internal pull-ups
-2. Scan for devices
-   - Check addresses 0x00-0x7F
-   - Record responding devices
-3. Configure each device
-   - Write control registers
-   - Verify configuration
+#. Initialize I2C bus
+    - Set clock frequency to 400 kHz
+    - Enable internal pull-ups
+#. Scan for devices
+    - Check addresses 0x00-0x7F
+    - Record responding devices
+#. Configure each device
+    - Write control registers
+    - Verify configuration
+
+Three-level nested ordered list:
+
+#. Top level item
+    #. Second level item
+        #. Third level item
+    #. Second level item, sibling
+#. Top level item, sibling
+
+Interrupted and continued ordered list:
+
+#. First item
+#. Second item []{#list:i2c-setup}
+
+An interrupting paragraph describing what comes next.
+
+@@@CONTINUE:#list:i2c-setup@@@
+#. Third item (continues from 2, not a restart at 1)
+#. Fourth item
 
 ### Definition Lists
 
@@ -737,6 +756,9 @@ Check the following in the generated Word document:
 - [ ] Tables display correct column alignment (left, center, right)
 - [ ] Figures display correctly with italicized, centered "Figure N.M - Description" captions - no manually-typed numbers, no missing/doubled numbers
 - [ ] Ctrl+click on "the figure" in the "Figure with Caption" note jumps to that figure
+- [ ] "Ordered Lists" renders auto-numbered (no hand-typed digits) via the "Dilon Step List" style, visually consistent with the step lists below
+- [ ] "Three-level nested ordered list" shows correct dotted-decimal numbering (`1.`, `1.1.`, `1.1.1.`) at all three levels
+- [ ] "Interrupted and continued ordered list" continues from 3 (not restart at 1) across the interrupting paragraph
 - [ ] "Numbered Step List Examples" steps show native, correctly-nested dotted-decimal numbers (`1.`, `1.1`, `1.2`) - no manually-typed digits
 - [ ] The "Interrupted Sequence with `continue`" steps continue from 2 (not restart at 1) despite the intervening NOTE
 - [ ] The "Digit-Adjacent Step Text" steps render correctly - no corrupted/skipped numbers from the "5 minutes"/"24 AWG" text
