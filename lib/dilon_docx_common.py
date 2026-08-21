@@ -391,6 +391,62 @@ def add_field_simple_run(paragraph, instr, cached_text):
     paragraph._p.append(fld)
 
 
+def _narrow_bookmark(body, bookmark_start_el, new_start_anchor_el, new_end_anchor_el):
+    """
+    Removes bookmark_start_el and its matching bookmarkEnd (same
+    w:id - bookmarkEnd carries no name, only bookmarkStart does, so
+    they're paired by id) from wherever they currently sit, then
+    re-inserts a fresh bookmarkStart/bookmarkEnd pair of the same name
+    immediately before new_start_anchor_el and immediately after
+    new_end_anchor_el. Works whether the anchors are paragraph-level
+    (narrowing a whole-section bookmark down to one heading paragraph)
+    or run-level (narrowing a figure's image+caption bookmark down to
+    just its number's field runs) - lxml sibling insertion doesn't
+    care which level it operates at, only that both anchors share the
+    same parent as each other.
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    bookmark_id = bookmark_start_el.get(qn('w:id'))
+    name = bookmark_start_el.get(qn('w:name'))
+    bookmark_end_el = None
+    for el in body.iter(qn('w:bookmarkEnd')):
+        if el.get(qn('w:id')) == bookmark_id:
+            bookmark_end_el = el
+            break
+
+    bookmark_start_el.getparent().remove(bookmark_start_el)
+    if bookmark_end_el is not None:
+        bookmark_end_el.getparent().remove(bookmark_end_el)
+
+    new_start = OxmlElement('w:bookmarkStart')
+    new_start.set(qn('w:id'), bookmark_id)
+    new_start.set(qn('w:name'), name)
+    new_end = OxmlElement('w:bookmarkEnd')
+    new_end.set(qn('w:id'), bookmark_id)
+
+    new_start_anchor_el.addprevious(new_start)
+    new_end_anchor_el.addnext(new_end)
+    return name
+
+
+def _find_bookmark_start_before(element, prefix):
+    """Walks backward through consecutive <w:bookmarkStart> siblings
+    immediately preceding element, returning the first whose name
+    starts with prefix (e.g. 'fig:'), or None if none match before a
+    non-bookmark sibling is hit."""
+    from docx.oxml.ns import qn
+
+    prev = element.getprevious()
+    while prev is not None and prev.tag == qn('w:bookmarkStart'):
+        name = prev.get(qn('w:name'))
+        if name and name.startswith(prefix):
+            return prev
+        prev = prev.getprevious()
+    return None
+
+
 def apply_figure_captions(docx_file):
     """
     Turn Pandoc's implicit-figure caption paragraphs into Word-native,
@@ -429,14 +485,22 @@ def apply_figure_captions(docx_file):
         for run in list(para.runs):
             run._element.getparent().remove(run._element)
 
+        image_para_el = para._p.getprevious()
+        bookmark_start_el = _find_bookmark_start_before(image_para_el, 'fig:') if image_para_el is not None else None
+
         para.style = doc.styles['Caption']
         para.add_run('Figure ')
+        figure_start_el = para._p[-1]
         add_field_simple_run(para, ' STYLEREF 2 \\s ', '1')
         para.add_run('.')
         add_field_simple_run(para, ' SEQ Figure \\* ARABIC \\s 2 ', '1')
+        figure_end_el = para._p[-1]
         if description:
             para.add_run(f' - {description}')
         count += 1
+
+        if bookmark_start_el is not None:
+            _narrow_bookmark(doc.element.body, bookmark_start_el, figure_start_el, figure_end_el)
 
     if count:
         doc.save(docx_file)

@@ -1258,6 +1258,43 @@ def test_figure_auto_numbering_consecutive_images_no_blank_line():
     check(xml.count('<a:blip') == 2, f"both images are still embedded (got {xml.count('<a:blip')})")
 
 
+def test_apply_figure_captions_narrows_bookmark_to_number_only():
+    images_dir = TEST_OUTPUT_DIR / "fig_bookmark_narrow_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    md = "![A test caption.](fig_bookmark_narrow_images/test.png){#fig:my-label}\n"
+    docx_path = TEST_OUTPUT_DIR / "fig_bookmark_narrow_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE, resource_dir=TEST_OUTPUT_DIR)
+    dilon_docx_common.apply_figure_captions(docx_path)
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+
+    check('w:name="fig:my-label"' in xml, "the fig:my-label bookmark still exists after narrowing")
+    drawing_pos = xml.find('<w:drawing>')
+    bookmark_pos = xml.find('w:name="fig:my-label"')
+    check(bookmark_pos > drawing_pos, "the bookmark now starts AFTER the image, not before it")
+    caption_pos = xml.find('Figure ')
+    check(bookmark_pos != -1 and caption_pos != -1 and abs(bookmark_pos - caption_pos) < 60,
+          "the bookmark sits immediately around the 'Figure ' text, not far from it")
+
+
+def test_apply_figure_captions_narrowing_is_noop_without_fig_id():
+    images_dir = TEST_OUTPUT_DIR / "fig_bookmark_no_id_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    md = "![A caption with no id.](fig_bookmark_no_id_images/test.png)\n"
+    docx_path = TEST_OUTPUT_DIR / "fig_bookmark_no_id_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE, resource_dir=TEST_OUTPUT_DIR)
+    dilon_docx_common.apply_figure_captions(docx_path)  # should not raise
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('bookmarkStart' not in xml, "no bookmark is fabricated for a figure with no {#fig:...} id")
+
+
 def test_heading_auto_numbering():
     """Render test: headings written WITHOUT manual numbers (per the
     updated MARKDOWN_STYLING_GUIDE.md convention) must come out of Pandoc
@@ -1920,6 +1957,8 @@ def main():
     test_heading_auto_numbering()
     test_figure_auto_numbering()
     test_figure_auto_numbering_consecutive_images_no_blank_line()
+    test_apply_figure_captions_narrows_bookmark_to_number_only()
+    test_apply_figure_captions_narrowing_is_noop_without_fig_id()
     test_get_step_list_abstract_num_id_found()
     test_get_step_list_abstract_num_id_missing_style()
     test_create_num_instance_first_allocation()
