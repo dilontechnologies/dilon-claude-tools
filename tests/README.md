@@ -35,6 +35,11 @@ compiler coverage for:
   with a clear error)
 - List continuation (`[]{#list:name}` / `@@@CONTINUE:#list:name@@@`),
   including missing-anchor and duplicate-anchor failure cases
+- Section-scoped `@@@STEPS@@@` numbering: automatic continuation across
+  multiple blocks within one `##` section, restart at a new section,
+  and a composite `Step <section>-<n>` cross-reference field
+  (`[](#step:label)`), including duplicate-anchor and missing-anchor
+  failure cases (`StepBlockError`/`StepReferenceError`)
 `STYLING_TEST_TEMPLATE.md`'s own "List Examples" and "Numbered Step
 List Examples" sections exercise the same features for manual
 Word-side (Ctrl+click, F9) verification.
