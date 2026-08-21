@@ -445,6 +445,275 @@ def apply_figure_captions(docx_file):
     return count
 
 
+class ListNestingError(ValueError):
+    """Raised when an ordered list (plain #. or, later, a step list)
+    nests more than three levels deep - MARKDOWN_STYLING_GUIDE.md's
+    documented cap. Bullet lists are not subject to this cap - only
+    lists backed by a decimal-numbered abstractNum (Pandoc's #.
+    auto-number marker, or the Dilon Step List numbering added in a
+    later plan)."""
+
+
+def _num_id_to_abstract_map(numbering_element):
+    """Maps every <w:num numId="..."> in numbering_element to the
+    <w:abstractNum abstractNumId="..."> it references."""
+    from docx.oxml.ns import qn
+
+    mapping = {}
+    for num_el in numbering_element.findall(qn('w:num')):
+        abstract_ref = num_el.find(qn('w:abstractNumId'))
+        if abstract_ref is not None:
+            mapping[num_el.get(qn('w:numId'))] = abstract_ref.get(qn('w:val'))
+    return mapping
+
+
+def _decimal_abstract_num_ids(numbering_element):
+    """Returns the set of abstractNumIds whose level-0 numFmt is
+    "decimal" - Pandoc's own native #. auto-number marker (verified
+    against TEMPLATE_Word_Base.docx: a #. list gets numFmt="decimal",
+    a - bullet list gets numFmt="bullet", both under the same "Compact"
+    paragraph style - style alone can't distinguish them, numFmt can)."""
+    from docx.oxml.ns import qn
+
+    decimal_ids = set()
+    for abstract_el in numbering_element.findall(qn('w:abstractNum')):
+        abstract_id = abstract_el.get(qn('w:abstractNumId'))
+        for lvl_el in abstract_el.findall(qn('w:lvl')):
+            if lvl_el.get(qn('w:ilvl')) != '0':
+                continue
+            num_fmt_el = lvl_el.find(qn('w:numFmt'))
+            if num_fmt_el is not None and num_fmt_el.get(qn('w:val')) == 'decimal':
+                decimal_ids.add(abstract_id)
+            break
+    return decimal_ids
+
+
+def _paragraph_num_id_and_ilvl(p_element):
+    """Returns (numId, ilvl) as strings for a <w:p> oxml element carrying
+    list numbering, or (None, None) if it carries none."""
+    from docx.oxml.ns import qn
+
+    p_pr = p_element.find(qn('w:pPr'))
+    if p_pr is None:
+        return None, None
+    num_pr = p_pr.find(qn('w:numPr'))
+    if num_pr is None:
+        return None, None
+    num_id_el = num_pr.find(qn('w:numId'))
+    ilvl_el = num_pr.find(qn('w:ilvl'))
+    num_id = num_id_el.get(qn('w:val')) if num_id_el is not None else None
+    ilvl = ilvl_el.get(qn('w:val')) if ilvl_el is not None else None
+    return num_id, ilvl
+
+
+def validate_list_nesting_depth(docx_file, max_ilvl=2):
+    """
+    Fails loudly if any ordered-list paragraph (Pandoc's native #.
+    marker, or - in a later plan - a Dilon step list) in docx_file
+    nests deeper than max_ilvl (0-indexed; the default 2 means three
+    levels total: 0, 1, 2). Bullet lists are exempt - the three-level
+    cap is a step/ordered-list authoring rule
+    (MARKDOWN_STYLING_GUIDE.md SS5), not a general Word-document rule.
+
+    Raises ListNestingError listing (up to 5 of) the offending items'
+    own text, rather than letting Word render a 4th-level item with
+    undefined/incorrect numbering.
+    """
+    doc = Document(docx_file)
+    numbering_part = doc.part.numbering_part
+    if numbering_part is None:
+        return
+    numbering_element = numbering_part.element
+
+    decimal_ids = _decimal_abstract_num_ids(numbering_element)
+    num_id_to_abstract = _num_id_to_abstract_map(numbering_element)
+
+    offenders = []
+    for para in doc.paragraphs:
+        num_id, ilvl = _paragraph_num_id_and_ilvl(para._p)
+        if num_id is None or ilvl is None:
+            continue
+        if num_id_to_abstract.get(num_id) not in decimal_ids:
+            continue
+        if int(ilvl) > max_ilvl:
+            offenders.append(para.text.strip() or '(empty)')
+
+    if offenders:
+        shown = "; ".join(repr(t) for t in offenders[:5])
+        more = f" (+{len(offenders) - 5} more)" if len(offenders) > 5 else ""
+        raise ListNestingError(
+            f"Ordered list nested more than {max_ilvl + 1} levels deep at: "
+            f"{shown}{more}. Reformat as separate lists or sub-bullets - "
+            f"see MARKDOWN_STYLING_GUIDE.md Section 5."
+        )
+
+
+def remap_ordered_lists_to_dilon_step_list(docx_file):
+    """
+    Restyles every paragraph carrying Pandoc's native #. ordered-list
+    numbering (MARKDOWN_STYLING_GUIDE.md SS5.2) onto the "Dilon Step
+    List" Word style, leaving Pandoc's own numId/ilvl completely
+    untouched - Pandoc's default ordered-list numbering is already
+    correct dotted-decimal and correctly continues counting through
+    nested sub-lists (verified against TEMPLATE_Word_Base.docx), so
+    this only needs to change how the paragraph *looks*, not
+    reimplement how it's numbered.
+
+    Distinguishes an ordered list from a bullet list by numFmt (see
+    _decimal_abstract_num_ids) rather than by paragraph style, since
+    Pandoc gives both the same "Compact" style - style alone can't
+    tell them apart.
+    """
+    doc = Document(docx_file)
+    numbering_part = doc.part.numbering_part
+    if numbering_part is None:
+        return 0
+    numbering_element = numbering_part.element
+
+    decimal_ids = _decimal_abstract_num_ids(numbering_element)
+    num_id_to_abstract = _num_id_to_abstract_map(numbering_element)
+
+    count = 0
+    for para in doc.paragraphs:
+        num_id, _ = _paragraph_num_id_and_ilvl(para._p)
+        if num_id is None:
+            continue
+        if num_id_to_abstract.get(num_id) not in decimal_ids:
+            continue
+        para.style = doc.styles['Dilon Step List']
+        count += 1
+
+    if count:
+        doc.save(docx_file)
+        print(f"  Applied 'Dilon Step List' style to {count} ordered-list paragraph(s)")
+    return count
+
+
+_LIST_CONTINUE_MARKER_RE = re.compile(r'(?m)^([ \t]*@@@CONTINUE:#list:[\w-]+@@@[ \t]*)\n(?!\n)')
+
+
+def ensure_blank_line_after_list_continue_markers(markdown_text):
+    """
+    Ensures a blank line separates a @@@CONTINUE:#list:name@@@ marker
+    line from the ordered list that follows it, mirroring
+    ensure_blank_line_after_table_markers()'s reasoning: without a
+    blank line, Pandoc may fold the marker line into the list's own
+    first item (or otherwise fail to treat the list as a fresh block
+    with its own numId) instead of leaving it as a separate plain-text
+    paragraph resolve_list_continuations() can find on its own.
+    """
+    return _LIST_CONTINUE_MARKER_RE.sub(lambda m: m.group(1) + '\n\n', markdown_text)
+
+
+_LIST_CONTINUE_RE = re.compile(r'^@@@CONTINUE:#list:([\w-]+)@@@$')
+
+
+class ListContinuationError(ValueError):
+    """Raised when @@@CONTINUE:#list:name@@@ references a {#list:name}
+    anchor that doesn't exist anywhere in the document, or when the
+    same {#list:name} label is declared more than once."""
+
+
+def resolve_list_continuations(docx_file):
+    """
+    Finds every @@@CONTINUE:#list:name@@@ marker paragraph in docx_file
+    and makes the very next ordered-list paragraph after it continue
+    counting from the {#list:name}-tagged paragraph's own list, by
+    rewriting every paragraph currently sharing the *new* block's numId
+    onto the *tagged* block's numId - native Word numbering then
+    continues correctly because both blocks share one numId (same
+    mechanism step_numbering.py's apply_step_numbering() already uses
+    for its own 'continue' support, keyed here by a bookmark instead of
+    a sentinel manifest).
+
+    {#list:name} is the same bracketed-span-with-id syntax already used
+    for {#fig:x}/{#step:x} - Pandoc turns it into a real bookmark on
+    its own; @@@CONTINUE:#list:name@@@ matches no markdown syntax, so
+    Pandoc passes it through untouched as a plain paragraph. Both
+    halves are resolved here, entirely post-conversion - no markdown
+    preprocessing needed beyond the blank-line normalization above.
+
+    Raises ListContinuationError - listing every marker with no
+    matching anchor, and every label declared more than once - rather
+    than degrading silently, matching this codebase's halt-on-broken-
+    reference convention for every other anchor type.
+    """
+    from docx.oxml.ns import qn
+
+    doc = Document(docx_file)
+    body = doc.element.body
+
+    bookmark_owner = {}
+    duplicates = set()
+    for bookmark_start in body.iter(qn('w:bookmarkStart')):
+        name = bookmark_start.get(qn('w:name'))
+        if not (name and name.startswith('list:')):
+            continue
+        if name in bookmark_owner:
+            duplicates.add(name)
+            continue
+        owner = bookmark_start
+        while owner is not None and owner.tag != qn('w:p'):
+            owner = owner.getparent()
+        if owner is not None:
+            bookmark_owner[name] = owner
+
+    paragraphs = list(doc.paragraphs)
+    missing = []
+    resolved = 0
+    markers_to_remove = []
+
+    for i, para in enumerate(paragraphs):
+        match = _LIST_CONTINUE_RE.match(para.text.strip())
+        if not match:
+            continue
+
+        label = match.group(1)
+        bookmark_name = f'list:{label}'
+        owner_p = bookmark_owner.get(bookmark_name)
+        if bookmark_name in duplicates or owner_p is None:
+            missing.append(label)
+            continue
+
+        source_num_id, _ = _paragraph_num_id_and_ilvl(owner_p)
+        if source_num_id is None:
+            missing.append(label)
+            continue
+
+        target_num_id = None
+        for later in paragraphs[i + 1:]:
+            target_num_id, _ = _paragraph_num_id_and_ilvl(later._p)
+            if target_num_id is not None:
+                break
+
+        if target_num_id is not None and target_num_id != source_num_id:
+            for p in doc.paragraphs:
+                num_id, _ = _paragraph_num_id_and_ilvl(p._p)
+                if num_id != target_num_id:
+                    continue
+                num_id_el = p._p.find(qn('w:pPr')).find(qn('w:numPr')).find(qn('w:numId'))
+                num_id_el.set(qn('w:val'), source_num_id)
+
+        markers_to_remove.append(para._p)
+        resolved += 1
+
+    if missing or duplicates:
+        parts = []
+        if missing:
+            parts.append("no matching {#list:...} anchor for: " + ", ".join(repr(m) for m in missing))
+        if duplicates:
+            parts.append("duplicate {#list:...} anchor(s): " + ", ".join(repr(d.split(':', 1)[1]) for d in sorted(duplicates)))
+        raise ListContinuationError("; ".join(parts))
+
+    for p_el in markers_to_remove:
+        p_el.getparent().remove(p_el)
+
+    if resolved:
+        doc.save(docx_file)
+        print(f"  Resolved {resolved} list continuation marker(s)")
+    return resolved
+
+
 def center_image_paragraphs(docx_file):
     """
     Center every paragraph that contains an inline image, captioned or

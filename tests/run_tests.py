@@ -23,6 +23,16 @@ from docx.shared import Inches
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "dilon-document-compiler" / "scripts"))
 import generate_dilon_doc as compiler
 import step_numbering
+import dilon_docx_common
+from dilon_docx_common import (
+    validate_list_nesting_depth,
+    ListNestingError,
+    remap_ordered_lists_to_dilon_step_list,
+    ensure_blank_line_after_list_continue_markers,
+    resolve_list_continuations,
+    ListContinuationError,
+    _paragraph_num_id_and_ilvl,
+)
 
 REPO_ROOT = Path(__file__).parent.parent
 TEST_OUTPUT_DIR = Path(__file__).parent / "test-output"
@@ -1719,6 +1729,155 @@ def test_compile_step_numbering_end_to_end():
     check('REF step:hold-board-by-edges \\r \\h' in xml, "the cross-reference resolves to a live REF field")
 
 
+def test_validate_list_nesting_depth_passes_at_three_levels():
+    md = (
+        "#. Top\n"
+        "    #. Second\n"
+        "        #. Third\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "nesting_ok_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    validate_list_nesting_depth(docx_path)  # should not raise
+
+
+def test_validate_list_nesting_depth_rejects_four_levels():
+    md = (
+        "#. Top\n"
+        "    #. Second\n"
+        "        #. Third\n"
+        "            #. Fourth\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "nesting_bad_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    try:
+        validate_list_nesting_depth(docx_path)
+        check(False, "a 4-level-deep ordered list raises ListNestingError")
+    except ListNestingError as exc:
+        check("Fourth" in str(exc), f"the error names the offending item's text (got: {exc})")
+
+
+def test_validate_list_nesting_depth_ignores_bullet_lists():
+    md = (
+        "- Top\n"
+        "    - Second\n"
+        "        - Third\n"
+        "            - Fourth\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "nesting_bullets_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    validate_list_nesting_depth(docx_path)  # bullets aren't capped - should not raise
+
+
+def test_remap_ordered_lists_restyles_decimal_paragraphs():
+    md = "#. First\n#. Second\n"
+    docx_path = TEST_OUTPUT_DIR / "remap_ordered_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    count = remap_ordered_lists_to_dilon_step_list(docx_path)
+    check(count == 2, f"both ordered-list paragraphs get restyled (got {count})")
+
+    doc = Document(docx_path)
+    step_styled = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List']
+    check(len(step_styled) == 2, "both paragraphs now carry the 'Dilon Step List' style")
+
+
+def test_remap_ordered_lists_leaves_bullets_alone():
+    md = "- First\n- Second\n"
+    docx_path = TEST_OUTPUT_DIR / "remap_bullets_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    count = remap_ordered_lists_to_dilon_step_list(docx_path)
+    check(count == 0, f"a bullet list is not restyled (got count={count})")
+
+    doc = Document(docx_path)
+    step_styled = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List']
+    check(len(step_styled) == 0, "no paragraph carries 'Dilon Step List' style")
+
+
+def test_remap_ordered_lists_preserves_native_numbering():
+    """The remap must only change *style*, never numId/ilvl - Pandoc's
+    own numbering is already numerically correct and must keep driving
+    the rendered number."""
+    md = "#. First\n#. Second\n    #. Nested\n#. Third\n"
+    docx_path = TEST_OUTPUT_DIR / "remap_preserves_numbering_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    before = [_paragraph_num_id_and_ilvl(p._p) for p in Document(docx_path).paragraphs]
+    remap_ordered_lists_to_dilon_step_list(docx_path)
+    after = [_paragraph_num_id_and_ilvl(p._p) for p in Document(docx_path).paragraphs]
+    check(before == after, f"numId/ilvl unchanged by the style remap (before={before}, after={after})")
+
+
+def test_ensure_blank_line_after_list_continue_marker_inserts_when_missing():
+    md = "@@@CONTINUE:#list:x@@@\n#. Third\n"
+    result = ensure_blank_line_after_list_continue_markers(md)
+    check(result == "@@@CONTINUE:#list:x@@@\n\n#. Third\n", f"a blank line is inserted (got {result!r})")
+
+
+def test_ensure_blank_line_after_list_continue_marker_idempotent():
+    md = "@@@CONTINUE:#list:x@@@\n\n#. Third\n"
+    result = ensure_blank_line_after_list_continue_markers(md)
+    check(result == md, "already-blank-line case is left unchanged")
+
+
+def test_resolve_list_continuations_reuses_numid():
+    md = (
+        "#. First\n"
+        "#. Second []{#list:cleaning-procedure}\n\n"
+        "Some interrupting paragraph.\n\n"
+    )
+    md = ensure_blank_line_after_list_continue_markers(
+        md + "@@@CONTINUE:#list:cleaning-procedure@@@\n#. Third\n#. Fourth\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "list_continue_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    resolved = resolve_list_continuations(docx_path)
+    check(resolved == 1, f"exactly one continuation marker resolved (got {resolved})")
+
+    doc = Document(docx_path)
+    check(all('@@@CONTINUE' not in p.text for p in doc.paragraphs), "the marker paragraph is removed")
+
+    num_ids = set()
+    for p in doc.paragraphs:
+        num_id, _ = _paragraph_num_id_and_ilvl(p._p)
+        if num_id is not None:
+            num_ids.add(num_id)
+    check(len(num_ids) == 1, f"both blocks now share exactly one numId (got {num_ids})")
+
+
+def test_resolve_list_continuations_missing_anchor_raises():
+    md = ensure_blank_line_after_list_continue_markers(
+        "@@@CONTINUE:#list:does-not-exist@@@\n#. Third\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "list_continue_missing_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    try:
+        resolve_list_continuations(docx_path)
+        check(False, "a @@@CONTINUE@@@ with no matching {#list:name} anchor raises ListContinuationError")
+    except ListContinuationError as exc:
+        check("does-not-exist" in str(exc), f"the error names the missing label (got: {exc})")
+
+
+def test_resolve_list_continuations_duplicate_anchor_raises():
+    md = (
+        "#. First []{#list:dup}\n\n"
+        "#. Second []{#list:dup}\n\n"
+    )
+    md = ensure_blank_line_after_list_continue_markers(
+        md + "@@@CONTINUE:#list:dup@@@\n#. Third\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "list_continue_duplicate_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    try:
+        resolve_list_continuations(docx_path)
+        check(False, "two {#list:dup} anchors raises ListContinuationError")
+    except ListContinuationError as exc:
+        check("dup" in str(exc), f"the error names the duplicated label (got: {exc})")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1813,6 +1972,17 @@ def main():
     test_resolve_step_references_missing_label_degrades_to_plain_text()
     test_resolve_step_references_resolves_multiple_in_same_paragraph()
     test_compile_step_numbering_end_to_end()
+    test_validate_list_nesting_depth_passes_at_three_levels()
+    test_validate_list_nesting_depth_rejects_four_levels()
+    test_validate_list_nesting_depth_ignores_bullet_lists()
+    test_remap_ordered_lists_restyles_decimal_paragraphs()
+    test_remap_ordered_lists_leaves_bullets_alone()
+    test_remap_ordered_lists_preserves_native_numbering()
+    test_ensure_blank_line_after_list_continue_marker_inserts_when_missing()
+    test_ensure_blank_line_after_list_continue_marker_idempotent()
+    test_resolve_list_continuations_reuses_numid()
+    test_resolve_list_continuations_missing_anchor_raises()
+    test_resolve_list_continuations_duplicate_anchor_raises()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")
