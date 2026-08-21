@@ -1375,247 +1375,120 @@ def test_create_num_instance_writes_start_override():
               "lvlOverride forces the level to start at 1")
 
 
-def test_preprocess_steps_unnamed_block():
-    md = "@@@STEPS@@@\n- First\n- Second\n@@@END_STEPS@@@\n"
-    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
-    check(len(manifest) == 2, f"2 steps recorded (got {len(manifest)})")
-    check(manifest[0]['sequence_key'] == manifest[1]['sequence_key'], "both steps in one unnamed block share a sequence key")
-    check(manifest[0]['depth'] == 0 and manifest[1]['depth'] == 0, "both steps are depth 0")
-    check('@@@STEPS@@@' not in new_md and '@@@END_STEPS@@@' not in new_md, "wrapper markers are stripped")
-    check('STEP0' in new_md and 'STEP1' in new_md, "each step line carries its own sentinel")
+def test_ensure_blank_line_around_steps_markers_inserts_both_sides():
+    md = "@@@STEPS@@@\n#. First\n#. Second\n@@@END_STEPS@@@\n"
+    result = step_numbering.ensure_blank_line_around_steps_markers(md)
+    check(result == "@@@STEPS@@@\n\n#. First\n#. Second\n\n@@@END_STEPS@@@\n",
+          f"blank lines inserted after @@@STEPS@@@ and before @@@END_STEPS@@@ (got {result!r})")
 
 
-def test_preprocess_steps_nesting():
-    md = "@@@STEPS@@@\n- First\n  - Sub of first\n- Second\n@@@END_STEPS@@@\n"
-    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
-    check([m['depth'] for m in manifest] == [0, 1, 0], f"depths reflect nesting (got {[m['depth'] for m in manifest]})")
+def test_ensure_blank_line_around_steps_markers_idempotent():
+    md = "@@@STEPS@@@\n\n#. First\n\n@@@END_STEPS@@@\n"
+    result = step_numbering.ensure_blank_line_around_steps_markers(md)
+    check(result == md, "already-blank-line case is left unchanged")
 
 
-def test_preprocess_steps_named_block():
-    md = "@@@STEPS: id=cleaning@@@\n- A\n@@@END_STEPS@@@\n"
-    _, manifest = step_numbering.preprocess_steps_markdown(md)
-    check(manifest[0]['sequence_key'] == 'cleaning', f"named block resolves to its declared name (got {manifest[0]['sequence_key']!r})")
-
-
-def test_preprocess_steps_bare_continue_resumes_most_recent_unnamed():
+def test_apply_section_scoped_step_numbering_single_section():
     md = (
-        "@@@STEPS@@@\n- A\n@@@END_STEPS@@@\n"
-        "Some interrupting prose.\n"
-        "@@@STEPS: continue@@@\n- B\n@@@END_STEPS@@@\n"
+        "## Section One\n\n"
+        "@@@STEPS@@@\n\n"
+        "#. First\n"
+        "#. Second\n"
+        "    #. Sub of second\n"
+        "\n@@@END_STEPS@@@\n"
     )
-    _, manifest = step_numbering.preprocess_steps_markdown(md)
-    check(manifest[0]['sequence_key'] == manifest[1]['sequence_key'], "bare continue resumes the most recently active (unnamed) sequence")
-
-
-def test_preprocess_steps_bare_continue_resumes_most_recent_named():
-    md = (
-        "@@@STEPS: id=cleaning@@@\n- A\n@@@END_STEPS@@@\n"
-        "@@@STEPS: continue@@@\n- B\n@@@END_STEPS@@@\n"
-    )
-    _, manifest = step_numbering.preprocess_steps_markdown(md)
-    check(manifest[0]['sequence_key'] == 'cleaning' and manifest[1]['sequence_key'] == 'cleaning',
-          "bare continue resumes the most recently active sequence even when it was named")
-
-
-def test_preprocess_steps_continue_named_across_other_sequences():
-    md = (
-        "@@@STEPS: id=cleaning@@@\n- A\n@@@END_STEPS@@@\n"
-        "@@@STEPS: id=curing@@@\n- X\n@@@END_STEPS@@@\n"
-        "@@@STEPS: continue=cleaning@@@\n- B\n@@@END_STEPS@@@\n"
-    )
-    _, manifest = step_numbering.preprocess_steps_markdown(md)
-    check(manifest[0]['sequence_key'] == 'cleaning' and manifest[2]['sequence_key'] == 'cleaning',
-          "continue=<name> resumes that specific sequence even after a different one ran in between")
-    check(manifest[1]['sequence_key'] == 'curing', "the intervening named sequence keeps its own distinct key")
-
-
-def test_preprocess_steps_unknown_continue_named_starts_fresh():
-    md = "@@@STEPS: continue=nonexistent@@@\n- A\n@@@END_STEPS@@@\n"
-    _, manifest = step_numbering.preprocess_steps_markdown(md)
-    check(len(manifest) == 1, "an unknown continue=<name> still produces a usable (freshly-started) sequence, not a crash")
-
-
-def test_preprocess_steps_bare_continue_with_nothing_to_continue():
-    md = "@@@STEPS: continue@@@\n- A\n@@@END_STEPS@@@\n"
-    _, manifest = step_numbering.preprocess_steps_markdown(md)
-    check(len(manifest) == 1, "a bare continue with nothing earlier still produces a usable (freshly-started) sequence, not a crash")
-
-
-def test_preprocess_steps_malformed_block_passes_through_unmodified():
-    md = "@@@STEPS@@@\nThis is not a bullet list.\n@@@END_STEPS@@@\n"
-    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
-    check(len(manifest) == 0, "a malformed block contributes nothing to the manifest")
-    check('@@@STEPS@@@' in new_md and 'This is not a bullet list.' in new_md,
-          "a malformed block is left completely untouched (markers included) rather than crashing")
-
-
-def test_preprocess_step_references_empty_link_becomes_sentinel():
-    md = "See [](#step:insert-carrier-boards) for details."
-    new_md = step_numbering.preprocess_step_references(md)
-    check('STEPREF:insert-carrier-boards' in new_md, "empty-text step link becomes a locatable sentinel")
-    check('[](#step:insert-carrier-boards)' not in new_md, "the original markdown link syntax is gone")
-
-
-def test_preprocess_step_references_leaves_real_link_text_untouched():
-    md = "See [step 4.2](#step:insert-carrier-boards) for details."
-    new_md = step_numbering.preprocess_step_references(md)
-    check(new_md == md, "a reference with real (non-empty) link text is left completely untouched")
-
-
-def test_preprocess_step_references_duplicate_label_does_not_raise():
-    """This test suite doesn't capture stdout (no existing test does -
-    see e.g. test_parse_column_widths_rejects_non_numeric, which checks
-    only the resulting behavior, never the printed warning text), so this
-    only confirms the warn-and-continue path doesn't crash. The warning
-    message itself is verified by reading the implementation in Step 3."""
-    md = "- First step. []{#step:dup}\n- Second step. []{#step:dup}\n"
-    result = step_numbering.preprocess_step_references(md)  # should not raise
-    check(result is not None, "a duplicate {#step:label} declaration degrades to a warning, not a crash")
-
-
-def test_apply_step_numbering_styles_and_links_paragraphs():
-    from docx import Document
-    md = "@@@STEPS@@@\n- First\n  - Sub\n- Third\n@@@END_STEPS@@@\n"
-    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
-    docx_path = TEST_OUTPUT_DIR / "step_numbering_apply_test.docx"
-    markdown_to_docx = compiler.markdown_to_docx
-    markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_single_section_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_step_numbering(docx_path, manifest, abstract_id)
+    count = step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
+    check(count == 3, f"all three step paragraphs get numbered (got {count})")
 
     doc = Document(docx_path)
-    step_paragraphs = [p for p in doc.paragraphs if p.text.strip() in ("First", "Sub", "Third")]
-    check(len(step_paragraphs) == 3, f"exactly 3 step paragraphs remain after sentinel cleanup (got {len(step_paragraphs)})")
-    check(all(p.style.name == 'Dilon Step List' for p in step_paragraphs), "every step paragraph carries the 'Dilon Step List' style")
-    check(all('STEP' not in p.text for p in step_paragraphs), "no sentinel text remains in any step paragraph's text")
+    check(all('@@@STEPS' not in p.text and '@@@END_STEPS' not in p.text for p in doc.paragraphs),
+          "both wrapper marker paragraphs are removed")
+    step_paras = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List']
+    check(len(step_paras) == 3, f"all three paragraphs carry the 'Dilon Step List' style (got {len(step_paras)})")
 
+
+def test_apply_section_scoped_step_numbering_reuses_numid_within_section():
+    md = (
+        "## Section One\n\n"
+        "@@@STEPS@@@\n\n#. First\n\n@@@END_STEPS@@@\n\n"
+        "An interrupting paragraph.\n\n"
+        "@@@STEPS@@@\n\n#. Second\n\n@@@END_STEPS@@@\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_two_blocks_one_section_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
+
+    doc = Document(docx_path)
+    num_ids = set()
+    for p in doc.paragraphs:
+        if p.style and p.style.name == 'Dilon Step List':
+            num_id, _ = dilon_docx_common._paragraph_num_id_and_ilvl(p._p)
+            num_ids.add(num_id)
+    check(len(num_ids) == 1, f"two separate @@@STEPS@@@ blocks in the same section share one numId (got {num_ids})")
+
+
+def test_apply_section_scoped_step_numbering_restarts_across_sections():
+    md = (
+        "## Section One\n\n@@@STEPS@@@\n\n#. First\n\n@@@END_STEPS@@@\n\n"
+        "## Section Two\n\n@@@STEPS@@@\n\n#. Second\n\n@@@END_STEPS@@@\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_two_sections_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
+
+    doc = Document(docx_path)
     num_ids = []
-    for p in step_paragraphs:
-        num_id_el = p._p.find('.//' + qn('w:numPr') + '/' + qn('w:numId'))
-        check(num_id_el is not None, f"paragraph {p.text!r} has a numId applied")
-        num_ids.append(num_id_el.get(qn('w:val')))
-    check(len(set(num_ids)) == 1, f"all 3 steps (same block) share one numId (got {num_ids})")
+    for p in doc.paragraphs:
+        if p.style and p.style.name == 'Dilon Step List':
+            num_id, _ = dilon_docx_common._paragraph_num_id_and_ilvl(p._p)
+            num_ids.append(num_id)
+    check(len(set(num_ids)) == 2, f"a new section gets a fresh numId (got {num_ids})")
 
 
-def test_apply_step_numbering_reuses_numid_for_continued_sequence():
-    from docx import Document
-    md = (
-        "@@@STEPS: id=cleaning@@@\n- A\n@@@END_STEPS@@@\n"
-        "@@@STEPS: continue=cleaning@@@\n- B\n@@@END_STEPS@@@\n"
-    )
-    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
-    docx_path = TEST_OUTPUT_DIR / "step_numbering_continue_test.docx"
-    markdown_to_docx = compiler.markdown_to_docx
-    markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+def test_apply_section_scoped_step_numbering_unclosed_block_raises():
+    md = "@@@STEPS@@@\n\n#. First\n"
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_unclosed_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_step_numbering(docx_path, manifest, abstract_id)
-
-    doc = Document(docx_path)
-    a_para = next(p for p in doc.paragraphs if p.text.strip() == "A")
-    b_para = next(p for p in doc.paragraphs if p.text.strip() == "B")
-    a_num = a_para._p.find('.//' + qn('w:numPr') + '/' + qn('w:numId')).get(qn('w:val'))
-    b_num = b_para._p.find('.//' + qn('w:numPr') + '/' + qn('w:numId')).get(qn('w:val'))
-    check(a_num == b_num, f"continued sequence reuses the same numId (got A={a_num}, B={b_num})")
+    try:
+        step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
+        check(False, "an @@@STEPS@@@ with no matching @@@END_STEPS@@@ raises StepBlockError")
+    except step_numbering.StepBlockError as exc:
+        check("END_STEPS" in str(exc), f"the error mentions the missing closing marker (got: {exc})")
 
 
-def test_apply_step_numbering_skips_gracefully_without_abstract_id():
-    """Regression test: apply_step_numbering used to leave the raw
-    sentinel visible in the compiled document ("STEP0Wear clean
-    gloves.") when the template lacks the numbering setup, instead of
-    degrading to plain unnumbered text like every other marker in this
-    codebase does on a malformed/unresolvable input."""
-    from docx import Document
-    md = "@@@STEPS@@@\n- First\n@@@END_STEPS@@@\n"
-    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
+def test_apply_section_scoped_step_numbering_skips_gracefully_without_abstract_id():
+    md = "@@@STEPS@@@\n\n#. First\n\n@@@END_STEPS@@@\n"
     docx_path = TEST_OUTPUT_DIR / "step_numbering_no_abstract_test.docx"
-    markdown_to_docx = compiler.markdown_to_docx
-    markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
-
-    step_numbering.apply_step_numbering(docx_path, manifest, None)  # should not raise
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    step_numbering.apply_section_scoped_step_numbering(docx_path, None)  # should not raise
 
     doc = Document(docx_path)
-    check(not any('STEP' in p.text for p in doc.paragraphs), "with no abstract_num_id, the sentinel is still stripped (degrades to plain unnumbered text)")
-    check(any(p.text.strip() == 'First' for p in doc.paragraphs), "the step's own text survives, just without numbering applied")
+    check(all('@@@STEPS' not in p.text and '@@@END_STEPS' not in p.text for p in doc.paragraphs),
+          "wrapper markers are still stripped even with numbering skipped")
 
 
-def test_preprocess_steps_digit_adjacent_text_no_corruption():
-    """Regression test: a step whose text starts with a digit (extremely
-    common in work instructions - "5 minutes", "10 mA", "24 AWG") used to
-    merge into the STEP<idx> sentinel's own digit run, e.g. idx=1 followed
-    by "5 minutes..." produced "STEP15 minutes...", which
-    apply_step_numbering's _STEP_SENTINEL_RE then misreads as idx=15,
-    raising IndexError against a 2-entry manifest and crashing the whole
-    compile. Mirrors the U+E000-delimiter fix already applied to the
-    sibling STEPREF sentinel for the same class of bug."""
-    md = "@@@STEPS@@@\n- A\n- 5 minutes of curing time required.\n@@@END_STEPS@@@\n"
-    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
-    check(len(manifest) == 2, f"2 steps recorded (got {len(manifest)})")
-
-    matches = list(step_numbering._STEP_SENTINEL_RE.finditer(new_md))
-    check(len(matches) == 2, f"exactly 2 sentinels found, not merged into one (got {len(matches)})")
-    if len(matches) == 2:
-        indices = [int(m.group(1)) for m in matches]
-        check(indices == [0, 1], f"sentinel indices are 0 and 1, not corrupted by adjacent digit text (got {indices})")
-
-
-def test_apply_step_numbering_end_to_end_digit_adjacent_text():
-    """End-to-end version of the above: must not raise IndexError when
-    actually applying numbering to a document with a digit-adjacent step."""
-    md = "@@@STEPS@@@\n- A\n- 5 minutes of curing time required.\n@@@END_STEPS@@@\n"
-    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
-    docx_path = TEST_OUTPUT_DIR / "step_numbering_digit_adjacent_test.docx"
-    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
-    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
-
-    step_numbering.apply_step_numbering(docx_path, manifest, abstract_id)  # should not raise IndexError
-
-    from docx import Document
-    doc = Document(docx_path)
-    texts = [p.text.strip() for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List']
-    check("5 minutes of curing time required." in texts, f"digit-adjacent step text survives intact (got {texts})")
-
-
-def test_apply_step_numbering_preserves_inline_formatting():
-    """Regression test: apply_step_numbering used to clear every run in a
-    matched paragraph and rebuild it as one plain run, destroying inline
-    bold/italic formatting elsewhere in the step's text."""
-    md = "@@@STEPS@@@\n- Use **IPA** and a lint-free cloth.\n@@@END_STEPS@@@\n"
-    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
+def test_apply_section_scoped_step_numbering_preserves_inline_formatting():
+    md = "@@@STEPS@@@\n\n#. Use **IPA** and a lint-free cloth.\n\n@@@END_STEPS@@@\n"
     docx_path = TEST_OUTPUT_DIR / "step_numbering_formatting_test.docx"
-    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
     abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
 
-    step_numbering.apply_step_numbering(docx_path, manifest, abstract_id)
-
-    from docx import Document
     doc = Document(docx_path)
-    step_para = next(p for p in doc.paragraphs if 'IPA' in p.text)
-    bold_runs = [r for r in step_para.runs if r.font.bold and r.text.strip() == 'IPA']
-    check(len(bold_runs) == 1, f"inline bold formatting on 'IPA' survives sentinel cleanup (runs: {[(r.text, r.font.bold) for r in step_para.runs]})")
-
-
-def test_preprocess_steps_skips_code_fenced_example():
-    """Regression test: @@@STEPS@@@ syntax shown as a documentation
-    example inside a fenced code block (exactly like
-    MARKDOWN_STYLING_GUIDE.md's own worked example) must be left
-    completely untouched, matching apply_styles()'s existing precedent of
-    skipping 'Verbatim'-styled (i.e. code-fenced) paragraphs so
-    @@@STYLE@@@ syntax shown as an example isn't processed as a real
-    marker."""
-    md = (
-        "Here is how the marker works:\n\n"
-        "```markdown\n"
-        "@@@STEPS@@@\n"
-        "- Example step\n"
-        "@@@END_STEPS@@@\n"
-        "```\n\n"
-        "That's the syntax.\n"
-    )
-    new_md, manifest = step_numbering.preprocess_steps_markdown(md)
-    check(len(manifest) == 0, "a code-fenced example block contributes nothing to the manifest")
-    check(new_md == md, "a code-fenced example block is left completely untouched")
+    step_para = [p for p in doc.paragraphs if 'IPA' in p.text][0]
+    bold_runs = [r for r in step_para.runs if r.bold]
+    check(len(bold_runs) == 1 and bold_runs[0].text == 'IPA', "bold formatting on 'IPA' survives")
 
 
 def test_resolve_step_references_resolves_multiple_in_same_paragraph():
@@ -1653,80 +1526,120 @@ def test_resolve_step_references_creates_ref_field():
     check('STEPREF' not in xml, "no reference sentinel remains in the output")
 
 
-def test_resolve_step_references_missing_label_degrades_to_plain_text():
+def test_resolve_step_references_builds_composite_field():
+    md = "## Section One\n\n[](#step:x) See [](#step:x) for details. []{#step:x}"
+    new_md = step_numbering.preprocess_step_references(md)
+    docx_path = TEST_OUTPUT_DIR / "step_ref_composite_test.docx"
+    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    step_numbering.resolve_step_references(docx_path)
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('STYLEREF 2 \\s' in xml, "the section-number half of the composite is a live STYLEREF field")
+    check('REF step:x \\r \\h' in xml, "the step-number half is a live, hyperlinked REF \\r field")
+    check('Step ' in xml and '-' in xml, "the literal 'Step ' and '-' text is present around the two fields")
+    check('STEPREF' not in xml, "no sentinel remains")
+
+
+def test_resolve_step_references_missing_label_raises():
     md = "See [](#step:does-not-exist) for details."
     new_md = step_numbering.preprocess_step_references(md)
     docx_path = TEST_OUTPUT_DIR / "step_ref_missing_test.docx"
     compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
-    step_numbering.resolve_step_references(docx_path)  # should not raise
-
-    from docx import Document
-    doc = Document(docx_path)
-    full_text = '\n'.join(p.text for p in doc.paragraphs)
-    check('[missing step reference: does-not-exist]' in full_text, "a reference to a nonexistent label degrades to visible plain text")
-    check('STEPREF' not in full_text, "the sentinel itself is gone even in the degraded case")
+    try:
+        step_numbering.resolve_step_references(docx_path)
+        check(False, "a reference to a nonexistent step label raises StepReferenceError")
+    except step_numbering.StepReferenceError as exc:
+        check("does-not-exist" in str(exc), f"the error names the missing label (got: {exc})")
 
 
-WI_STYLE_STEPS_MARKDOWN = (
+def test_resolve_step_references_duplicate_anchor_raises():
+    md = "[]{#step:dup} First. []{#step:dup} Second."
+    new_md = step_numbering.preprocess_step_references(md)
+    docx_path = TEST_OUTPUT_DIR / "step_ref_duplicate_test.docx"
+    compiler.markdown_to_docx(new_md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    try:
+        step_numbering.resolve_step_references(docx_path)
+        check(False, "two {#step:dup} anchors raises StepReferenceError")
+    except step_numbering.StepReferenceError as exc:
+        check("dup" in str(exc), f"the error names the duplicated label (got: {exc})")
+
+
+STEP_REDESIGN_MARKDOWN = (
     '\n## Carrier Board Assembly Procedure\n\n'
-    '@@@STEPS@@@\n'
-    '- Wear clean gloves.\n'
-    '- Simple dirt such as lint or light dust can be blown away before wiping.\n'
-    '  - Hold the board by the edges. []{#step:hold-board-by-edges}\n'
+    '@@@STEPS@@@\n\n'
+    '#. Wear clean gloves.\n'
+    '#. Simple dirt such as lint or light dust can be blown away before wiping.\n'
+    '    #. Hold the board by the edges. []{#step:hold-board-by-edges}\n\n'
     '@@@END_STEPS@@@\n\n'
     'NOTE: Clean the entire crystal but give special attention to the polished end.\n\n'
-    '@@@STEPS: continue@@@\n'
-    '- Visually inspect both the crystal and the photomultiplier for defects.\n'
-    '- Set the cleaned crystals aside on a clean lint free cloth.\n'
+    '@@@STEPS@@@\n\n'
+    '#. Visually inspect both the crystal and the photomultiplier for defects.\n'
+    '#. Set the cleaned crystals aside on a clean lint free cloth.\n\n'
     '@@@END_STEPS@@@\n\n'
     'As described in [](#step:hold-board-by-edges), always support the board by its edges.\n'
 )
 
 
-def test_compile_step_numbering_end_to_end():
-    """Integration test matching the design spec's 'docxcompose survival'
-    testing requirement: a document with a step list interrupted by a
-    NOTE, continued afterward, plus a cross-reference, compiled through
-    the exact real pipeline - numbering.xml entries and the reference
-    field must survive the full A/B/C/D docxcompose merge."""
-    markdown = SAMPLE_MARKDOWN + WI_STYLE_STEPS_MARKDOWN
-    input_md = TEST_OUTPUT_DIR / "compile_test_step_numbering.md"
-    output_docx = TEST_OUTPUT_DIR / "compile_test_step_numbering.docx"
+def test_compile_section_scoped_step_numbering_end_to_end():
+    """Integration test: two @@@STEPS@@@ blocks in one section
+    (interrupted by a NOTE), a nested sub-step, and a cross-reference,
+    compiled through the real pipeline."""
+    markdown = SAMPLE_MARKDOWN + STEP_REDESIGN_MARKDOWN
+    input_md = TEST_OUTPUT_DIR / "compile_test_section_step_numbering.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_section_step_numbering.docx"
     input_md.write_text(markdown, encoding="utf-8")
 
     result = subprocess.run(
         [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
-    check(result.returncode == 0, "compiler exits 0 for a document with @@@STEPS@@@ blocks")
+    check(result.returncode == 0, "compiler exits 0 for a document with section-scoped @@@STEPS@@@ blocks")
     if result.returncode != 0:
         print(result.stdout)
         print(result.stderr)
-        check(False, "step numbering survives the full compile pipeline (skipped: compile failed)")
         return
 
     doc = Document(output_docx)
-    step_texts = {"Wear clean gloves.", "Simple dirt such as lint or light dust can be blown away before wiping.",
-                  "Hold the board by the edges. ", "Visually inspect both the crystal and the photomultiplier for defects.",
-                  "Set the cleaned crystals aside on a clean lint free cloth."}
+    check(all('@@@STEPS' not in p.text and 'STEP' not in p.text for p in doc.paragraphs
+              if p.style is None or p.style.name != 'Dilon Step List' or '@@@' not in p.text),
+          "no wrapper marker or sentinel text remains anywhere")
     step_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List']
     check(len(step_paragraphs) == 5, f"all 5 steps across both blocks get the 'Dilon Step List' style (got {len(step_paragraphs)})")
-    check(all('STEP' not in p.text for p in doc.paragraphs), "no sentinel text remains anywhere in the compiled document")
 
     num_ids = set()
     for p in step_paragraphs:
         num_id_el = p._p.find('.//' + qn('w:numPr') + '/' + qn('w:numId'))
-        check(num_id_el is not None, f"step paragraph {p.text!r} carries a numId")
         if num_id_el is not None:
             num_ids.add(num_id_el.get(qn('w:val')))
-    check(len(num_ids) == 1, f"the interrupted-by-a-NOTE 'continue' block reuses the SAME numId as the first block (got {num_ids})")
+    check(len(num_ids) == 1, f"both blocks in the same section share one numId (got {num_ids})")
 
     with zipfile.ZipFile(output_docx) as z:
-        check("word/numbering.xml" in z.namelist(), "compiled document contains a word/numbering.xml part")
         xml = z.read('word/document.xml').decode('utf-8')
-    check('w:name="step:hold-board-by-edges"' in xml, "the step's {#step:label} anchor survives as a real bookmark")
+    check('w:name="step:hold-board-by-edges"' in xml, "the step's anchor survives as a real bookmark")
     check('REF step:hold-board-by-edges \\r \\h' in xml, "the cross-reference resolves to a live REF field")
+    check('STYLEREF 2 \\s' in xml, "the cross-reference includes a live section-number field")
+
+
+def test_compile_duplicate_step_anchor_fails_clearly():
+    markdown = SAMPLE_MARKDOWN + (
+        '\n## Section\n\n@@@STEPS@@@\n\n'
+        '#. First. []{#step:dup}\n#. Second. []{#step:dup}\n\n@@@END_STEPS@@@\n'
+    )
+    input_md = TEST_OUTPUT_DIR / "compile_test_duplicate_step_anchor.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_duplicate_step_anchor.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode != 0, "compiler exits non-zero for a duplicate {#step:x} anchor")
+    check("dup" in result.stderr.lower() or "dup" in result.stdout.lower(),
+          "the failure message names the duplicated label")
 
 
 def test_validate_list_nesting_depth_passes_at_three_levels():
@@ -2012,29 +1925,21 @@ def main():
     test_create_num_instance_first_allocation()
     test_create_num_instance_sequential_allocations_dont_collide()
     test_create_num_instance_writes_start_override()
-    test_preprocess_steps_unnamed_block()
-    test_preprocess_steps_nesting()
-    test_preprocess_steps_named_block()
-    test_preprocess_steps_bare_continue_resumes_most_recent_unnamed()
-    test_preprocess_steps_bare_continue_resumes_most_recent_named()
-    test_preprocess_steps_continue_named_across_other_sequences()
-    test_preprocess_steps_unknown_continue_named_starts_fresh()
-    test_preprocess_steps_bare_continue_with_nothing_to_continue()
-    test_preprocess_steps_malformed_block_passes_through_unmodified()
-    test_preprocess_step_references_empty_link_becomes_sentinel()
-    test_preprocess_step_references_leaves_real_link_text_untouched()
-    test_preprocess_step_references_duplicate_label_does_not_raise()
-    test_apply_step_numbering_styles_and_links_paragraphs()
-    test_apply_step_numbering_reuses_numid_for_continued_sequence()
-    test_apply_step_numbering_skips_gracefully_without_abstract_id()
-    test_preprocess_steps_digit_adjacent_text_no_corruption()
-    test_apply_step_numbering_end_to_end_digit_adjacent_text()
-    test_apply_step_numbering_preserves_inline_formatting()
-    test_preprocess_steps_skips_code_fenced_example()
+    test_ensure_blank_line_around_steps_markers_inserts_both_sides()
+    test_ensure_blank_line_around_steps_markers_idempotent()
+    test_apply_section_scoped_step_numbering_single_section()
+    test_apply_section_scoped_step_numbering_reuses_numid_within_section()
+    test_apply_section_scoped_step_numbering_restarts_across_sections()
+    test_apply_section_scoped_step_numbering_unclosed_block_raises()
+    test_apply_section_scoped_step_numbering_skips_gracefully_without_abstract_id()
+    test_apply_section_scoped_step_numbering_preserves_inline_formatting()
     test_resolve_step_references_creates_ref_field()
-    test_resolve_step_references_missing_label_degrades_to_plain_text()
+    test_resolve_step_references_builds_composite_field()
+    test_resolve_step_references_missing_label_raises()
+    test_resolve_step_references_duplicate_anchor_raises()
     test_resolve_step_references_resolves_multiple_in_same_paragraph()
-    test_compile_step_numbering_end_to_end()
+    test_compile_section_scoped_step_numbering_end_to_end()
+    test_compile_duplicate_step_anchor_fails_clearly()
     test_validate_list_nesting_depth_passes_at_three_levels()
     test_validate_list_nesting_depth_rejects_four_levels()
     test_validate_list_nesting_depth_ignores_bullet_lists()

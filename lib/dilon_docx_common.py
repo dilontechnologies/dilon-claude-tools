@@ -368,7 +368,7 @@ def apply_styles(docx_file):
     doc.save(docx_file)
 
 
-def _add_field_simple_run(paragraph, instr, cached_text):
+def add_field_simple_run(paragraph, instr, cached_text):
     """
     Append a Word fldSimple field (e.g. STYLEREF/SEQ) to a paragraph, with
     cached_text as the field's placeholder display value until Word
@@ -431,9 +431,9 @@ def apply_figure_captions(docx_file):
 
         para.style = doc.styles['Caption']
         para.add_run('Figure ')
-        _add_field_simple_run(para, ' STYLEREF 2 \\s ', '1')
+        add_field_simple_run(para, ' STYLEREF 2 \\s ', '1')
         para.add_run('.')
-        _add_field_simple_run(para, ' SEQ Figure \\* ARABIC \\s 2 ', '1')
+        add_field_simple_run(para, ' SEQ Figure \\* ARABIC \\s 2 ', '1')
         if description:
             para.add_run(f' - {description}')
         count += 1
@@ -781,7 +781,7 @@ def add_complex_field(paragraph, instr, cached_text):
     """
     Append a complex Word field (begin/instrText/separate/cached-result/
     end run sequence) to a paragraph. Used for PAGE/NUMPAGES fields, which
-    - unlike the STYLEREF/SEQ fields _add_field_simple_run() handles -
+    - unlike the STYLEREF/SEQ fields add_field_simple_run() handles -
     are conventionally authored as complex fields (that's what Word's own
     Insert Page Number feature emits), not fldSimple.
     """

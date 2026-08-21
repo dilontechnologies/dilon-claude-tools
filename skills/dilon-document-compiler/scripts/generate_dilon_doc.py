@@ -65,10 +65,12 @@ from dilon_docx_common import (  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from step_numbering import (  # noqa: E402
     preprocess_step_references,
-    preprocess_steps_markdown,
+    ensure_blank_line_around_steps_markers,
     get_step_list_abstract_num_id,
-    apply_step_numbering,
+    apply_section_scoped_step_numbering,
     resolve_step_references,
+    StepBlockError,
+    StepReferenceError,
 )
 
 
@@ -456,7 +458,7 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     metadata, markdown_body = extract_yaml_and_markdown(markdown_path)
     markdown_body = render_jinja(markdown_body, metadata)
     markdown_body = preprocess_step_references(markdown_body)
-    markdown_body, step_manifest = preprocess_steps_markdown(markdown_body)
+    markdown_body = ensure_blank_line_around_steps_markers(markdown_body)
     markdown_body = ensure_blank_line_after_list_continue_markers(markdown_body)
 
     print(f"Metadata extracted: {list(metadata.keys())}")
@@ -547,11 +549,14 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     print("Centering image paragraphs...")
     center_image_paragraphs(temp_part_d)
 
-    if step_manifest:
-        print("Applying step-list numbering...")
+    try:
         step_list_abstract_num_id = get_step_list_abstract_num_id(signature_template_path)
-        apply_step_numbering(temp_part_d, step_manifest, step_list_abstract_num_id)
-    resolve_step_references(temp_part_d)
+        print("Applying step-list numbering...")
+        apply_section_scoped_step_numbering(temp_part_d, step_list_abstract_num_id)
+        resolve_step_references(temp_part_d)
+    except (StepBlockError, StepReferenceError) as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
 
     print(f"Part D converted")
 
