@@ -33,6 +33,10 @@ python scripts/generate_dilon_doc.py <input.md> <output.docx> <base_template>
 
 After the script exits, verify the output file now exists. Report the script's stdout/stderr to the user on failure; report the output path on success.
 
+Compilation halts (non-zero exit, clear error message) rather than producing a silently-broken document for:
+- An ordered (`#.`) list nested more than three levels deep
+- A `@@@CONTINUE:#list:name@@@` marker whose `name` has no matching `[]{#list:name}` anchor, or a `[]{#list:name}` anchor declared more than once
+
 ## Input format reference
 
 The input markdown needs YAML front matter shaped like:
