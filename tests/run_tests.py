@@ -1878,6 +1878,69 @@ def test_resolve_list_continuations_duplicate_anchor_raises():
         check("dup" in str(exc), f"the error names the duplicated label (got: {exc})")
 
 
+def test_compile_ordered_list_and_continuation_end_to_end():
+    """Integration test: a #. list interrupted by a paragraph and
+    resumed via {#list:name}/@@@CONTINUE@@@, compiled through the real
+    pipeline - numbering.xml and the shared numId must survive the
+    full A/B/C/D docxcompose merge."""
+    markdown = SAMPLE_MARKDOWN + (
+        "\n## Ordered List Continuation Example\n\n"
+        "#. First item\n"
+        "#. Second item []{#list:demo-list}\n\n"
+        "An interrupting paragraph.\n\n"
+        "@@@CONTINUE:#list:demo-list@@@\n"
+        "#. Third item\n"
+        "#. Fourth item\n"
+    )
+    input_md = TEST_OUTPUT_DIR / "compile_test_ordered_list.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_ordered_list.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a document with a continued #. list")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+    check(all('@@@CONTINUE' not in p.text for p in doc.paragraphs), "no marker text remains")
+    step_styled = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List'
+                   and p.text.strip() in ('First item', 'Second item', 'Third item', 'Fourth item')]
+    check(len(step_styled) == 4, f"all four items got the 'Dilon Step List' style (got {len(step_styled)})")
+
+    num_ids = set()
+    for p in step_styled:
+        num_id, _ = _paragraph_num_id_and_ilvl(p._p)
+        if num_id is not None:
+            num_ids.add(num_id)
+    check(len(num_ids) == 1, f"all four items share one numId across the interruption (got {num_ids})")
+
+
+def test_compile_four_level_nested_list_fails_clearly():
+    markdown = SAMPLE_MARKDOWN + (
+        "\n## Over-Nested List Example\n\n"
+        "#. Top\n"
+        "    #. Second\n"
+        "        #. Third\n"
+        "            #. Fourth\n"
+    )
+    input_md = TEST_OUTPUT_DIR / "compile_test_over_nested.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_over_nested.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode != 0, "compiler exits non-zero for a 4-level-deep ordered list")
+    check("nested" in result.stderr.lower() or "nested" in result.stdout.lower(),
+          "the failure message mentions nesting, not a raw traceback only")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1983,6 +2046,8 @@ def main():
     test_resolve_list_continuations_reuses_numid()
     test_resolve_list_continuations_missing_anchor_raises()
     test_resolve_list_continuations_duplicate_anchor_raises()
+    test_compile_ordered_list_and_continuation_end_to_end()
+    test_compile_four_level_nested_list_fails_clearly()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")

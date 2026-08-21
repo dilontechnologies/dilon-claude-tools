@@ -29,6 +29,12 @@ from dilon_docx_common import (  # noqa: E402
     populate_header,
     populate_footer,
     strip_leading_empty_paragraphs,
+    ensure_blank_line_after_list_continue_markers,
+    remap_ordered_lists_to_dilon_step_list,
+    resolve_list_continuations,
+    validate_list_nesting_depth,
+    ListContinuationError,
+    ListNestingError,
 )
 
 try:
@@ -69,6 +75,7 @@ def generate_form_document(markdown_path, output_path, form_template_path=None):
     markdown_body = render_jinja(markdown_body, metadata)
     if protect_field_grid_line_breaks is not None:
         markdown_body = protect_field_grid_line_breaks(markdown_body)
+    markdown_body = ensure_blank_line_after_list_continue_markers(markdown_body)
     print(f"Metadata extracted: {list(metadata.keys())}")
 
     # Part A: the base template, populated with header/footer
@@ -93,6 +100,19 @@ def generate_form_document(markdown_path, output_path, form_template_path=None):
 
     print("Applying custom styles...")
     apply_styles(temp_part_d)
+
+    print("Applying ordered-list styling...")
+    remap_ordered_lists_to_dilon_step_list(temp_part_d)
+    try:
+        resolve_list_continuations(temp_part_d)
+    except ListContinuationError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+    try:
+        validate_list_nesting_depth(temp_part_d)
+    except ListNestingError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
 
     if apply_form_fields is not None:
         print("Applying form-specific field markers...")

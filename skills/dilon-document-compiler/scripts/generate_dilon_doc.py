@@ -48,6 +48,12 @@ from dilon_docx_common import (  # noqa: E402
     compose_documents,
     ensure_blank_line_after_table_markers,
     ensure_blank_line_between_images,
+    ensure_blank_line_after_list_continue_markers,
+    remap_ordered_lists_to_dilon_step_list,
+    resolve_list_continuations,
+    validate_list_nesting_depth,
+    ListContinuationError,
+    ListNestingError,
     parse_column_widths,
     apply_table_column_widths,
     render_jinja,
@@ -451,6 +457,7 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     markdown_body = render_jinja(markdown_body, metadata)
     markdown_body = preprocess_step_references(markdown_body)
     markdown_body, step_manifest = preprocess_steps_markdown(markdown_body)
+    markdown_body = ensure_blank_line_after_list_continue_markers(markdown_body)
 
     print(f"Metadata extracted: {list(metadata.keys())}")
 
@@ -519,6 +526,19 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     # Apply all styles (tables and paragraphs) - scans Word document for @@@ markers, applies styles, removes markers
     print("Applying custom styles...")
     apply_styles(temp_part_d)
+
+    print("Applying ordered-list styling...")
+    remap_ordered_lists_to_dilon_step_list(temp_part_d)
+    try:
+        resolve_list_continuations(temp_part_d)
+    except ListContinuationError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+    try:
+        validate_list_nesting_depth(temp_part_d)
+    except ListNestingError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
 
     # Convert Pandoc's implicit-figure captions into auto-numbered Word captions
     print("Applying figure caption numbering...")
