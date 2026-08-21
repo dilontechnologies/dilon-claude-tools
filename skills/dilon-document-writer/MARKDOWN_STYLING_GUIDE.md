@@ -409,78 +409,79 @@ Paragraph after definition list.
 
 ## 6. Numbered Step Lists
 
-<!-- TODO(step-redesign plan): id=/continue/continue=<name> below are being replaced - see spec SS5 -->
-
 Work-instruction procedures need steps that number themselves
-automatically - added, removed, or reordered without ever hand-renumbering
-- and that can be referenced elsewhere in the same document by a number
-that's always correct. Use `@@@STEPS@@@` for this instead of a plain
-bulleted or ordered list.
+automatically, resolve into a section, and produce a single unique
+identifier per step across the whole document. Use `@@@STEPS@@@` for
+this instead of a plain `#.` list.
 
 ```markdown
+## Cleaning Procedure
+
 @@@STEPS@@@
-- Wear clean gloves.
-- Simple dirt such as lint or light dust can be blown away before wiping.
-  - Hold the board by the edges of the board when cleaning.
-  - Wipe with IPA and a lint-free cloth.
+
+#. Wear clean gloves.
+#. Simple dirt such as lint or light dust can be blown away before wiping.
+    #. Hold the board by the edges of the board when cleaning.
+    #. Wipe with IPA and a lint-free cloth.
+
 @@@END_STEPS@@@
 ```
 
 **Rules:**
-- Use `#.` list syntax, same as a general ordered list (Section 5.2) - never type a number. The compiler applies Word's
-  own native numbering (dotted-decimal: `1`, `1.1`, `1.1.1`, ...); the
-  number is never baked text, so it's always correct even if the document
-  is later edited by hand in Word.
-- Nesting is indentation, 2 spaces per level - same convention as any
-  other nested list (Section 5.1).
-- `@@@STEPS@@@` alone starts a new sequence at 1.
-- `@@@STEPS: id=<name>@@@` starts a new **named** sequence.
-- `@@@STEPS: continue@@@` resumes whichever sequence - named or unnamed -
-  most recently ran, even after prose, a figure, or a `NOTE:` in between.
-  This is the common case: a procedure interrupted by an explanatory
-  paragraph or photo, then picking back up.
-- `@@@STEPS: continue=<name>@@@` resumes a specific named sequence
-  explicitly, anywhere later in the document, even after a *different*
-  sequence ran in between.
+- `@@@STEPS@@@` takes no attributes - just the bare marker, opening and closing (`@@@END_STEPS@@@`) around `#.` list content, same tab-nesting convention as any ordered list (Section 5.2)
+- A step's top-level number is scoped to the nearest preceding `##` heading. Every `@@@STEPS@@@` block within the *same* section shares one continuous counter automatically - no marker needed to "continue" a procedure interrupted by prose, a photo, or a `NOTE:`. A new `##` heading always starts a fresh counter at 1.
+- **In the procedure itself**, a step shows only its bare native number (`1.`, `1.1.`) - visually identical to a plain `#.` list, since both use the "Dilon Step List" style.
+- **When referenced elsewhere** (see below), a step resolves to `Step <section>-<n>[.<m>]` (e.g. `Step 6-3.1`) - the section number and "Step " prefix only ever appear in a cross-reference, never in the procedure's own in-place numbering.
+- Maximum nesting depth is three levels, same cap as any ordered list.
 
 **Referencing a step:**
 
 Give the step an anchor, the same way a figure gets `{#fig:label}`:
 
 ```markdown
-- Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
+#. Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
 ```
 
-Reference it elsewhere with an **empty-text** link - the compiler fills in
-the current number automatically, so it can never go stale:
+Every `{#step:label}` anchor must be unique across the whole document - a duplicate fails compilation with an error.
+
+Reference it elsewhere with an **empty-text** link - the compiler fills in the current number automatically, so it can never go stale:
 
 ```markdown
 As described in [](#step:hold-board-by-edges), always support the board by its edges.
 ```
 
-This renders as, e.g., "As described in Step 2.1, always support the
+This renders as, e.g., "As described in Step 6-3.1, always support the
 board by its edges" - a live Word field, not typed text. Supplying real
 link text instead (`[see the earlier step](#step:hold-board-by-edges)`)
-is respected as-is, same as a figure or section cross-reference.
+is respected as-is, same as a figure or section cross-reference. A
+reference to a label that doesn't exist anywhere in the document fails
+compilation with an error, rather than silently rendering placeholder
+text.
 
 **Worked example** - a procedure interrupted by a note and a photo, then
 continued, with a later reference back to it:
 
 ```markdown
+## Cleaning Procedure
+
 @@@STEPS@@@
-- Wear clean gloves.
-- Simple dirt such as lint or light dust can be blown away before wiping.
-  - Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
+
+#. Wear clean gloves.
+#. Simple dirt such as lint or light dust can be blown away before wiping.
+    #. Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
+
 @@@END_STEPS@@@
 
 NOTE: Clean the entire crystal but give special attention to ensure the
 polished end is free of dust, as that is the bonding surface.
 
-@@@STEPS: continue@@@
-- Visually inspect both the crystal and the photomultiplier for any
-  physical defects or anomalies such as scratches, chips, or cracks.
-- Set the cleaned crystals aside on a clean lint free cloth for
-  installation later.
+@@@STEPS@@@
+
+#. Visually inspect both the crystal and the photomultiplier for any
+   physical defects or anomalies such as scratches, chips, or cracks.
+#. Set the cleaned crystals aside on a clean lint free cloth for
+   installation later.
+
 @@@END_STEPS@@@
 
 As described in [](#step:hold-board-by-edges), always support the board
