@@ -1709,6 +1709,62 @@ def test_compile_duplicate_step_anchor_fails_clearly():
           "the failure message names the duplicated label")
 
 
+FULL_XREF_MARKDOWN = (
+    '\n## Assembly Section {#sec:assembly}\n\n'
+    '![A widget.](diagrams/example.png){#fig:widget}\n\n'
+    '@@@STEPS@@@\n\n'
+    '#. Install the widget. []{#step:install-widget}\n\n'
+    '@@@END_STEPS@@@\n\n'
+    'See [](#fig:widget), [](#sec:assembly), and [](#step:install-widget) for full context.\n'
+)
+
+
+def test_compile_full_cross_reference_set_end_to_end():
+    """Integration test: a figure, a section, and a step, each
+    referenced via [](#TYPE:label), compiled through the real
+    pipeline."""
+    images_dir = TEST_OUTPUT_DIR / "diagrams"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "example.png").write_bytes(make_test_png())
+
+    markdown = SAMPLE_MARKDOWN + FULL_XREF_MARKDOWN
+    input_md = TEST_OUTPUT_DIR / "compile_test_full_xref.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_full_xref.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a document exercising all three reference types")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    with zipfile.ZipFile(output_docx) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('REF fig:widget \\h' in xml, "the figure reference resolved")
+    check('REF sec:assembly \\r \\h' in xml, "the section reference resolved")
+    check('REF step:install-widget \\r \\h' in xml, "the step reference resolved")
+    check('XREF' not in xml, "no sentinel remains")
+
+
+def test_compile_broken_reference_fails_clearly():
+    markdown = SAMPLE_MARKDOWN + '\nSee [](#fig:does-not-exist) for details.\n'
+    input_md = TEST_OUTPUT_DIR / "compile_test_broken_xref.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_broken_xref.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode != 0, "compiler exits non-zero for a reference to a nonexistent figure")
+    check("does-not-exist" in result.stderr.lower() or "does-not-exist" in result.stdout.lower(),
+          "the failure message names the missing label")
+
+
 def test_validate_list_nesting_depth_passes_at_three_levels():
     md = (
         "#. Top\n"
@@ -2012,6 +2068,8 @@ def main():
     test_resolve_step_reference_builds_composite_field()
     test_compile_section_scoped_step_numbering_end_to_end()
     test_compile_duplicate_step_anchor_fails_clearly()
+    test_compile_full_cross_reference_set_end_to_end()
+    test_compile_broken_reference_fails_clearly()
     test_validate_list_nesting_depth_passes_at_three_levels()
     test_validate_list_nesting_depth_rejects_four_levels()
     test_validate_list_nesting_depth_ignores_bullet_lists()
