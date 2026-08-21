@@ -330,18 +330,47 @@ This is a paragraph after the list.
 
 ### 5.2 Ordered Lists
 
+Use Pandoc's native `#.` auto-number marker instead of typing numbers - like `-` for bullets, the number is never baked text, so inserting, removing, or reordering items never requires renumbering by hand:
+
 ```markdown
 This is a paragraph before the list.
 
-1. First step
-2. Second step
-   - Sub-point (use hyphen for nested bullets)
-3. Third step
+#. First step
+#. Second step
+    #. Sub-point (2-space or 1-tab indent per nesting level, same convention as bullets)
+#. Third step
 
 This is a paragraph after the list.
 ```
 
-### 5.3 Definition Lists
+**Rules:**
+- Never type a literal number (`1.`, `2.`) - always `#.`, exactly like bullets always use `-`, never a hand-typed count
+- Nesting is 2 spaces or 1 tab per level, same convention as unordered lists (Section 5.1)
+- **Maximum nesting depth is three levels.** A fourth level fails compilation with an error rather than rendering incorrectly - reformat as separate lists or sub-bullets instead
+- Renders as native, auto-numbered dotted-decimal (`1.`, `1.1.`, `1.1.1.`) via the shared "Dilon Step List" Word style - the same style `@@@STEPS@@@` procedures use, for a consistent look across both
+
+### 5.3 Continuing a List Across an Interruption
+
+A `#.` list (or a `@@@STEPS@@@` list) can be split by intervening prose, a photo, or a `NOTE:`, and resumed later with numbering intact: tag the item to resume from with a bracketed-span anchor, then reference that tag immediately before the resuming block.
+
+```markdown
+#. First item
+#. Second item []{#list:cleaning-procedure}
+
+Some interrupting paragraph or photo.
+
+@@@CONTINUE:#list:cleaning-procedure@@@
+#. Third item
+#. Fourth item
+```
+
+**Rules:**
+- `[]{#list:name}` is a bracketed-span anchor - place it right after the item you want a later block to continue from. It must be written as `[]{#list:name}` (empty brackets, then the id in braces), not a bare `{#list:name}` - Pandoc only turns a *bare* `{#id}` into an anchor when it trails a heading; on any other line it needs the bracketed-span form
+- `@@@CONTINUE:#list:name@@@` must be on its own line, immediately before the `#.` list it continues
+- A `@@@CONTINUE:#list:name@@@` whose `name` doesn't match any `[]{#list:name}` anchor anywhere earlier in the document **fails compilation** with a clear error - it does not silently restart the list at 1
+- Two `[]{#list:name}` anchors sharing the same `name` also **fails compilation** - every list-continuation tag must be unique
+
+### 5.4 Definition Lists
 
 For glossaries or field definitions:
 
@@ -380,6 +409,8 @@ Paragraph after definition list.
 
 ## 6. Numbered Step Lists
 
+<!-- TODO(step-redesign plan): id=/continue/continue=<name> below are being replaced - see spec SS5 -->
+
 Work-instruction procedures need steps that number themselves
 automatically - added, removed, or reordered without ever hand-renumbering
 - and that can be referenced elsewhere in the same document by a number
@@ -396,7 +427,7 @@ bulleted or ordered list.
 ```
 
 **Rules:**
-- Plain bullets only - never type a number. The compiler applies Word's
+- Use `#.` list syntax, same as a general ordered list (Section 5.2) - never type a number. The compiler applies Word's
   own native numbering (dotted-decimal: `1`, `1.1`, `1.1.1`, ...); the
   number is never baked text, so it's always correct even if the document
   is later edited by hand in Word.
