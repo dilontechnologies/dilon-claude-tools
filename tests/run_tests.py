@@ -17,6 +17,7 @@ import zlib
 from pathlib import Path
 
 from docx import Document
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches
 
@@ -2061,6 +2062,60 @@ def test_compile_figure_reference_bookmark_not_corrupted_by_merge():
           "(a REF field against it would otherwise paste the image, not hyperlinked text)")
 
 
+def _save_doc_with_bookmark(path, bookmark_name, text):
+    """Builds a minimal one-paragraph .docx whose entire text is wrapped
+    in a bookmark with raw id '0' - simulating one independently-built
+    docx part (Part A, B, or D) that numbers its own bookmarks starting
+    fresh at 0, exactly as Pandoc/our own bookmark-emitting code does
+    for each part before compose_documents() merges them."""
+    doc = Document()
+    p = doc.add_paragraph()
+    start = OxmlElement('w:bookmarkStart')
+    start.set(qn('w:id'), '0')
+    start.set(qn('w:name'), bookmark_name)
+    p._p.append(start)
+    p.add_run(text)
+    end = OxmlElement('w:bookmarkEnd')
+    end.set(qn('w:id'), '0')
+    p._p.append(end)
+    doc.save(path)
+
+
+def test_compose_documents_preserves_bookmark_pairs_across_colliding_source_ids():
+    """Regression test for a code-review finding on
+    _renumber_bookmarks_preserving_pairs(): it renumbers bookmarks by
+    building an id_map keyed on each bookmark's *raw* id as it walks
+    the merged body - but Composer.append() calls renumber_bookmarks()
+    once per appended document, each time over the WHOLE accumulated
+    body, not just the newly-appended part. So by the time a second
+    document is appended, the body holds both already-renumbered
+    bookmarks from the first append AND the second document's own
+    bookmarks, which independently started numbering at '0' too - two
+    unrelated bookmarks can raise the same raw id string within one
+    walk. A dict keyed on that raw id would let the second one silently
+    overwrite the first's mapping in id_map, corrupting the first
+    bookmark's pairing. Reproduces the shape directly: two documents,
+    each with exactly one bookmark whose native id is '0'."""
+    doc_a = TEST_OUTPUT_DIR / "bookmark_collision_a.docx"
+    doc_b = TEST_OUTPUT_DIR / "bookmark_collision_b.docx"
+    _save_doc_with_bookmark(doc_a, 'first', 'First document text.')
+    _save_doc_with_bookmark(doc_b, 'second', 'Second document text.')
+
+    composer = dilon_docx_common.compose_documents(doc_a, doc_b)
+    output_docx = TEST_OUTPUT_DIR / "bookmark_collision_merged.docx"
+    composer.save(output_docx)
+
+    doc = Document(output_docx)
+    mismatches = _bookmark_start_end_mismatches(doc)
+    check(not mismatches,
+          f"every bookmarkEnd in the merged document closes its correct bookmarkStart, "
+          f"even though both source documents' bookmarks started at id '0' "
+          f"(found {len(mismatches)} mismatch(es): {mismatches})")
+
+    names = {el.get(qn('w:name')) for el in doc.element.body.iter(qn('w:bookmarkStart'))}
+    check(names == {'first', 'second'}, f"both bookmarks survive the merge with their names intact (got {names})")
+
+
 def test_validate_list_nesting_depth_passes_at_three_levels():
     md = (
         "#. Top\n"
@@ -2375,6 +2430,7 @@ def main():
     test_compile_duplicate_sec_anchor_fails_clearly()
     test_compile_duplicate_fig_anchor_fails_clearly()
     test_compile_figure_reference_bookmark_not_corrupted_by_merge()
+    test_compose_documents_preserves_bookmark_pairs_across_colliding_source_ids()
     test_validate_list_nesting_depth_passes_at_three_levels()
     test_validate_list_nesting_depth_rejects_four_levels()
     test_validate_list_nesting_depth_ignores_bullet_lists()

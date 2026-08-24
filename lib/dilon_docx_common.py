@@ -1518,6 +1518,54 @@ def markdown_to_docx(markdown_text, output_file, reference_doc=None, resource_di
     temp_md.unlink()
 
 
+def _renumber_bookmarks_preserving_pairs(self):
+    """Replacement for docxcompose's Composer.renumber_bookmarks().
+
+    The original assigns every bookmarkStart a new id sequentially in
+    document order, then separately assigns every bookmarkEnd a new id
+    sequentially in document order - i.e. it assumes the Nth start
+    always pairs with the Nth end. That's only true when bookmarks
+    never nest. Our documents nest constantly (an un-narrowed heading
+    bookmark stays open around a {#fig:x}/{#sec:x}/{#step:x} bookmark
+    that opens and closes inside it - see apply_figure_captions() and
+    narrow_section_bookmarks()), so the naive version silently hands a
+    figure's bookmarkEnd the wrong id: Word then sees a bookmark
+    spanning from that figure all the way to wherever the mismatched id
+    really closes, and a REF field against it inserts a copy of
+    everything in between - including any images - instead of just the
+    bookmarked text.
+
+    Composer.append() calls renumber_bookmarks() once per appended
+    document, each time renumbering the WHOLE accumulated body (not
+    just the newly-appended part) - so an id-keyed lookup isn't safe
+    even across a single call's own walk: bookmarks from an
+    already-renumbered earlier append and a freshly-appended document's
+    own original ids can both be "0", "1", ... A dict keyed by that raw
+    id (an earlier version of this fix used exactly that, and passed
+    every test only because none of our documents currently put a
+    bookmark in more than one merged part) would let the second
+    occurrence silently overwrite the first's mapping, corrupting that
+    first bookmark's pairing.
+
+    Fixed instead by pairing bookmarkStart/bookmarkEnd purely by LIFO
+    nesting position (a stack) - bookmarks in OOXML always nest like
+    parentheses, never cross, so this needs no id comparison at all and
+    is correct regardless of what any id happens to collide with.
+    """
+    from docx.oxml.ns import qn
+
+    stack = []
+    next_id = 0
+    for el in self.doc.element.body.iter():
+        if el.tag == qn('w:bookmarkStart'):
+            new_id = str(next_id)
+            next_id += 1
+            el.set(qn('w:id'), new_id)
+            stack.append(new_id)
+        elif el.tag == qn('w:bookmarkEnd'):
+            el.set(qn('w:id'), stack.pop())
+
+
 def compose_documents(*doc_paths):
     """
     Merge 2+ Word documents in order via docxcompose's Composer, appending
@@ -1528,8 +1576,16 @@ def compose_documents(*doc_paths):
     2-document merge_word_documents() to N documents so both the full A-B-C-D
     compile pipeline and the form compiler's 2-document pipeline share one
     implementation.
+
+    Composer.append() calls its own renumber_bookmarks() internally,
+    which corrupts nested bookmark pairs (see
+    _renumber_bookmarks_preserving_pairs's docstring) - bound onto the
+    instance before any appends so every call uses the fixed version.
     """
+    import types
+
     composer = Composer(Document(doc_paths[0]))
+    composer.renumber_bookmarks = types.MethodType(_renumber_bookmarks_preserving_pairs, composer)
     for doc_path in doc_paths[1:]:
         composer.append(Document(doc_path))
     return composer
