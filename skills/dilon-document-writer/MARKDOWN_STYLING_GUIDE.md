@@ -734,7 +734,8 @@ For longer notes or quoted text:
 
 ### 11.2 Section Breaks
 
-Use horizontal rules sparingly (Pandoc will add page breaks):
+Heading 2 does not force a page break automatically. Insert one manually
+with a horizontal rule where you want it (use sparingly):
 
 ```markdown
 ---

@@ -1464,6 +1464,13 @@ def test_heading_auto_numbering():
           f"Heading 2/3/4 all link to the SAME numbering list, not separate ones (got {num_ids})")
 
 
+def test_heading2_has_no_automatic_page_break():
+    doc = Document(SIGNATURE_TEMPLATE)
+    heading2 = doc.styles['Heading 2']
+    check(heading2.paragraph_format.page_break_before is not True,
+          f"Heading 2 no longer forces a page break (got {heading2.paragraph_format.page_break_before!r})")
+
+
 def test_get_step_list_abstract_num_id_found():
     """SIGNATURE_TEMPLATE must have the 'Dilon Step List' style + sample
     paragraph built per the spec's Template Requirement section."""
@@ -2247,6 +2254,7 @@ def main():
     test_resolve_reference_markers_dispatches_by_type()
     test_resolve_reference_markers_missing_anchor_raises()
     test_resolve_reference_markers_duplicate_anchor_raises()
+    test_heading2_has_no_automatic_page_break()
     test_get_step_list_abstract_num_id_found()
     test_get_step_list_abstract_num_id_missing_style()
     test_create_num_instance_first_allocation()
