@@ -24,42 +24,39 @@ from dilon_docx_common import (
     _decimal_abstract_num_ids,
     _num_id_to_abstract_map,
     _paragraph_num_id_and_ilvl,
+    _narrow_bookmark,
 )
 
 W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 
 
-def get_step_list_abstract_num_id(template_path):
+def get_step_clarification_abstract_num_id(template_path):
     """
     Reads template_path's numbering.xml/document.xml/styles.xml directly
-    (python-docx has no numbering API) to find the abstractNumId backing
-    the 'Dilon Step List' style (see the design spec's Template
-    Requirement section).
-
-    Checks two places, in order: a sample paragraph in the template body
-    using the 'Dilon Step List' style with a numPr applied directly to
-    the paragraph, OR - since Word may instead bake the numbering link
-    into the style definition itself rather than writing a per-paragraph
-    override (confirmed against the real template) - the style's own
-    numPr.
+    to find the abstractNumId backing the 'Dilon Step Clarification
+    List' style - the lowerLetter list ordered clarifications inside
+    @@@STEPS@@@ get relettered onto, one fresh instance per step. Same
+    two-place lookup as the retired get_step_list_abstract_num_id():
+    a sample paragraph using the style with a numPr override, or the
+    style's own baked-in numPr.
 
     Returns the abstractNumId as a string, or None (with a printed
-    warning) if the template doesn't have the style set up yet - callers
-    treat None as "skip step-numbering for this compile" rather than
-    failing the whole document.
+    warning) if the template doesn't have the style set up - callers
+    treat None as "leave ordered clarifications alone for this
+    compile" rather than failing the whole document.
     """
     with zipfile.ZipFile(template_path) as z:
         doc_xml = etree.fromstring(z.read('word/document.xml'))
         styles_xml = etree.fromstring(z.read('word/styles.xml'))
         if 'word/numbering.xml' not in z.namelist():
-            print("  Warning: template has no numbering.xml; step numbering skipped")
+            print("  Warning: template has no numbering.xml; step clarification numbering skipped")
             return None
         num_xml = etree.fromstring(z.read('word/numbering.xml'))
 
     sample_num_id = None
     for p in doc_xml.iter(f'{{{W_NS}}}p'):
         p_style = p.find(f'.//{{{W_NS}}}pStyle')
-        if p_style is None or p_style.get(f'{{{W_NS}}}val') != 'DilonStepList':
+        if p_style is None or p_style.get(f'{{{W_NS}}}val') != 'DilonStepClarificationList':
             continue
         num_id_el = p.find(f'.//{{{W_NS}}}numPr/{{{W_NS}}}numId')
         if num_id_el is not None:
@@ -67,9 +64,8 @@ def get_step_list_abstract_num_id(template_path):
             break
 
     if sample_num_id is None:
-        # Fall back to the style's own numPr.
         for s in styles_xml.iter(f'{{{W_NS}}}style'):
-            if s.get(f'{{{W_NS}}}styleId') != 'DilonStepList':
+            if s.get(f'{{{W_NS}}}styleId') != 'DilonStepClarificationList':
                 continue
             num_id_el = s.find(f'.//{{{W_NS}}}pPr/{{{W_NS}}}numPr/{{{W_NS}}}numId')
             if num_id_el is not None:
@@ -79,10 +75,9 @@ def get_step_list_abstract_num_id(template_path):
     if sample_num_id is None:
         print(
             "  Warning: no paragraph in the base template uses the 'Dilon "
-            "Step List' style with numbering applied (checked both the "
-            "paragraph and the style itself); step numbering skipped. See "
-            "the Template Requirement section of "
-            "docs/superpowers/specs/2026-08-20-work-instruction-step-numbering-design.md"
+            "Step Clarification List' style with numbering applied; "
+            "step clarification numbering skipped. See "
+            "docs/superpowers/specs/2026-08-24-steps-field-numbering-design.md"
         )
         return None
 
@@ -90,7 +85,7 @@ def get_step_list_abstract_num_id(template_path):
         if num.get(f'{{{W_NS}}}numId') == sample_num_id:
             return num.find(f'{{{W_NS}}}abstractNumId').get(f'{{{W_NS}}}val')
 
-    print(f"  Warning: numId {sample_num_id} has no matching <w:num> entry; step numbering skipped")
+    print(f"  Warning: numId {sample_num_id} has no matching <w:num> entry; step clarification numbering skipped")
     return None
 
 
@@ -183,58 +178,111 @@ def ensure_blank_line_around_steps_markers(markdown_text):
     return '\n'.join(result)
 
 
-def apply_section_scoped_step_numbering(docx_file, abstract_num_id):
-    """
-    Walks docx_file's paragraphs once, in document order, tracking
-    which Heading-2-numbered section each paragraph falls under and
-    whether a @@@STEPS@@@ block is currently open. Every #.-list
-    paragraph (numFmt="decimal" - see dilon_docx_common's
-    _decimal_abstract_num_ids()) found inside an open @@@STEPS@@@
-    block gets its numId reassigned to a section-scoped numId,
-    allocated fresh the first time a steps block appears in a new
-    section and reused automatically for every later steps block in
-    that same section - this is what makes cross-block continuation
-    within a section automatic, with no marker needed. A #.-list
-    paragraph outside any @@@STEPS@@@ block is left completely alone
-    (it's an ordinary ordered-list paragraph, already handled by
-    remap_ordered_lists_to_dilon_step_list() in the ordered-lists
-    plan).
+def _strip_num_pr(p_element):
+    """Removes <w:numPr> from p_element's <w:pPr>, if present - used to
+    turn a step's paragraph from a list item into plain text before
+    restyling it 'Dilon Step Heading'."""
+    p_pr = p_element.find(qn('w:pPr'))
+    if p_pr is None:
+        return
+    num_pr = p_pr.find(qn('w:numPr'))
+    if num_pr is not None:
+        p_pr.remove(num_pr)
 
-    Both wrapper marker paragraphs are removed from the output
-    regardless of whether numbering was actually applied (mirrors
-    apply_step_numbering()'s old warn-and-degrade convention: if
-    abstract_num_id is None - get_step_list_abstract_num_id() already
-    printed a warning that the template isn't set up - step text still
-    ships as plain unnumbered text rather than leaving raw
-    "@@@STEPS@@@" markers visible in the shipped document).
+
+def _prepend_step_number_fields(para):
+    """
+    Builds 'Step N.M' fields (STYLEREF 3 \\s + '.' + a SEQ counter that
+    resets at each Heading 3) and inserts them BEFORE para's existing
+    text runs, so the number reads first and the author's own step text
+    follows - unlike add_field_simple_run(), which always appends to
+    the paragraph's end. Mirrors apply_figure_captions()'s field-code
+    syntax, just reset at Heading 3 (the step's own numbering scope)
+    instead of Heading 2.
+
+    Returns (start_el, end_el): the field span's first and last child
+    elements, so the caller can narrow a {#step:label} bookmark around
+    exactly this span.
+    """
+    anchor = para._p.find(qn('w:r'))
+
+    def _place(new_el):
+        if anchor is not None:
+            anchor.addprevious(new_el)
+        else:
+            para._p.append(new_el)
+
+    add_field_simple_run(para, ' STYLEREF 3 \\s ', '1')
+    start_el = para._p[-1]
+    _place(start_el)
+
+    dot_run = para.add_run('.')
+    _place(dot_run._element)
+
+    add_field_simple_run(para, ' SEQ DilonStep \\* ARABIC \\s 3 ', '1')
+    end_el = para._p[-1]
+    _place(end_el)
+
+    tab_run = para.add_run()
+    tab_run.add_tab()
+    _place(tab_run._element)
+
+    return start_el, end_el
+
+
+def _find_step_bookmark_start_in(para_element):
+    """Returns the first <w:bookmarkStart> inside para_element whose
+    name starts with 'step:' (the author's []{#step:label} anchor,
+    which Pandoc renders as a zero-width bookmark somewhere within the
+    paragraph - not necessarily at the start), or None."""
+    for el in para_element.iter(qn('w:bookmarkStart')):
+        name = el.get(qn('w:name'))
+        if name and name.startswith('step:'):
+            return el
+    return None
+
+
+def apply_field_based_step_numbering(docx_file, clarification_abstract_num_id):
+    """
+    Walks docx_file's paragraphs in document order, tracking whether a
+    @@@STEPS@@@ block is open and which Heading 3 is currently in
+    scope. Every ilvl-0 #.-list paragraph inside an open block becomes
+    a field-numbered 'Dilon Step Heading' paragraph (see
+    _prepend_step_number_fields()); every ilvl>=1 #.-list paragraph
+    (an ordered "clarification") gets relettered onto a fresh numId of
+    the 'Dilon Step Clarification List' abstract list, one fresh
+    instance per top-level step. A bullet-list paragraph inside a block
+    is left completely alone.
 
     Raises StepBlockError for an @@@STEPS@@@ with no matching
-    @@@END_STEPS@@@, or an @@@END_STEPS@@@ with no @@@STEPS@@@ open -
-    both compilation-halting, not degrade-and-continue, since a
-    malformed wrapper pair means the author's procedure boundaries
-    don't mean what they look like.
+    @@@END_STEPS@@@, an @@@END_STEPS@@@ with no @@@STEPS@@@ open, or a
+    block left open across a Heading 3 boundary - all compilation-
+    halting, matching the retired apply_section_scoped_step_numbering()'s
+    conventions.
     """
     from docx import Document
     doc = Document(docx_file)
-    numbering_part = doc.part.numbering_part if abstract_num_id is not None else None
+    numbering_part = doc.part.numbering_part if clarification_abstract_num_id is not None else None
     numbering_element = numbering_part.element if numbering_part is not None else None
 
     decimal_ids = _decimal_abstract_num_ids(numbering_element) if numbering_element is not None else set()
     num_id_to_abstract = _num_id_to_abstract_map(numbering_element) if numbering_element is not None else {}
 
-    section_index = 0
-    section_num_id = {}  # section_index -> numId currently assigned to that section's steps
+    heading_style_available = 'Dilon Step Heading' in {s.name for s in doc.styles}
+    if not heading_style_available:
+        print("  Warning: template has no 'Dilon Step Heading' style; step numbering skipped")
+
     inside_steps = False
     marker_elements = []
+    current_clarification_num_id = None
     numbered = 0
 
     for para in doc.paragraphs:
         stripped = para.text.strip()
 
-        if para.style is not None and para.style.name and para.style.name.startswith('Heading 2'):
+        if para.style is not None and para.style.name and para.style.name.startswith('Heading 3'):
             if inside_steps:
                 raise StepBlockError("@@@STEPS@@@ has no matching @@@END_STEPS@@@ before the next section heading")
-            section_index += 1
             continue
 
         if stripped == '@@@STEPS@@@':
@@ -251,21 +299,38 @@ def apply_section_scoped_step_numbering(docx_file, abstract_num_id):
             marker_elements.append(para._p)
             continue
 
-        if not inside_steps or abstract_num_id is None:
+        if not inside_steps:
             continue
 
-        num_id, _ = _paragraph_num_id_and_ilvl(para._p)
+        num_id, ilvl = _paragraph_num_id_and_ilvl(para._p)
         if num_id is None or num_id_to_abstract.get(num_id) not in decimal_ids:
-            continue
+            continue  # bullet or non-list paragraph inside a block - left alone
 
-        if section_index not in section_num_id:
-            section_num_id[section_index] = create_num_instance(numbering_element, abstract_num_id)
-        target_num_id = section_num_id[section_index]
-
-        para.style = doc.styles['Dilon Step List']
-        num_pr = para._p.find(qn('w:pPr')).find(qn('w:numPr'))
-        num_pr.find(qn('w:numId')).set(qn('w:val'), str(target_num_id))
-        numbered += 1
+        if ilvl in (None, '0'):
+            current_clarification_num_id = None
+            if not heading_style_available:
+                continue
+            bookmark_start_el = _find_step_bookmark_start_in(para._p)
+            _strip_num_pr(para._p)
+            para.style = doc.styles['Dilon Step Heading']
+            start_el, end_el = _prepend_step_number_fields(para)
+            if bookmark_start_el is not None:
+                _narrow_bookmark(doc.element.body, bookmark_start_el, start_el, end_el)
+            numbered += 1
+        else:
+            if clarification_abstract_num_id is None:
+                continue
+            if current_clarification_num_id is None:
+                current_clarification_num_id = create_num_instance(numbering_element, clarification_abstract_num_id)
+            para.style = doc.styles['Dilon Step Clarification List']
+            num_pr = para._p.find(qn('w:pPr')).find(qn('w:numPr'))
+            num_pr.find(qn('w:numId')).set(qn('w:val'), str(current_clarification_num_id))
+            ilvl_el = num_pr.find(qn('w:ilvl'))
+            if ilvl_el is None:
+                ilvl_el = OxmlElement('w:ilvl')
+                num_pr.insert(0, ilvl_el)
+            ilvl_el.set(qn('w:val'), '0')
+            numbered += 1
 
     if inside_steps:
         raise StepBlockError("@@@STEPS@@@ has no matching @@@END_STEPS@@@ before the end of the document")
@@ -276,7 +341,7 @@ def apply_section_scoped_step_numbering(docx_file, abstract_num_id):
     if marker_elements or numbered:
         doc.save(docx_file)
         if numbered:
-            print(f"  Applied section-scoped step numbering to {numbered} paragraph(s)")
+            print(f"  Applied field-based step numbering to {numbered} paragraph(s)")
     return numbered
 
 

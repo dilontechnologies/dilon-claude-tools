@@ -1471,19 +1471,20 @@ def test_heading2_has_no_automatic_page_break():
           f"Heading 2 no longer forces a page break (got {heading2.paragraph_format.page_break_before!r})")
 
 
-def test_get_step_list_abstract_num_id_found():
-    """SIGNATURE_TEMPLATE must have the 'Dilon Step List' style + sample
-    paragraph built per the spec's Template Requirement section."""
-    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
-    check(abstract_id is not None, "finds an abstractNumId for 'Dilon Step List' in the real template")
+def test_get_step_clarification_abstract_num_id_found():
+    """SIGNATURE_TEMPLATE must have the 'Dilon Step Clarification List'
+    style + sample paragraph built per the spec's Template Requirement
+    section."""
+    abstract_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    check(abstract_id is not None, "finds an abstractNumId for 'Dilon Step Clarification List' in the real template")
 
 
-def test_get_step_list_abstract_num_id_missing_style():
-    empty_template = TEST_OUTPUT_DIR / "step_numbering_no_style_template.docx"
+def test_get_step_clarification_abstract_num_id_missing_style():
+    empty_template = TEST_OUTPUT_DIR / "step_numbering_no_clarification_style_template.docx"
     from docx import Document
     Document().save(empty_template)
-    abstract_id = step_numbering.get_step_list_abstract_num_id(empty_template)
-    check(abstract_id is None, "returns None (not an exception) when the template has no 'Dilon Step List' style")
+    abstract_id = step_numbering.get_step_clarification_abstract_num_id(empty_template)
+    check(abstract_id is None, "returns None (not an exception) when the template has no 'Dilon Step Clarification List' style")
 
 
 def test_create_num_instance_first_allocation():
@@ -1540,124 +1541,148 @@ def test_ensure_blank_line_around_steps_markers_idempotent():
     check(result == md, "already-blank-line case is left unchanged")
 
 
-def test_apply_section_scoped_step_numbering_single_section():
+def test_apply_field_based_step_numbering_single_step():
     md = (
-        "## Section One\n\n"
+        "## Major Section\n\n### Subsection Title\n\n"
         "@@@STEPS@@@\n\n"
-        "#. First\n"
-        "#. Second\n"
-        "    #. Sub of second\n"
+        "#. First.\n"
+        "#. Second.\n"
+        "    #. Ordered clarification of second.\n"
         "\n@@@END_STEPS@@@\n"
     )
-    docx_path = TEST_OUTPUT_DIR / "step_numbering_single_section_test.docx"
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_single_step_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
-    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
-    count = step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
-    check(count == 3, f"all three step paragraphs get numbered (got {count})")
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    count = step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    check(count == 3, f"both steps and the one clarification get numbered (got {count})")
 
     doc = Document(docx_path)
     check(all('@@@STEPS' not in p.text and '@@@END_STEPS' not in p.text for p in doc.paragraphs),
           "both wrapper marker paragraphs are removed")
-    step_paras = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List']
-    check(len(step_paras) == 3, f"all three paragraphs carry the 'Dilon Step List' style (got {len(step_paras)})")
+
+    step_paras = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading']
+    check(len(step_paras) == 2, f"both top-level steps carry 'Dilon Step Heading' (got {len(step_paras)})")
+
+    clarification_paras = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Clarification List']
+    check(len(clarification_paras) == 1, f"the nested item carries 'Dilon Step Clarification List' (got {len(clarification_paras)})")
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    instrs = re.findall(r'w:instr="([^"]*)"', xml)
+    styleref_count = sum(1 for i in instrs if i.strip() == 'STYLEREF 3 \\s')
+    seq_count = sum(1 for i in instrs if i.strip() == 'SEQ DilonStep \\* ARABIC \\s 3')
+    check(styleref_count == 2, f"both steps get a 'STYLEREF 3 \\\\s' field (got {styleref_count})")
+    check(seq_count == 2, f"both steps get a 'SEQ DilonStep \\\\* ARABIC \\\\s 3' field (got {seq_count})")
 
 
-def test_apply_section_scoped_step_numbering_reuses_numid_within_section():
-    md = (
-        "## Section One\n\n"
-        "@@@STEPS@@@\n\n#. First\n\n@@@END_STEPS@@@\n\n"
-        "An interrupting paragraph.\n\n"
-        "@@@STEPS@@@\n\n#. Second\n\n@@@END_STEPS@@@\n"
-    )
-    docx_path = TEST_OUTPUT_DIR / "step_numbering_two_blocks_one_section_test.docx"
+def test_apply_field_based_step_numbering_number_precedes_step_text():
+    md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. Wear clean gloves.\n\n@@@END_STEPS@@@\n"
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_field_order_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
-    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
-    num_ids = set()
-    for p in doc.paragraphs:
-        if p.style and p.style.name == 'Dilon Step List':
-            num_id, _ = dilon_docx_common._paragraph_num_id_and_ilvl(p._p)
-            num_ids.add(num_id)
-    check(len(num_ids) == 1, f"two separate @@@STEPS@@@ blocks in the same section share one numId (got {num_ids})")
+    step_para = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading'][0]
+    check(step_para.text.strip().endswith('Wear clean gloves.'),
+          f"the field's cached placeholder text comes before the author's step text (got {step_para.text!r})")
 
 
-def test_apply_section_scoped_step_numbering_restarts_across_sections():
+def test_apply_field_based_step_numbering_clarifications_restart_per_step():
     md = (
-        "## Section One\n\n@@@STEPS@@@\n\n#. First\n\n@@@END_STEPS@@@\n\n"
-        "## Section Two\n\n@@@STEPS@@@\n\n#. Second\n\n@@@END_STEPS@@@\n"
+        "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n"
+        "#. First.\n"
+        "    #. First's clarification A.\n"
+        "    #. First's clarification B.\n"
+        "#. Second.\n"
+        "    #. Second's clarification A.\n"
+        "\n@@@END_STEPS@@@\n"
     )
-    docx_path = TEST_OUTPUT_DIR / "step_numbering_two_sections_test.docx"
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_clarification_restart_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
-    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
-    num_ids = []
-    for p in doc.paragraphs:
-        if p.style and p.style.name == 'Dilon Step List':
-            num_id, _ = dilon_docx_common._paragraph_num_id_and_ilvl(p._p)
-            num_ids.append(num_id)
-    check(len(set(num_ids)) == 2, f"a new section gets a fresh numId (got {num_ids})")
+    clarification_paras = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Clarification List']
+    num_ids = [dilon_docx_common._paragraph_num_id_and_ilvl(p._p)[0] for p in clarification_paras]
+    check(num_ids[0] == num_ids[1], f"First's two clarifications share one numId (got {num_ids[:2]})")
+    check(num_ids[2] != num_ids[0], f"Second's clarification gets its own fresh numId (got {num_ids})")
+    check(all(dilon_docx_common._paragraph_num_id_and_ilvl(p._p)[1] in (None, '0') for p in clarification_paras),
+          "every clarification sits at ilvl 0 of its own fresh list, not nested under the step")
 
 
-def test_apply_section_scoped_step_numbering_unclosed_block_raises():
+def test_apply_field_based_step_numbering_bullets_left_alone():
+    md = (
+        "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n"
+        "#. First.\n"
+        "    - An unordered clarification.\n"
+        "\n@@@END_STEPS@@@\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_bullets_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+
+    doc = Document(docx_path)
+    bullet_para = [p for p in doc.paragraphs if 'unordered clarification' in p.text][0]
+    check(bullet_para.style is None or bullet_para.style.name != 'Dilon Step Clarification List',
+          "the bullet item is left with its own style, not reassigned to the clarification list style")
+
+
+def test_apply_field_based_step_numbering_unclosed_block_raises():
     md = "@@@STEPS@@@\n\n#. First\n"
     docx_path = TEST_OUTPUT_DIR / "step_numbering_unclosed_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
-    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
     try:
-        step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
+        step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
         check(False, "an @@@STEPS@@@ with no matching @@@END_STEPS@@@ raises StepBlockError")
     except step_numbering.StepBlockError as exc:
         check("END_STEPS" in str(exc), f"the error mentions the missing closing marker (got: {exc})")
 
 
-def test_apply_section_scoped_step_numbering_open_block_across_section_boundary_raises():
-    """Regression test: a @@@STEPS@@@ left open when a new ## heading
-    starts used to silently split into two separately-numbered
-    sequences (the paragraphs after the heading getting a fresh numId
-    keyed to the new section) instead of halting - a plausible
-    authoring slip (forgetting @@@END_STEPS@@@) that must not produce
-    silently wrong step numbers."""
+def test_apply_field_based_step_numbering_open_block_across_heading3_boundary_raises():
     md = (
-        "## Section One\n\n@@@STEPS@@@\n\n#. First\n#. Second\n\n"
-        "## Section Two\n\n#. Third\n\n@@@END_STEPS@@@\n"
+        "### Subsection One\n\n@@@STEPS@@@\n\n#. First\n#. Second\n\n"
+        "### Subsection Two\n\n#. Third\n\n@@@END_STEPS@@@\n"
     )
-    docx_path = TEST_OUTPUT_DIR / "step_numbering_open_across_section_test.docx"
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_open_across_h3_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
-    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
     try:
-        step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
-        check(False, "an @@@STEPS@@@ left open across a ## section boundary raises StepBlockError")
+        step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+        check(False, "an @@@STEPS@@@ left open across a ### (Heading 3) boundary raises StepBlockError")
     except step_numbering.StepBlockError as exc:
         check("section heading" in str(exc), f"the error mentions the section boundary (got: {exc})")
 
 
-def test_apply_section_scoped_step_numbering_skips_gracefully_without_abstract_id():
-    md = "@@@STEPS@@@\n\n#. First\n\n@@@END_STEPS@@@\n"
-    docx_path = TEST_OUTPUT_DIR / "step_numbering_no_abstract_test.docx"
+def test_apply_field_based_step_numbering_skips_gracefully_without_clarification_style():
+    md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. First\n    #. Clarification\n\n@@@END_STEPS@@@\n"
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_no_clarification_id_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
-    step_numbering.apply_section_scoped_step_numbering(docx_path, None)  # should not raise
+    step_numbering.apply_field_based_step_numbering(docx_path, None)  # should not raise
 
     doc = Document(docx_path)
     check(all('@@@STEPS' not in p.text and '@@@END_STEPS' not in p.text for p in doc.paragraphs),
-          "wrapper markers are still stripped even with numbering skipped")
+          "wrapper markers are still stripped even with clarification numbering skipped")
+    check(any(p.style and p.style.name == 'Dilon Step Heading' for p in doc.paragraphs),
+          "the top-level step is still converted even when clarification numbering is skipped")
 
 
-def test_apply_section_scoped_step_numbering_preserves_inline_formatting():
-    md = "@@@STEPS@@@\n\n#. Use **IPA** and a lint-free cloth.\n\n@@@END_STEPS@@@\n"
+def test_apply_field_based_step_numbering_preserves_inline_formatting():
+    md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. Use **IPA** and a lint-free cloth.\n\n@@@END_STEPS@@@\n"
     docx_path = TEST_OUTPUT_DIR / "step_numbering_formatting_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
-    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
     step_para = [p for p in doc.paragraphs if 'IPA' in p.text][0]
@@ -2255,20 +2280,21 @@ def main():
     test_resolve_reference_markers_missing_anchor_raises()
     test_resolve_reference_markers_duplicate_anchor_raises()
     test_heading2_has_no_automatic_page_break()
-    test_get_step_list_abstract_num_id_found()
-    test_get_step_list_abstract_num_id_missing_style()
+    test_get_step_clarification_abstract_num_id_found()
+    test_get_step_clarification_abstract_num_id_missing_style()
     test_create_num_instance_first_allocation()
     test_create_num_instance_sequential_allocations_dont_collide()
     test_create_num_instance_writes_start_override()
     test_ensure_blank_line_around_steps_markers_inserts_both_sides()
     test_ensure_blank_line_around_steps_markers_idempotent()
-    test_apply_section_scoped_step_numbering_single_section()
-    test_apply_section_scoped_step_numbering_reuses_numid_within_section()
-    test_apply_section_scoped_step_numbering_restarts_across_sections()
-    test_apply_section_scoped_step_numbering_unclosed_block_raises()
-    test_apply_section_scoped_step_numbering_open_block_across_section_boundary_raises()
-    test_apply_section_scoped_step_numbering_skips_gracefully_without_abstract_id()
-    test_apply_section_scoped_step_numbering_preserves_inline_formatting()
+    test_apply_field_based_step_numbering_single_step()
+    test_apply_field_based_step_numbering_number_precedes_step_text()
+    test_apply_field_based_step_numbering_clarifications_restart_per_step()
+    test_apply_field_based_step_numbering_bullets_left_alone()
+    test_apply_field_based_step_numbering_unclosed_block_raises()
+    test_apply_field_based_step_numbering_open_block_across_heading3_boundary_raises()
+    test_apply_field_based_step_numbering_skips_gracefully_without_clarification_style()
+    test_apply_field_based_step_numbering_preserves_inline_formatting()
     test_resolve_step_reference_builds_composite_field()
     test_compile_section_scoped_step_numbering_end_to_end()
     test_compile_duplicate_step_anchor_fails_clearly()
