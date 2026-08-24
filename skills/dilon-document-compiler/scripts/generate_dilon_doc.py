@@ -324,113 +324,6 @@ def _insert_table_before_section_properties(document, table):
         body.append(separator)
 
 
-def _add_runs(paragraph, spans):
-    """Append (text, bold, italic) tuples to `paragraph` as separate runs -
-    used for title-page boilerplate that bolds/italicizes specific words
-    mid-sentence."""
-    for text, bold, italic in spans:
-        run = paragraph.add_run(text)
-        run.font.bold = bold
-        run.font.italic = italic
-
-
-def build_title_page(document, metadata):
-    """
-    Build the title page (title, author table, master-document/
-    effectivity/approval boilerplate) directly via python-docx, in place
-    of a docxtpl-rendered TEMPLATE_Word_Content.docx. Only {{title}} and
-    {{author}} were ever dynamic in that template - everything else was
-    static boilerplate, now inlined here as plain Python.
-    """
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.enum.table import WD_TABLE_ALIGNMENT
-    from docx.oxml.ns import qn
-    from docx.oxml import OxmlElement
-
-    title_para = document.add_paragraph(metadata.get('title', ''), style='Title')
-
-    table = document.add_table(rows=1, cols=2)
-    table.columns[0].width = Inches(1.7326388888888888)
-    table.columns[1].width = Inches(4.814583333333333)
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    label_cell, value_cell = table.rows[0].cells
-    label_run = label_cell.paragraphs[0].add_run('Author/Revised by:')
-    label_run.font.bold = True
-    value_cell.paragraphs[0].add_run(metadata.get('author', ''))
-
-    # Explicit grid borders - 'Normal Table' alone carries none, which
-    # made this table invisible (indistinguishable from plain side-by-side
-    # text). Same border spec as create_signature_table()'s fix.
-    tbl_pr = table._element.tblPr
-    if tbl_pr is None:
-        tbl_pr = OxmlElement('w:tblPr')
-        table._element.insert(0, tbl_pr)
-    borders = OxmlElement('w:tblBorders')
-    for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
-        edge_el = OxmlElement(f'w:{edge}')
-        edge_el.set(qn('w:val'), 'single')
-        edge_el.set(qn('w:sz'), '8')
-        edge_el.set(qn('w:space'), '0')
-        edge_el.set(qn('w:color'), 'auto')
-        borders.append(edge_el)
-    tbl_pr.append(borders)
-
-    for _ in range(4):
-        document.add_paragraph()
-
-    document.add_paragraph('Master Document', style='Normal').alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    effectivity_heading = document.add_paragraph(style='Normal')
-    effectivity_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    effectivity_run = effectivity_heading.add_run('Effectivity and Location:')
-    effectivity_run.font.underline = True
-
-    effectivity_body = document.add_paragraph(style='Normal')
-    effectivity_body.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _add_runs(effectivity_body, [
-        ('This is an electronic document, the authoritative ', False, False),
-        ('Item', True, False),
-        (' ', False, True),
-        ('in the ', False, False),
-        ('Dilon Technologies', True, False),
-        (' Production Workspace in the ', False, False),
-        ('ARENA PLM system.', True, False),
-    ])
-
-    non_authoritative = document.add_paragraph(style='Normal')
-    non_authoritative.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _add_runs(non_authoritative, [
-        ('\nAll other copies of this document, either in electronic or physical media, shall be considered as ', False, False),
-        ('non-authoritative', True, False),
-        (' copies.', False, False),
-    ])
-
-    document.add_paragraph(style='Normal').alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    approval_heading = document.add_paragraph(style='Normal')
-    approval_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    approval_run = approval_heading.add_run('Approval, Release and Change History:')
-    approval_run.font.underline = True
-
-    approval_body = document.add_paragraph(style='Normal')
-    approval_body.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _add_runs(approval_body, [
-        ('Records of the approvals and release of this document version and its full revision history are available in the History ', False, False),
-        ('Subview', False, False),
-        (' of the Revisions View of the related ', False, False),
-        ('Item', True, False),
-        (' in the ', False, False),
-        ('Dilon Technologies Production Workspace', True, False),
-        (' in the ', False, False),
-        ('ARENA PLM system', True, False),
-    ])
-
-    for _ in range(3):
-        document.add_paragraph()
-
-    return title_para
-
-
 def generate_requirements_document(markdown_path, output_path, signature_template_path=None):
     """
     Generate final requirements Word document.
@@ -510,15 +403,7 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
         revision_doc.save(temp_part_b)
         print(f"No revisions found, created placeholder")
 
-    # Step 3: Build Part C (title page)
-    print("Building title page (Part C)...")
-    doc_c = Document()
-    build_title_page(doc_c, metadata)
-    temp_part_c = Path(output_path).parent / "_temp_part_c.docx"
-    doc_c.save(temp_part_c)
-    print(f"Part C built")
-
-    # Step 4: Convert Markdown body to Word (Part D) using signature template as style reference
+    # Step 3: Convert Markdown body to Word (Part D) using signature template as style reference
     print("Converting Markdown content to Word (Part D)...")
     temp_part_d = Path(output_path).parent / "_temp_part_d.docx"
 
@@ -570,9 +455,9 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
 
     print(f"Part D converted")
 
-    # Step 5: Merge all documents in order: A -> B -> C -> D
-    print("Merging all parts (A -> B -> C -> D)...")
-    composer = compose_documents(temp_part_a, temp_part_b, temp_part_c, temp_part_d)
+    # Step 4: Merge all parts in order: A -> B -> D
+    print("Merging all parts (A -> B -> D)...")
+    composer = compose_documents(temp_part_a, temp_part_b, temp_part_d)
     composer.save(output_path)
 
     # Ensure figure numbers / TOC page numbers are correct the moment the
@@ -582,7 +467,6 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     # Clean up temporary files
     temp_part_a.unlink()
     temp_part_b.unlink()
-    temp_part_c.unlink()
     temp_part_d.unlink()
 
     print(f"\nDocument generated successfully!")

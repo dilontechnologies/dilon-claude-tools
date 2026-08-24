@@ -480,14 +480,37 @@ def test_compile_has_no_leading_blank_paragraph():
     )
 
 
-def test_compile_header_signature_revision_widths_and_author_centering():
+def test_compile_has_no_title_page():
+    input_md = TEST_OUTPUT_DIR / "compile_test_no_title_page.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_no_title_page.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a valid document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+    check(not any(p.style and p.style.name == 'Title' for p in doc.paragraphs),
+          "no paragraph carries the 'Title' style - the title page is gone")
+    check(not any('Master Document' in p.text for p in doc.paragraphs),
+          "the title page's 'Master Document' boilerplate is gone")
+    check(not any('Effectivity and Location' in p.text for p in doc.paragraphs),
+          "the title page's 'Effectivity and Location' boilerplate is gone")
+
+
+def test_compile_header_signature_revision_widths():
     """Regression test for a formatting request: the running header,
     signature-approval table, and revision-history table must all extend
     to the page's full content width (previously narrower than the
     margins, leaving unused space on the right), with their fixed
     columns matching a hand-tuned reference document's widths exactly and
-    their remaining column absorbing whatever width is left. The
-    Author/Revised-by table on the title page must also be centered."""
+    their remaining column absorbing whatever width is left."""
     input_md = TEST_OUTPUT_DIR / "compile_test_column_geometry.md"
     output_docx = TEST_OUTPUT_DIR / "compile_test_column_geometry.docx"
     input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
@@ -569,11 +592,6 @@ def test_compile_header_signature_revision_widths_and_author_centering():
     check(cell_dxa(revision_table, 2) == rev_widths,
           f"revision table's actual per-cell widths match the tblGrid definition, not just the grid (got {cell_dxa(revision_table, 2)})")
     check(is_fixed_layout(revision_table), "revision table uses a fixed layout, so Word can't AutoFit its columns away")
-
-    author_table = next(t for t in doc.tables if header_row(t)[0] == "Author/Revised by:")
-    from docx.enum.table import WD_TABLE_ALIGNMENT
-    check(author_table.alignment == WD_TABLE_ALIGNMENT.CENTER,
-          f"Author/Revised-by table is centered on the page (got {author_table.alignment})")
 
 
 def test_compile_footer_table_layout():
@@ -1828,6 +1846,119 @@ def test_compile_duplicate_fig_anchor_fails_clearly():
           "the failure message names the duplicated label")
 
 
+def _bookmark_start_end_mismatches(doc):
+    """Walks a compiled document's body in order, treating bookmarkStart/
+    bookmarkEnd as a LIFO stack (proper nesting). Returns a list of
+    (end_id, expected_id_or_None) tuples for every bookmarkEnd whose id
+    doesn't close the innermost still-open bookmarkStart - i.e. every
+    place the document's bookmark structure isn't well-formed.
+
+    docxcompose's Composer.renumber_bookmarks() reassigns every
+    bookmarkStart's id sequentially in document order, then separately
+    reassigns every bookmarkEnd's id sequentially in document order,
+    assuming the Nth start always pairs with the Nth end. That's only
+    true when bookmarks never nest. Our documents nest constantly (an
+    un-narrowed heading bookmark stays open around a {#fig:x} bookmark
+    that opens and closes inside it), so the naive renumbering hands a
+    figure's bookmarkEnd the wrong id - the figure's real end lands on
+    an unrelated, later bookmark instead."""
+    stack = []
+    mismatches = []
+    for el in doc.element.body.iter():
+        if el.tag == qn('w:bookmarkStart'):
+            stack.append(el.get(qn('w:id')))
+        elif el.tag == qn('w:bookmarkEnd'):
+            end_id = el.get(qn('w:id'))
+            if stack and stack[-1] == end_id:
+                stack.pop()
+            else:
+                mismatches.append((end_id, stack[-1] if stack else None))
+    return mismatches
+
+
+def _bookmark_span_contains_drawing(doc, bookmark_name):
+    """True if the named bookmark's start...end span (in document order)
+    contains a <w:drawing> (embedded picture) element - i.e. the
+    bookmark isn't narrowly wrapping just caption text, it's swallowing
+    an image. This is the literal Word-visible symptom of the
+    docxcompose renumbering bug: a REF field against a bookmark whose
+    end got reassigned to some later, unrelated position spans - and so
+    inserts a copy of - everything in between, images included."""
+    body = doc.element.body
+    all_els = list(body.iter())
+    start_idx = end_idx = None
+    for i, el in enumerate(all_els):
+        if el.tag == qn('w:bookmarkStart') and el.get(qn('w:name')) == bookmark_name:
+            start_idx = i
+            start_id = el.get(qn('w:id'))
+            break
+    if start_idx is None:
+        raise AssertionError(f"no bookmarkStart named {bookmark_name!r} found")
+    for i in range(start_idx + 1, len(all_els)):
+        el = all_els[i]
+        if el.tag == qn('w:bookmarkEnd') and el.get(qn('w:id')) == start_id:
+            end_idx = i
+            break
+    if end_idx is None:
+        raise AssertionError(f"no matching bookmarkEnd for {bookmark_name!r} (id={start_id})")
+    return any(el.tag == qn('w:drawing') for el in all_els[start_idx:end_idx])
+
+
+MERGE_BUG_MARKDOWN = (
+    '\n## Widget Assembly\n\n'
+    '![First widget.](merge_bug_images/one.png){#fig:widget-one}\n\n'
+    'Reference the first widget here ([](#fig:widget-one)).\n\n'
+    '![Second widget.](merge_bug_images/two.png){#fig:widget-two}\n\n'
+    '![Third widget.](merge_bug_images/three.png){#fig:widget-three}\n'
+)
+
+
+def test_compile_figure_reference_bookmark_not_corrupted_by_merge():
+    """Regression test for a bug report: a [](#fig:x) cross-reference
+    rendered as a live copy of the figure's image pasted into the text,
+    instead of hyperlinked "Figure N.M" text. Root cause: Part D's own
+    bookmarks are correctly paired (verified separately by tracing every
+    pipeline stage), but compose_documents()'s merge step
+    (docxcompose's Composer.append() -> renumber_bookmarks()) reassigns
+    bookmarkStart/bookmarkEnd ids independently and positionally,
+    corrupting any nested bookmark pair - which an un-narrowed heading
+    bookmark wrapping a {#fig:x} bookmark always produces. Reproduces
+    with an ordinary (unnamed) heading followed by three back-to-back
+    figures, the first one referenced - the same shape as the real
+    document that surfaced the bug."""
+    images_dir = TEST_OUTPUT_DIR / "merge_bug_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "one.png").write_bytes(make_test_png())
+    (images_dir / "two.png").write_bytes(make_test_png())
+    (images_dir / "three.png").write_bytes(make_test_png())
+
+    markdown = SAMPLE_MARKDOWN + MERGE_BUG_MARKDOWN
+    input_md = TEST_OUTPUT_DIR / "compile_test_merge_bug.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_merge_bug.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for the merge-bug repro document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+
+    mismatches = _bookmark_start_end_mismatches(doc)
+    check(not mismatches,
+          f"every bookmarkEnd in the merged document closes its correct bookmarkStart "
+          f"(found {len(mismatches)} mismatch(es): {mismatches[:5]}{'...' if len(mismatches) > 5 else ''})")
+
+    check(not _bookmark_span_contains_drawing(doc, 'fig:widget-one'),
+          "the fig:widget-one bookmark wraps only its caption text, not an embedded picture "
+          "(a REF field against it would otherwise paste the image, not hyperlinked text)")
+
+
 def test_validate_list_nesting_depth_passes_at_three_levels():
     md = (
         "#. Top\n"
@@ -2091,7 +2222,8 @@ def main():
     test_create_signature_table_structure()
     test_compile_signature_table_generated_programmatically()
     test_compile_has_no_leading_blank_paragraph()
-    test_compile_header_signature_revision_widths_and_author_centering()
+    test_compile_has_no_title_page()
+    test_compile_header_signature_revision_widths()
     test_compile_footer_table_layout()
     test_compile_bom_front_matter()
     test_compile_table_marker_no_blank_line()
@@ -2136,6 +2268,7 @@ def main():
     test_compile_broken_reference_fails_clearly()
     test_compile_duplicate_sec_anchor_fails_clearly()
     test_compile_duplicate_fig_anchor_fails_clearly()
+    test_compile_figure_reference_bookmark_not_corrupted_by_merge()
     test_validate_list_nesting_depth_passes_at_three_levels()
     test_validate_list_nesting_depth_rejects_four_levels()
     test_validate_list_nesting_depth_ignores_bullet_lists()
