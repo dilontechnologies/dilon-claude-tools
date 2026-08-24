@@ -230,6 +230,24 @@ def _prepend_step_number_fields(para):
     return start_el, end_el
 
 
+def _decrement_bullet_ilvl(p_element, ilvl):
+    """Shifts a bullet-list paragraph's <w:numPr>/<w:ilvl> up by one level
+    (e.g. ilvl 2 -> 1), leaving its numId untouched. Compensates for the
+    step it's nested under no longer being a real list item: Pandoc
+    still assigns ilvl based on the *original* markdown nesting depth,
+    which counted the step itself as level 0, so every bullet inside
+    @@@STEPS@@@ renders one level deeper than it should once the step's
+    own level is stripped out. A bullet already at ilvl 0 (nested
+    directly under nothing - shouldn't normally occur inside a block)
+    is left alone rather than going negative."""
+    if ilvl in (None, '0'):
+        return
+    num_pr = p_element.find(qn('w:pPr')).find(qn('w:numPr'))
+    ilvl_el = num_pr.find(qn('w:ilvl'))
+    if ilvl_el is not None:
+        ilvl_el.set(qn('w:val'), str(int(ilvl) - 1))
+
+
 def _find_step_bookmark_start_in(para_element):
     """Returns the first <w:bookmarkStart> inside para_element whose
     name starts with 'step:' (the author's []{#step:label} anchor,
@@ -252,7 +270,9 @@ def apply_field_based_step_numbering(docx_file, clarification_abstract_num_id):
     (an ordered "clarification") gets relettered onto a fresh numId of
     the 'Dilon Step Clarification List' abstract list, one fresh
     instance per top-level step. A bullet-list paragraph inside a block
-    is left completely alone.
+    keeps its own bullet styling, but has its ilvl decremented by one
+    (see _decrement_bullet_ilvl()) to compensate for the step above it
+    no longer occupying a real list level.
 
     Raises StepBlockError for an @@@STEPS@@@ with no matching
     @@@END_STEPS@@@, an @@@END_STEPS@@@ with no @@@STEPS@@@ open, or a
@@ -262,7 +282,7 @@ def apply_field_based_step_numbering(docx_file, clarification_abstract_num_id):
     """
     from docx import Document
     doc = Document(docx_file)
-    numbering_part = doc.part.numbering_part if clarification_abstract_num_id is not None else None
+    numbering_part = doc.part.numbering_part
     numbering_element = numbering_part.element if numbering_part is not None else None
 
     decimal_ids = _decimal_abstract_num_ids(numbering_element) if numbering_element is not None else set()
@@ -303,8 +323,11 @@ def apply_field_based_step_numbering(docx_file, clarification_abstract_num_id):
             continue
 
         num_id, ilvl = _paragraph_num_id_and_ilvl(para._p)
-        if num_id is None or num_id_to_abstract.get(num_id) not in decimal_ids:
-            continue  # bullet or non-list paragraph inside a block - left alone
+        if num_id is None:
+            continue  # non-list paragraph inside a block - left alone
+        if num_id_to_abstract.get(num_id) not in decimal_ids:
+            _decrement_bullet_ilvl(para._p, ilvl)  # bullet - left un-styled, but re-leveled
+            continue
 
         if ilvl in (None, '0'):
             current_clarification_num_id = None

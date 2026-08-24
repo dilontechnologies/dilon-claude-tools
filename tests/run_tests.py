@@ -1634,6 +1634,39 @@ def test_apply_field_based_step_numbering_bullets_left_alone():
           "the bullet item is left with its own style, not reassigned to the clarification list style")
 
 
+def test_apply_field_based_step_numbering_bullets_ilvl_decremented():
+    """A bullet's ilvl inside @@@STEPS@@@ is Pandoc's original markdown-
+    nesting depth, which still counts the step itself as a real list
+    level even though the step is stripped of its own numPr. Left
+    uncorrected, every bullet inside a block renders one indent level
+    deeper than it should. Covers both a bullet directly under a step
+    (ilvl 1 -> 0) and a bullet nested under an ordered clarification
+    (ilvl 2 -> 1)."""
+    md = (
+        "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n"
+        "#. First.\n"
+        "    - Directly under the step.\n"
+        "#. Second.\n"
+        "    #. An ordered clarification.\n"
+        "        - Under the ordered clarification.\n"
+        "\n@@@END_STEPS@@@\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_bullets_ilvl_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+
+    doc = Document(docx_path)
+    direct_bullet = [p for p in doc.paragraphs if 'Directly under the step' in p.text][0]
+    _, direct_ilvl = dilon_docx_common._paragraph_num_id_and_ilvl(direct_bullet._p)
+    check(direct_ilvl in (None, '0'), f"a bullet directly under a step is decremented to ilvl 0 (got {direct_ilvl!r})")
+
+    nested_bullet = [p for p in doc.paragraphs if 'Under the ordered clarification' in p.text][0]
+    _, nested_ilvl = dilon_docx_common._paragraph_num_id_and_ilvl(nested_bullet._p)
+    check(nested_ilvl == '1', f"a bullet under an ordered clarification is decremented to ilvl 1 (got {nested_ilvl!r})")
+
+
 def test_apply_field_based_step_numbering_unclosed_block_raises():
     md = "@@@STEPS@@@\n\n#. First\n"
     docx_path = TEST_OUTPUT_DIR / "step_numbering_unclosed_test.docx"
@@ -1705,13 +1738,25 @@ def test_resolve_step_reference_builds_composite_field():
     check('REF step:x \\h' in xml, "the reference resolves via a plain REF \\h against the narrowed bookmark")
     check('Step ' in xml, "the literal 'Step ' prefix is present at the reference site")
 
+    doc = Document(docx_path)
+    els = list(doc.element.body.iter())
+    start_idx = next(i for i, el in enumerate(els) if el.tag == qn('w:bookmarkStart') and el.get(qn('w:name')) == 'step:x')
+    start_id = els[start_idx].get(qn('w:id'))
+    end_idx = next(i for i in range(start_idx + 1, len(els)) if els[i].tag == qn('w:bookmarkEnd') and els[i].get(qn('w:id')) == start_id)
+    check(end_idx > start_idx + 1,
+          "the narrowed bookmark wraps the step's number-field span, not an empty gap between "
+          "bookmarkStart and bookmarkEnd (regression: an anchor on a nested clarification, which "
+          "is never narrowed, produces exactly this empty-span shape and REF \\h then resolves to "
+          "nothing)")
+
 
 STEP_REDESIGN_MARKDOWN = (
-    '\n## Carrier Board Assembly Procedure\n\n'
+    '\n## Carrier Board Assembly\n\n'
+    '### Cleaning Procedure\n\n'
     '@@@STEPS@@@\n\n'
     '#. Wear clean gloves.\n'
-    '#. Simple dirt such as lint or light dust can be blown away before wiping.\n'
-    '    #. Hold the board by the edges. []{#step:hold-board-by-edges}\n\n'
+    '#. Hold the board by the edges. []{#step:hold-board-by-edges}\n'
+    '    #. Simple dirt such as lint or light dust can be blown away before wiping.\n\n'
     '@@@END_STEPS@@@\n\n'
     'NOTE: Clean the entire crystal but give special attention to the polished end.\n\n'
     '@@@STEPS@@@\n\n'
@@ -1722,49 +1767,75 @@ STEP_REDESIGN_MARKDOWN = (
 )
 
 
-def test_compile_section_scoped_step_numbering_end_to_end():
-    """Integration test: two @@@STEPS@@@ blocks in one section
-    (interrupted by a NOTE), a nested sub-step, and a cross-reference,
-    compiled through the real pipeline."""
+def test_compile_field_based_step_numbering_end_to_end():
+    """Integration test: two @@@STEPS@@@ blocks in one Heading 3
+    subsection (interrupted by a NOTE), a nested ordered clarification,
+    and a cross-reference, compiled through the real pipeline."""
     markdown = SAMPLE_MARKDOWN + STEP_REDESIGN_MARKDOWN
-    input_md = TEST_OUTPUT_DIR / "compile_test_section_step_numbering.md"
-    output_docx = TEST_OUTPUT_DIR / "compile_test_section_step_numbering.docx"
+    input_md = TEST_OUTPUT_DIR / "compile_test_field_step_numbering.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_field_step_numbering.docx"
     input_md.write_text(markdown, encoding="utf-8")
 
     result = subprocess.run(
         [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
-    check(result.returncode == 0, "compiler exits 0 for a document with section-scoped @@@STEPS@@@ blocks")
+    check(result.returncode == 0, "compiler exits 0 for a document with field-based @@@STEPS@@@ blocks")
     if result.returncode != 0:
         print(result.stdout)
         print(result.stderr)
         return
 
     doc = Document(output_docx)
-    check(all('@@@STEPS' not in p.text and 'STEP' not in p.text for p in doc.paragraphs
-              if p.style is None or p.style.name != 'Dilon Step List' or '@@@' not in p.text),
-          "no wrapper marker or sentinel text remains anywhere")
-    step_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List']
-    check(len(step_paragraphs) == 5, f"all 5 steps across both blocks get the 'Dilon Step List' style (got {len(step_paragraphs)})")
-
-    num_ids = set()
-    for p in step_paragraphs:
-        num_id_el = p._p.find('.//' + qn('w:numPr') + '/' + qn('w:numId'))
-        if num_id_el is not None:
-            num_ids.add(num_id_el.get(qn('w:val')))
-    check(len(num_ids) == 1, f"both blocks in the same section share one numId (got {num_ids})")
+    check(all('@@@STEPS' not in p.text and '@@@END_STEPS' not in p.text for p in doc.paragraphs),
+          "no wrapper marker text remains anywhere")
+    step_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading']
+    check(len(step_paragraphs) == 4, f"all 4 top-level steps across both blocks get 'Dilon Step Heading' (got {len(step_paragraphs)})")
+    clarification_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Clarification List']
+    check(len(clarification_paragraphs) == 1, f"the one nested clarification gets 'Dilon Step Clarification List' (got {len(clarification_paragraphs)})")
 
     with zipfile.ZipFile(output_docx) as z:
         xml = z.read('word/document.xml').decode('utf-8')
     check('w:name="step:hold-board-by-edges"' in xml, "the step's anchor survives as a real bookmark")
-    check('REF step:hold-board-by-edges \\r \\h' in xml, "the cross-reference resolves to a live REF field")
-    check('STYLEREF 2 \\s' in xml, "the cross-reference includes a live section-number field")
+    check('REF step:hold-board-by-edges \\h' in xml, "the cross-reference resolves to a live REF field")
+    check('STYLEREF 3 \\s' in xml, "steps carry a live Heading-3-scoped number field")
+
+
+def test_compile_steps_with_bullets_end_to_end():
+    """Open validation item from the spec: bullets nested inside
+    @@@STEPS@@@ (directly under a step, and under an ordered
+    clarification) must still compile without error. Indentation is
+    inspected manually against the produced .docx, not asserted here."""
+    markdown = SAMPLE_MARKDOWN + (
+        '\n## Bullet Coverage\n\n### Subsection Title\n\n'
+        '@@@STEPS@@@\n\n'
+        '#. Do the first thing.\n'
+        '    - A bulleted clarification directly under the step.\n'
+        '#. Do the second thing.\n'
+        '    #. An ordered clarification.\n'
+        '        - A bullet nested under the ordered clarification.\n'
+        '\n@@@END_STEPS@@@\n'
+    )
+    input_md = TEST_OUTPUT_DIR / "compile_test_steps_with_bullets.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_steps_with_bullets.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for @@@STEPS@@@ content containing bullets")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+    print(f"  Compiled {output_docx} - open it in Word to visually confirm bullet indentation is acceptable "
+          "(spec's open validation item; not asserted automatically).")
 
 
 def test_compile_duplicate_step_anchor_fails_clearly():
     markdown = SAMPLE_MARKDOWN + (
-        '\n## Section\n\n@@@STEPS@@@\n\n'
+        '\n## Section\n\n### Subsection\n\n@@@STEPS@@@\n\n'
         '#. First. []{#step:dup}\n#. Second. []{#step:dup}\n\n@@@END_STEPS@@@\n'
     )
     input_md = TEST_OUTPUT_DIR / "compile_test_duplicate_step_anchor.md"
@@ -1817,7 +1888,7 @@ def test_compile_full_cross_reference_set_end_to_end():
         xml = z.read('word/document.xml').decode('utf-8')
     check('REF fig:widget \\h' in xml, "the figure reference resolved")
     check('REF sec:assembly \\r \\h' in xml, "the section reference resolved")
-    check('REF step:install-widget \\r \\h' in xml, "the step reference resolved")
+    check('REF step:install-widget \\h' in xml, "the step reference resolved")
     check('XREF' not in xml, "no sentinel remains")
 
 
@@ -2290,12 +2361,14 @@ def main():
     test_apply_field_based_step_numbering_number_precedes_step_text()
     test_apply_field_based_step_numbering_clarifications_restart_per_step()
     test_apply_field_based_step_numbering_bullets_left_alone()
+    test_apply_field_based_step_numbering_bullets_ilvl_decremented()
     test_apply_field_based_step_numbering_unclosed_block_raises()
     test_apply_field_based_step_numbering_open_block_across_heading3_boundary_raises()
     test_apply_field_based_step_numbering_skips_gracefully_without_clarification_style()
     test_apply_field_based_step_numbering_preserves_inline_formatting()
     test_resolve_step_reference_builds_composite_field()
-    test_compile_section_scoped_step_numbering_end_to_end()
+    test_compile_field_based_step_numbering_end_to_end()
+    test_compile_steps_with_bullets_end_to_end()
     test_compile_duplicate_step_anchor_fails_clearly()
     test_compile_full_cross_reference_set_end_to_end()
     test_compile_broken_reference_fails_clearly()

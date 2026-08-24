@@ -347,7 +347,7 @@ This is a paragraph after the list.
 - Never type a literal number (`1.`, `2.`) - always `#.`, exactly like bullets always use `-`, never a hand-typed count
 - Nesting is 2 spaces or 1 tab per level, same convention as unordered lists (Section 5.1)
 - **Maximum nesting depth is three levels.** A fourth level fails compilation with an error rather than rendering incorrectly - reformat as separate lists or sub-bullets instead
-- Renders as native, auto-numbered dotted-decimal (`1.`, `1.1.`, `1.1.1.`) via the shared "Dilon Step List" Word style - the same style `@@@STEPS@@@` procedures use, for a consistent look across both
+- Renders as native, auto-numbered dotted-decimal (`1.`, `1.1.`, `1.1.1.`) via the shared "Dilon Step List" Word style. `@@@STEPS@@@` procedures (Section 6) use their own distinct styling instead
 
 ### 5.3 Continuing a List Across an Interruption
 
@@ -415,7 +415,9 @@ identifier per step across the whole document. Use `@@@STEPS@@@` for
 this instead of a plain `#.` list.
 
 ```markdown
-## Cleaning Procedure
+## Carrier Board Assembly
+
+### Cleaning Procedure
 
 @@@STEPS@@@
 
@@ -428,10 +430,11 @@ this instead of a plain `#.` list.
 ```
 
 **Rules:**
-- `@@@STEPS@@@` takes no attributes - just the bare marker, opening and closing (`@@@END_STEPS@@@`) around `#.` list content, same tab-nesting convention as any ordered list (Section 5.2)
-- A step's top-level number is scoped to the nearest preceding `##` heading. Every `@@@STEPS@@@` block within the *same* section shares one continuous counter automatically - no marker needed to "continue" a procedure interrupted by prose, a photo, or a `NOTE:`. A new `##` heading always starts a fresh counter at 1.
-- **In the procedure itself**, a step shows only its bare native number (`1.`, `1.1.`) - visually identical to a plain `#.` list, since both use the "Dilon Step List" style.
-- **When referenced elsewhere** (see below), a step resolves to `Step <section>-<n>[.<m>]` (e.g. `Step 6-3.1`) - the section number and "Step " prefix only ever appear in a cross-reference, never in the procedure's own in-place numbering.
+- `@@@STEPS@@@` takes no attributes - just the bare marker, opening and closing (`@@@END_STEPS@@@`) around `#.` list content, same tab-nesting convention as any ordered list (Section 5.2).
+- A step's number is scoped to the nearest preceding `###` (Heading 3) - a new `###` always starts a fresh count at 1. Every `@@@STEPS@@@` block within the *same* Heading 3 subsection shares one continuous count automatically - no marker needed to "continue" a procedure interrupted by prose, a photo, or a `NOTE:`.
+- **In the procedure itself**, a step shows its live `<H2 number>.<H3 number>.<step number>` (e.g. `2.3.1`) - no "Step " word in place.
+- A nested `#.` item under a step is a **clarification**: it's relettered `a.`, `b.`, `c.` and restarts at "a." for every step (it does not continue the previous step's lettering). A nested `-` (bulleted) item is left as a plain bullet.
+- **When referenced elsewhere** (see below), a step resolves to `Step <n>.<m>.<p>` (e.g. `Step 2.3.1`) - the "Step " word only ever appears in a cross-reference, never in the procedure's own in-place numbering.
 - Maximum nesting depth is three levels, same cap as any ordered list.
 
 **Referencing a step:**
@@ -442,6 +445,8 @@ Give the step an anchor with a bracketed-span id - `[]{#step:label}`, not a bare
 #. Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
 ```
 
+The anchor must sit on a **top-level step**, not on a nested clarification - only a top-level step's number is field-based and cross-reference-ready; a clarification keeps its own native list lettering and isn't currently a valid reference target.
+
 Every `{#step:label}` anchor must be unique across the whole document - a duplicate fails compilation with an error.
 
 Reference it elsewhere with an **empty-text** link - the compiler fills in the current number automatically, so it can never go stale:
@@ -450,7 +455,7 @@ Reference it elsewhere with an **empty-text** link - the compiler fills in the c
 As described in [](#step:hold-board-by-edges), always support the board by its edges.
 ```
 
-This renders as, e.g., "As described in Step 6-3.1, always support the
+This renders as, e.g., "As described in Step 2.3.1, always support the
 board by its edges" - a live Word field, not typed text. Supplying real
 link text instead (`[see the earlier step](#step:hold-board-by-edges)`)
 is respected as-is, same as a figure or section cross-reference. A
@@ -462,13 +467,15 @@ text.
 continued, with a later reference back to it:
 
 ```markdown
-## Cleaning Procedure
+## Carrier Board Assembly
+
+### Cleaning Procedure
 
 @@@STEPS@@@
 
 #. Wear clean gloves.
-#. Simple dirt such as lint or light dust can be blown away before wiping.
-    #. Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
+#. Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
+    #. Simple dirt such as lint or light dust can be blown away before wiping.
 
 @@@END_STEPS@@@
 

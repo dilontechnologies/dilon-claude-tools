@@ -71,8 +71,8 @@ from dilon_docx_common import (  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from step_numbering import (  # noqa: E402
     ensure_blank_line_around_steps_markers,
-    get_step_list_abstract_num_id,
-    apply_section_scoped_step_numbering,
+    get_step_clarification_abstract_num_id,
+    apply_field_based_step_numbering,
     resolve_step_reference,
     StepBlockError,
 )
@@ -439,9 +439,9 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     center_image_paragraphs(temp_part_d)
 
     try:
-        step_list_abstract_num_id = get_step_list_abstract_num_id(signature_template_path)
-        print("Applying step-list numbering...")
-        apply_section_scoped_step_numbering(temp_part_d, step_list_abstract_num_id)
+        step_clarification_abstract_num_id = get_step_clarification_abstract_num_id(signature_template_path)
+        print("Applying step-heading numbering...")
+        apply_field_based_step_numbering(temp_part_d, step_clarification_abstract_num_id)
 
         narrow_section_bookmarks(temp_part_d)
         resolve_reference_markers(temp_part_d, {

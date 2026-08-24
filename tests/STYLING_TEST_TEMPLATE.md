@@ -235,25 +235,26 @@ the "Cross-References" section below. The same is true for figures and
 sections: see [](#fig:i2c-bus-topology) and [](#sec:figures-and-images)
 below, both resolved here even though neither target has appeared yet.
 
-### Basic Sequence with Nesting
+### Cleaning Procedure
 
-No manually-typed numbers - Word applies native dotted-decimal
-numbering itself, scoped to this "Numbered Step List Examples" section:
+No manually-typed numbers - Word applies a live `<H2>.<H3>.<n>` number
+itself (e.g. `5.1.1`), scoped to this "Cleaning Procedure" (Heading 3)
+subsection. A nested `#.` item reletters as `a.`, `b.`, ...; a nested
+`-` item stays a plain bullet:
 
 @@@STEPS@@@
 
 #. Wear clean gloves before handling any board.
-#. Simple dirt such as lint or light dust can be blown away before wiping.
-    #. Hold the board by the edges. []{#step:hold-board-by-edges}
+#. Hold the board by the edges. []{#step:hold-board-by-edges}
+    #. Simple dirt such as lint or light dust can be blown away before wiping.
     #. Wipe with **IPA** and a lint-free cloth.
+        - A visible smear does not always mean contamination is present.
 
 @@@END_STEPS@@@
 
-### Interrupted Sequence, Automatically Continued
-
 A procedure interrupted by prose picks back up automatically within the
-same section - no marker needed - continuing from step 2 above, not
-restarting at 1:
+same Heading 3 subsection - no marker needed - continuing the number
+sequence above, not restarting at 1:
 
 NOTE: Clean the entire crystal but give special attention to ensure the
 polished end is free of dust, as that is the bonding surface.
@@ -267,7 +268,10 @@ polished end is free of dust, as that is the bonding surface.
 
 ### Digit-Adjacent Step Text
 
-A step whose text starts with a number - a common shape in real work
+A new Heading 3 always starts step numbering fresh at 1, even while
+still under the same "Numbered Step List Examples" (Heading 2) section -
+proving the reset is scoped to Heading 3, not Heading 2. Also exercises
+a step whose text starts with a number - a common shape in real work
 instructions ("5 minutes", "10 mA") that must not corrupt the step's own
 internal numbering:
 
@@ -283,7 +287,7 @@ internal numbering:
 
 Give a step an anchor with `[]{#step:label}` (as done above on "Hold the
 board by the edges"), then reference it elsewhere with an **empty-text**
-link - the number fills in live as `Step <section>-<n>`, so it stays
+link - the number fills in live as `Step <n>.<m>.<p>`, so it stays
 correct even if steps are added or removed above it:
 
 As described in [](#step:hold-board-by-edges), always support the board
@@ -312,8 +316,11 @@ converted into a real numbered list:
 
 ## Second Numbered Step List Section
 
-A new `##` heading always starts step numbering fresh at 1, regardless
-of how far the previous section's steps counted:
+A new Heading 2 (with a fresh Heading 3 beneath it) always starts step
+numbering fresh at 1, regardless of how far the previous section's
+steps counted:
+
+### Housing Inspection
 
 @@@STEPS@@@
 
@@ -756,7 +763,7 @@ To test this document:
 
 Check the following in the generated Word document:
 
-- [ ] Title page with correct document number and revision
+- [ ] No separate title page - the document goes straight from the signature/revision pages into the table of contents
 - [ ] Signature page with all three approvers
 - [ ] Revision history table with all entries
 - [ ] Table of contents with correct page numbers
@@ -771,14 +778,14 @@ Check the following in the generated Word document:
 - [ ] "Ordered Lists" renders auto-numbered (no hand-typed digits) via the "Dilon Step List" style, visually consistent with the step lists below
 - [ ] "Three-level nested ordered list" shows correct dotted-decimal numbering (`1.`, `1.1.`, `1.1.1.`) at all three levels
 - [ ] "Interrupted and continued ordered list" continues from 3 (not restart at 1) across the interrupting paragraph
-- [ ] "Numbered Step List Examples" steps show native, correctly-nested dotted-decimal numbers (`1.`, `1.1`, `1.2`) in place - no manually-typed digits, no section prefix, no "Step" word
-- [ ] The "Interrupted Sequence, Automatically Continued" steps continue from 2 (not restart at 1) despite the intervening NOTE, with no `continue` marker in the markdown
-- [ ] The "Digit-Adjacent Step Text" steps render correctly - no corrupted/skipped numbers from the "5 minutes"/"24 AWG" text
-- [ ] "Second Numbered Step List Section" restarts step numbering at 1, independent of how far "Numbered Step List Examples" counted
-- [ ] Ctrl+click on any of the three empty-text step references to "hold the board by the edges" (including the forward reference above "Basic Sequence with Nesting") jumps to that step, and each displays the correct live `Step <section>-<n>` text (e.g. "Step 5-1.1")
+- [ ] "Cleaning Procedure" steps show a live `<H2>.<H3>.<n>` number (e.g. `5.1.1`) in place - no manually-typed digits, no "Step" word
+- [ ] The steps interrupted by the NOTE continue the number sequence from "Cleaning Procedure" above (not restart at 1) despite the intervening NOTE, with no `continue` marker in the markdown
+- [ ] "Digit-Adjacent Step Text" restarts its own numbering at 1 (a new Heading 3 under the same Heading 2 as "Cleaning Procedure") - proving the reset is scoped to Heading 3, not Heading 2 - and renders correctly with no corrupted/skipped numbers from the "5 minutes"/"24 AWG" text
+- [ ] "Second Numbered Step List Section" / "Housing Inspection" restarts step numbering at 1, independent of how far "Numbered Step List Examples" counted
+- [ ] Ctrl+click on any of the three empty-text step references to "hold the board by the edges" (including the forward reference above "Cleaning Procedure") jumps to that step, and each displays the correct live `Step <n>.<m>.<p>` text (e.g. "Step 5.1.1")
 - [ ] "the board-handling step" (real link text) renders as a plain hyperlink, not a live step-number field
 - [ ] The `@@@STEPS@@@` syntax shown in the fenced code block under "Syntax Shown as a Documentation Example" renders as plain code text - not converted into a real numbered list
-- [ ] "IPA" in the first nested step renders bold
+- [ ] "IPA" in the first nested step renders bold, and the bulleted clarification beneath it ("A visible smear...") renders as a plain bullet, not relettered
 - [ ] Code blocks use "Source Code" style
 - [ ] Bold and italic text render correctly
 - [ ] Footnotes appear at bottom of pages
