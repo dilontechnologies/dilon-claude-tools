@@ -1691,20 +1691,19 @@ def test_apply_field_based_step_numbering_preserves_inline_formatting():
 
 
 def test_resolve_step_reference_builds_composite_field():
-    md = "## Section One\n\n@@@STEPS@@@\n\n#. Hold the board. []{#step:x}\n\n@@@END_STEPS@@@\n\nSee [](#step:x).\n"
+    md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. Hold the board. []{#step:x}\n\n@@@END_STEPS@@@\n\nSee [](#step:x).\n"
     md = dilon_docx_common.preprocess_reference_markers(md)
     docx_path = TEST_OUTPUT_DIR / "step_resolver_callback_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
-    abstract_id = step_numbering.get_step_list_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_section_scoped_step_numbering(docx_path, abstract_id)
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
     dilon_docx_common.resolve_reference_markers(docx_path, {'step': step_numbering.resolve_step_reference})
 
     with zipfile.ZipFile(docx_path) as z:
         xml = z.read('word/document.xml').decode('utf-8')
-    check('STYLEREF 2 \\s' in xml, "the section-number half is present")
-    check('REF step:x \\r \\h' in xml, "the step-number half is present")
-    check('Step ' in xml, "the literal 'Step ' prefix is present")
+    check('REF step:x \\h' in xml, "the reference resolves via a plain REF \\h against the narrowed bookmark")
+    check('Step ' in xml, "the literal 'Step ' prefix is present at the reference site")
 
 
 STEP_REDESIGN_MARKDOWN = (

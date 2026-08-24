@@ -349,16 +349,15 @@ def resolve_step_reference(para, bookmark_name):
     """
     type_resolvers['step'] callback for
     dilon_docx_common.resolve_reference_markers(): literal "Step " +
-    a live STYLEREF (nearest Heading 2's own section number) + literal
-    "-" + a hyperlinked REF \\r against the step's own bookmark (\\r
-    extracts the step's natively-rendered list number - unlike fig/sec,
-    step's bookmark is already exactly where it needs to be, authored
-    as a tight inline {#step:label} anchor, so no narrowing pass is
-    needed for this type).
+    a plain REF against the step's own bookmark (Task 3's
+    apply_field_based_step_numbering() already narrowed that bookmark
+    down to wrap just the number-field span, so \\h alone reproduces
+    the live "2.3.1" text - no \\r needed, since there's no native list
+    marker to extract anymore). The in-place number itself carries no
+    "Step " word (matches the reviewer's reference-document
+    convention), so it's added here, at the reference site, instead.
     """
     para.add_run('Step ')
-    add_field_simple_run(para, ' STYLEREF 2 \\s ', '1')
-    para.add_run('-')
-    add_complex_field(para, f'REF {bookmark_name} \\r \\h', '1')
+    add_complex_field(para, f'REF {bookmark_name} \\h', '1')
 
 
