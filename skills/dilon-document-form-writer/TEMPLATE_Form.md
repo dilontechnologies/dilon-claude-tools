@@ -4,9 +4,10 @@ author: "Author Name"
 department: "--"
 doc_number: "FO-XXXXX"
 current_revision: "00"
-regulatory_rep: "--"
-quality_rep: "--"
 department_head: "--"
+signature_fields:
+  - department: "--"
+    name: "--"
 revisions:
   - number: "00"
     description: "Initial release"

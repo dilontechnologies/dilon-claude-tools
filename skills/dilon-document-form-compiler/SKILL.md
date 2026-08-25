@@ -23,7 +23,7 @@ If it reports any `[FAIL]`, stop and tell the user exactly which dependency is m
 python scripts/generate_dilon_form.py <input.md> <output.docx> <base_template>
 ```
 
-- `<input.md>`: the form's markdown file, with the same YAML front-matter shape as `dilon-document-compiler` expects (see its `SKILL.md`) - keep it rich (`author`/`regulatory_rep`/`quality_rep`/`department_head`/`revisions` and all) even though the base template's header only renders `title`/`doc_number`/`current_revision`; those fields are used elsewhere (approval tracking, audits).
+- `<input.md>`: the form's markdown file, with the same YAML front-matter shape as `dilon-document-compiler` expects (see its `SKILL.md`) - keep it rich (`author`/`department_head`/`signature_fields`/`revisions` and all) even though the base template's header only renders `title`/`doc_number`/`current_revision`; those fields are used elsewhere (approval tracking, audits).
 - `<output.docx>`: defaults to the same name as the input with a `.docx` extension if not specified.
 - `<base_template>`: defaults to repo-root `templates/TEMPLATE_Word_Base.docx` - the same header/footer/styles template `dilon-document-compiler` uses. There is no separate form-only template: neither skill's template carries body content of its own, so both share the one file.
 

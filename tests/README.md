@@ -98,7 +98,7 @@ Test outputs are created in `tests/test-output/`:
 - Must have valid YAML front matter (between `---` delimiters)
 - Required YAML fields:
   - `title`, `author`, `department`, `doc_number`
-  - `current_revision`, `regulatory_rep`, `quality_rep`, `department_head`
+  - `current_revision`, `department_head`, `signature_fields` (array of `department`/`name` pairs)
   - `revisions` (array)
 - Each revision must have:
   - `number`, `description`, `eco_number`, `eco_date`

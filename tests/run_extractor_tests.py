@@ -241,17 +241,22 @@ def test_extract_signature_fields_clean_labels():
         ["Group", "Preparer", "Signature"],
         ["Engineering", "P. Gray", "Electronic"],
         ["Department", "Name", "Signature"],
+        ["Engineering", "Kevin Lint", "Electronic"],
         ["Regulatory", "Pedro Cruz", "Electronic"],
         ["Quality", "Rebecca Miller", "Electronic"],
-        ["Engineering", "Kevin Lint", "Electronic"],
     ])
     fields, warnings = ex.extract_signature_fields(table)
     check(fields["author"] == "P. Gray", "author extracted from row 1")
     check(fields["department"] == "Engineering", "department extracted from row 1")
-    check(fields["regulatory_rep"] == "Pedro Cruz", "regulatory_rep extracted by position")
-    check(fields["quality_rep"] == "Rebecca Miller", "quality_rep extracted by position")
     check(fields["department_head"] == "Kevin Lint", "department_head extracted by position")
-    check(warnings == [], "no warnings when every row label matches its canonical role")
+    check(
+        fields["signature_fields"] == [
+            {"department": "Regulatory", "name": "Pedro Cruz"},
+            {"department": "Quality", "name": "Rebecca Miller"},
+        ],
+        f"remaining rows extracted as signature_fields entries by position, got {fields['signature_fields']}",
+    )
+    check(warnings == [], "no warnings when the department head row's label matches the top department")
 
 
 def test_extract_signature_fields_mismatched_labels_warns():
@@ -266,8 +271,8 @@ def test_extract_signature_fields_mismatched_labels_warns():
         ["Quality", "K. Mack", "Electronic"],
     ])
     fields, warnings = ex.extract_signature_fields(table)
-    check(fields["regulatory_rep"] == "K. Lint", "regulatory_rep still assigned by position despite label mismatch")
-    check(len(warnings) == 3, f"a warning is emitted for each of the 3 mismatched role labels, got {len(warnings)}")
+    check(fields["department_head"] == "K. Lint", "department_head still assigned by position despite label mismatch")
+    check(len(warnings) == 1, f"a warning is emitted for the mismatched department head label, got {len(warnings)}")
 
 
 def test_extract_revisions():
@@ -615,7 +620,14 @@ def test_extract_full_fixture():
 
     check(front_matter["doc_number"] == "WI-99999", f"doc_number in front matter, got {front_matter.get('doc_number')!r}")
     check(front_matter["author"] == "P. Gray", f"author in front matter, got {front_matter.get('author')!r}")
-    check(front_matter["quality_rep"] == "J. Jones", f"quality_rep assigned by position, got {front_matter.get('quality_rep')!r}")
+    check(front_matter["department_head"] == "K. Lint", f"department_head assigned by position, got {front_matter.get('department_head')!r}")
+    check(
+        front_matter["signature_fields"] == [
+            {"department": "Manufacturing", "name": "J. Jones"},
+            {"department": "Quality", "name": "K. Mack"},
+        ],
+        f"signature_fields extracted by position, got {front_matter.get('signature_fields')!r}",
+    )
     check(front_matter["revisions"][0]["eco_number"] == "ECO-000099", "revisions list populated from body table")
 
     check("Group | Preparer | Signature" not in content, "signature table text excluded from body")

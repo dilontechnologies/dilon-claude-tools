@@ -62,9 +62,12 @@ SAMPLE_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "DD_TST_99999"\n'
     'current_revision: "00"\n'
-    'regulatory_rep: "Test Rep"\n'
-    'quality_rep: "Test QA"\n'
     'department_head: "Test Head"\n'
+    'signature_fields:\n'
+    '  - department: "Regulatory"\n'
+    '    name: "Test Rep"\n'
+    '  - department: "Quality"\n'
+    '    name: "Test QA"\n'
     'revisions:\n'
     '  - number: "00"\n'
     '    description: "Initial test"\n'
@@ -111,8 +114,6 @@ def generate_stub(output_path, **overrides):
         "department": overrides.get("department", "--"),
         "doc_number": overrides.get("doc_number", "DD_XXX_XXXXX"),
         "current_revision": overrides.get("current_revision", "00"),
-        "regulatory_rep": overrides.get("regulatory_rep", "--"),
-        "quality_rep": overrides.get("quality_rep", "--"),
         "department_head": overrides.get("department_head", "--"),
         "revision_description": overrides.get("revision_description", "Initial release"),
         "eco_number": overrides.get("eco_number", "ECO-TBD"),
@@ -125,8 +126,6 @@ def generate_stub(output_path, **overrides):
     content = re.sub(r'department: ".*?"', f'department: "{values["department"]}"', content, count=1)
     content = re.sub(r'doc_number: ".*?"', f'doc_number: "{values["doc_number"]}"', content, count=1)
     content = re.sub(r'current_revision: ".*?"', f'current_revision: "{values["current_revision"]}"', content, count=1)
-    content = re.sub(r'regulatory_rep: ".*?"', f'regulatory_rep: "{values["regulatory_rep"]}"', content, count=1)
-    content = re.sub(r'quality_rep: ".*?"', f'quality_rep: "{values["quality_rep"]}"', content, count=1)
     content = re.sub(r'department_head: ".*?"', f'department_head: "{values["department_head"]}"', content, count=1)
     content = re.sub(
         r'- number: ".*?"\s+description: ".*?"\s+eco_number: ".*?"\s+eco_date: ".*?"',
@@ -372,9 +371,11 @@ def test_create_signature_table_structure():
     metadata = {
         "department": "Engineering",
         "author": "Jane Author",
-        "regulatory_rep": "Reg Rep",
-        "quality_rep": "QA Rep",
         "department_head": "Dept Head",
+        "signature_fields": [
+            {"department": "Regulatory", "name": "Reg Rep"},
+            {"department": "Quality", "name": "QA Rep"},
+        ],
     }
     available_width = Inches(6.768055555555556)
     table = compiler.create_signature_table(metadata, available_width)
@@ -386,12 +387,29 @@ def test_create_signature_table_structure():
     check(rows_text[0] == ["Group", "Preparer", "Signature"], f"row 0 is the Group/Preparer/Signature header, got {rows_text[0]}")
     check(rows_text[1] == ["Engineering", "Jane Author", "Electronic"], f"row 1 has the preparer's department/author, got {rows_text[1]}")
     check(rows_text[2] == ["Department", "Name", "Signature"], f"row 2 is the Department/Name/Signature header, got {rows_text[2]}")
-    check(rows_text[3] == ["Regulatory", "Reg Rep", "Electronic"], f"row 3 has the regulatory rep, got {rows_text[3]}")
-    check(rows_text[4] == ["Quality", "QA Rep", "Electronic"], f"row 4 has the quality rep, got {rows_text[4]}")
-    check(rows_text[5] == ["Engineering", "Dept Head", "Electronic"], f"row 5 has the department head, got {rows_text[5]}")
+    check(rows_text[3] == ["Engineering", "Dept Head", "Electronic"], f"row 3 has the department head, got {rows_text[3]}")
+    check(rows_text[4] == ["Regulatory", "Reg Rep", "Electronic"], f"row 4 has the first signature_fields entry, got {rows_text[4]}")
+    check(rows_text[5] == ["Quality", "QA Rep", "Electronic"], f"row 5 has the second signature_fields entry, got {rows_text[5]}")
 
     check(table.rows[0].cells[0].paragraphs[0].runs[0].font.bold is True, "header row 0 is bold")
     check(table.rows[1].cells[0].paragraphs[0].runs[0].font.bold is not True, "data row 1 is not bold")
+
+
+def test_create_signature_table_empty_signature_fields():
+    """signature_fields may be an empty list - the table then has just the
+    Preparer and Department Head rows (4 rows total)."""
+    metadata = {
+        "department": "Engineering",
+        "author": "Jane Author",
+        "department_head": "Dept Head",
+        "signature_fields": [],
+    }
+    available_width = Inches(6.768055555555556)
+    table = compiler.create_signature_table(metadata, available_width)
+
+    check(len(table.rows) == 4, f"signature table has 4 rows when signature_fields is empty, got {len(table.rows)}")
+    rows_text = [[c.text for c in row.cells] for row in table.rows]
+    check(rows_text[3] == ["Engineering", "Dept Head", "Electronic"], f"row 3 has the department head, got {rows_text[3]}")
 
 
 def test_compile_signature_table_generated_programmatically():
@@ -1009,9 +1027,12 @@ HEADING_NUMBERING_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "DD_TST_88888"\n'
     'current_revision: "00"\n'
-    'regulatory_rep: "Test Rep"\n'
-    'quality_rep: "Test QA"\n'
     'department_head: "Test Head"\n'
+    'signature_fields:\n'
+    '  - department: "Regulatory"\n'
+    '    name: "Test Rep"\n'
+    '  - department: "Quality"\n'
+    '    name: "Test QA"\n'
     'revisions:\n'
     '  - number: "00"\n'
     '    description: "Initial test"\n'
@@ -1470,6 +1491,60 @@ def test_heading2_has_no_automatic_page_break():
     heading2 = doc.styles['Heading 2']
     check(heading2.paragraph_format.page_break_before is not True,
           f"Heading 2 no longer forces a page break (got {heading2.paragraph_format.page_break_before!r})")
+
+
+def test_compile_toc_forces_page_break_after_toc():
+    """The table of contents must always land on its own page - the
+    compiler inserts a forced page break immediately after Pandoc's TOC
+    content control. This is the only page break the compiler itself
+    forces (see MARKDOWN_STYLING_GUIDE.md 11.2 for the manual '---'
+    opt-in everywhere else)."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_toc_break.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_toc_break.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for the TOC page break check document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    if not output_docx.exists():
+        check(False, "compile_test_toc_break.docx created on disk")
+        return
+
+    doc = Document(output_docx)
+    body = doc.element.body
+
+    toc_sdt = None
+    for child in body:
+        if child.tag == qn('w:sdt'):
+            gallery = child.find('.//' + qn('w:docPartGallery'))
+            if gallery is not None and gallery.get(qn('w:val')) == 'Table of Contents':
+                toc_sdt = child
+                break
+    check(toc_sdt is not None, "compiled document contains Pandoc's TOC content control")
+    if toc_sdt is None:
+        return
+
+    siblings = list(body)
+    next_el = siblings[siblings.index(toc_sdt) + 1]
+    page_break = next_el.find('.//' + qn('w:br'))
+    check(
+        next_el.tag == qn('w:p') and page_break is not None and page_break.get(qn('w:type')) == 'page',
+        "a forced page break paragraph immediately follows the TOC content control",
+    )
 
 
 def test_get_step_clarification_abstract_num_id_found():
@@ -2377,6 +2452,7 @@ def main():
     test_compile_missing_input_error()
     test_compile_valid_document()
     test_create_signature_table_structure()
+    test_create_signature_table_empty_signature_fields()
     test_compile_signature_table_generated_programmatically()
     test_compile_has_no_leading_blank_paragraph()
     test_compile_has_no_title_page()
@@ -2405,6 +2481,7 @@ def main():
     test_resolve_reference_markers_missing_anchor_raises()
     test_resolve_reference_markers_duplicate_anchor_raises()
     test_heading2_has_no_automatic_page_break()
+    test_compile_toc_forces_page_break_after_toc()
     test_get_step_clarification_abstract_num_id_found()
     test_get_step_clarification_abstract_num_id_missing_style()
     test_create_num_instance_first_allocation()

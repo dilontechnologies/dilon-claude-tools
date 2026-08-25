@@ -22,9 +22,12 @@ author: "Author Name"
 department: "Engineering"
 doc_number: "DD_XXX_XXXXX"
 current_revision: "1"
-regulatory_rep: "Regulatory Representative"
-quality_rep: "Quality Representative"
 department_head: "Department Head"
+signature_fields:
+  - department: "Regulatory"
+    name: "Regulatory Representative"
+  - department: "Quality"
+    name: "Quality Representative"
 revisions:
   - number: "1"
     description: "Initial release"
@@ -39,7 +42,8 @@ revisions:
 - `department`: Usually "Engineering"
 - `doc_number`: Dilon document number (format: `DD_XXX_XXXXX`)
 - `current_revision`: Current revision number (string)
-- `regulatory_rep`, `quality_rep`, `department_head`: Approver names
+- `department_head`: Department head approver name
+- `signature_fields`: Array of additional approvers, each a `department`/`name` pair (may be empty) - lets each document declare its own set of signators (e.g. Regulatory, Quality) instead of a fixed pair of roles
 - `revisions`: Array of revision history entries
 
 **Referencing Front Matter in the Document Body:**
@@ -741,7 +745,11 @@ For longer notes or quoted text:
 
 ### 11.2 Section Breaks
 
-Heading 2 does not force a page break automatically. Insert one manually
+The compiler forces exactly one page break: immediately after the
+auto-generated table of contents, so the TOC always lands on its own
+page ahead of the body content. That is the only certified page break
+in a Dilon document - Heading 2 does not force one automatically, and
+none of the body content otherwise does either. Insert one manually
 with a horizontal rule where you want it (use sparingly):
 
 ```markdown
@@ -968,9 +976,12 @@ author: "Your Name"
 department: "Engineering"
 doc_number: "DD_NAV3_XXX_NNN"
 current_revision: "1"
-regulatory_rep: "Name"
-quality_rep: "Name"
 department_head: "Name"
+signature_fields:
+  - department: "Regulatory"
+    name: "Name"
+  - department: "Quality"
+    name: "Name"
 revisions:
   - number: "1"
     description: "Initial release"

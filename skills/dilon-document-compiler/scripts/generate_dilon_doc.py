@@ -43,6 +43,7 @@ from dilon_docx_common import (  # noqa: E402
     apply_figure_captions,
     center_image_paragraphs,
     markdown_to_docx,
+    insert_page_break_after_toc,
     extract_yaml_and_markdown,
     set_update_fields_on_open,
     compose_documents,
@@ -200,7 +201,9 @@ def create_signature_table(metadata, available_width):
 
     Args:
         metadata: front-matter dict with department, author,
-            regulatory_rep, quality_rep, department_head
+            department_head, and signature_fields (a list of
+            {department, name} dicts for any additional approvers - may
+            be empty).
         available_width: content width (page width minus margins), as a
             python-docx Length, to size the table to - see
             generate_requirements_document().
@@ -213,8 +216,10 @@ def create_signature_table(metadata, available_width):
     from docx.oxml import OxmlElement
     from docx.shared import Twips
 
+    signature_fields = metadata.get('signature_fields') or []
+
     temp_doc = Document()
-    table = temp_doc.add_table(rows=6, cols=3)
+    table = temp_doc.add_table(rows=4 + len(signature_fields), cols=3)
     table.style = 'Normal Table'
 
     # Group/Department and Signature widths match an approved, hand-tuned
@@ -259,17 +264,15 @@ def create_signature_table(metadata, available_width):
     set_cell(2, 1, 'Name', bold=True, center=False, fill='C0C0C0')
     set_cell(2, 2, 'Signature', bold=True, center=True, fill='C0C0C0')
 
-    set_cell(3, 0, 'Regulatory', center=True)
-    set_cell(3, 1, metadata.get('regulatory_rep', ''), center=False)
+    set_cell(3, 0, department, center=True)
+    set_cell(3, 1, metadata.get('department_head', ''), center=False)
     set_cell(3, 2, 'Electronic', center=True)
 
-    set_cell(4, 0, 'Quality', center=True)
-    set_cell(4, 1, metadata.get('quality_rep', ''), center=False)
-    set_cell(4, 2, 'Electronic', center=True)
-
-    set_cell(5, 0, department, center=True)
-    set_cell(5, 1, metadata.get('department_head', ''), center=False)
-    set_cell(5, 2, 'Electronic', center=True)
+    for i, entry in enumerate(signature_fields):
+        row_idx = 4 + i
+        set_cell(row_idx, 0, entry.get('department', ''), center=True)
+        set_cell(row_idx, 1, entry.get('name', ''), center=False)
+        set_cell(row_idx, 2, 'Electronic', center=True)
 
     table.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
@@ -413,6 +416,7 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
         reference_doc=signature_template_path,
         resource_dir=Path(markdown_path).resolve().parent,
     )
+    insert_page_break_after_toc(temp_part_d)
 
     # Apply all styles (tables and paragraphs) - scans Word document for @@@ markers, applies styles, removes markers
     print("Applying custom styles...")

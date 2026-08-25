@@ -122,17 +122,6 @@ def paragraph_list_ilvl(paragraph):
         return 0
 
 
-ROLE_LABEL_HINTS = {
-    "regulatory_rep": ("regulat",),
-    "quality_rep": ("quality", "qa", "qc"),
-    "department_head": ("head", "director", "manager"),
-}
-# Position of each role's data row within the canonical 6-row signature
-# table shape (see dilon-document-compiler's create_signature_table()):
-# row 1 is department/author, rows 3-5 are regulatory/quality/department_head.
-SIGNATURE_ROLE_ROW_ORDER = ["regulatory_rep", "quality_rep", "department_head"]
-
-
 def classify_table(table):
     """Return 'signature', 'revision', or 'content' for a python-docx
     Table, based on its first two rows' text (case-insensitive)."""
@@ -150,43 +139,43 @@ def classify_table(table):
 
 def extract_signature_fields(table):
     """table: a Table classified as 'signature'. Returns (fields, warnings).
-    fields may include 'author', 'department', 'regulatory_rep',
-    'quality_rep', 'department_head'. Matches create_signature_table()'s
-    canonical 6-row shape by position, cross-checked against each row's
-    label text where recognizable - a warning (not a failure) is returned
-    for any row whose label doesn't match its expected canonical wording,
-    since real source documents (e.g. WI-00077) use inconsistent role
-    labels ("R&D / Eng", "Manufacturing") in these slots."""
+    fields may include 'author', 'department', 'department_head', and
+    'signature_fields' (a list of {'department', 'name'} dicts for any
+    rows beyond the fixed department_head row). Matches
+    create_signature_table()'s canonical shape by position: row 1 is
+    department/author, row 3 is department_head, and every row from 4
+    onward is a signature_fields entry - a warning (not a failure) is
+    returned when the department_head row's label doesn't match the top
+    department field, since real source documents (e.g. WI-00077) use
+    inconsistent role labels ("R&D / Eng", "Manufacturing") in these
+    slots."""
     fields = {}
     warnings = []
     rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
 
-    if len(rows) < 6:
+    if len(rows) < 4:
         warnings.append(
-            f"signature table has {len(rows)} rows, expected 6 (canonical "
-            "Group/Preparer/Signature + Department/Name/Signature shape) "
-            "- extracted nothing, fill approvers in manually"
+            f"signature table has {len(rows)} rows, expected at least 4 "
+            "(canonical Group/Preparer/Signature + Department/Name/Signature "
+            "+ Department Head shape) - extracted nothing, fill approvers in manually"
         )
         return fields, warnings
 
     fields["department"] = rows[1][0]
     fields["author"] = rows[1][1]
+    fields["department_head"] = rows[3][1]
 
-    for row, expected_role in zip(rows[3:6], SIGNATURE_ROLE_ROW_ORDER):
-        label, value = row[0], row[1]
-        fields[expected_role] = value
-        hints = ROLE_LABEL_HINTS[expected_role]
-        # department_head rows are commonly labeled with the department
-        # name itself (e.g. "Engineering") rather than a role word.
-        label_matches_department = (
-            expected_role == "department_head"
-            and label.strip().lower() == fields["department"].strip().lower()
+    department_head_label = rows[3][0]
+    if department_head_label.strip().lower() != fields["department"].strip().lower():
+        warnings.append(
+            f"department head row labeled '{department_head_label}' doesn't "
+            f"match the preparer's department '{fields['department']}' - "
+            "verify by position"
         )
-        if not label_matches_department and not any(hint in label.lower() for hint in hints):
-            warnings.append(
-                f"row labeled '{label}' assigned to {expected_role} by "
-                "table position (label didn't match expected wording) - verify"
-            )
+
+    fields["signature_fields"] = [
+        {"department": row[0], "name": row[1]} for row in rows[4:] if len(row) >= 2
+    ]
 
     return fields, warnings
 
@@ -572,9 +561,8 @@ def extract(docx_path, output_dir):
         "department": "",
         "doc_number": "",
         "current_revision": "00",
-        "regulatory_rep": "",
-        "quality_rep": "",
         "department_head": "",
+        "signature_fields": [],
         "revisions": [],
     }
     front_matter.update(extract_header_footer_metadata(doc))

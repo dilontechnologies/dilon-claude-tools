@@ -57,9 +57,12 @@ SAMPLE_FORM_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "FO-99999"\n'
     'current_revision: "00"\n'
-    'regulatory_rep: "Test Rep"\n'
-    'quality_rep: "Test QA"\n'
     'department_head: "Test Head"\n'
+    'signature_fields:\n'
+    '  - department: "Regulatory"\n'
+    '    name: "Test Rep"\n'
+    '  - department: "Quality"\n'
+    '    name: "Test QA"\n'
     'revisions:\n'
     '  - number: "00"\n'
     '    description: "Initial test"\n'
@@ -81,9 +84,12 @@ FIELD_GRID_PERMUTATIONS_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "FO-88888"\n'
     'current_revision: "00"\n'
-    'regulatory_rep: "Test Rep"\n'
-    'quality_rep: "Test QA"\n'
     'department_head: "Test Head"\n'
+    'signature_fields:\n'
+    '  - department: "Regulatory"\n'
+    '    name: "Test Rep"\n'
+    '  - department: "Quality"\n'
+    '    name: "Test QA"\n'
     'revisions:\n'
     '  - number: "00"\n'
     '    description: "Initial test"\n'
@@ -300,9 +306,12 @@ FIELD_GRID_TITLE_ROW_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "FO-77778"\n'
     'current_revision: "00"\n'
-    'regulatory_rep: "Test Rep"\n'
-    'quality_rep: "Test QA"\n'
     'department_head: "Test Head"\n'
+    'signature_fields:\n'
+    '  - department: "Regulatory"\n'
+    '    name: "Test Rep"\n'
+    '  - department: "Quality"\n'
+    '    name: "Test QA"\n'
     'revisions:\n'
     '  - number: "00"\n'
     '    description: "Initial test"\n'
@@ -374,9 +383,12 @@ FO_00127_REPLICA_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "FO-00127"\n'
     'current_revision: "01"\n'
-    'regulatory_rep: "Test Rep"\n'
-    'quality_rep: "Test QA"\n'
     'department_head: "Test Head"\n'
+    'signature_fields:\n'
+    '  - department: "Regulatory"\n'
+    '    name: "Test Rep"\n'
+    '  - department: "Quality"\n'
+    '    name: "Test QA"\n'
     'revisions:\n'
     '  - number: "01"\n'
     '    description: "Initial test"\n'
@@ -1177,8 +1189,6 @@ def generate_form_stub(output_path, **overrides):
         "department": overrides.get("department", "--"),
         "doc_number": overrides.get("doc_number", "FO-XXXXX"),
         "current_revision": overrides.get("current_revision", "00"),
-        "regulatory_rep": overrides.get("regulatory_rep", "--"),
-        "quality_rep": overrides.get("quality_rep", "--"),
         "department_head": overrides.get("department_head", "--"),
         "revision_description": overrides.get("revision_description", "Initial release"),
         "eco_number": overrides.get("eco_number", "ECO-TBD"),
@@ -1191,8 +1201,6 @@ def generate_form_stub(output_path, **overrides):
     content = re.sub(r'department: ".*?"', f'department: "{values["department"]}"', content, count=1)
     content = re.sub(r'doc_number: ".*?"', f'doc_number: "{values["doc_number"]}"', content, count=1)
     content = re.sub(r'current_revision: ".*?"', f'current_revision: "{values["current_revision"]}"', content, count=1)
-    content = re.sub(r'regulatory_rep: ".*?"', f'regulatory_rep: "{values["regulatory_rep"]}"', content, count=1)
-    content = re.sub(r'quality_rep: ".*?"', f'quality_rep: "{values["quality_rep"]}"', content, count=1)
     content = re.sub(r'department_head: ".*?"', f'department_head: "{values["department_head"]}"', content, count=1)
     content = re.sub(
         r'- number: ".*?"\s+description: ".*?"\s+eco_number: ".*?"\s+eco_date: ".*?"',

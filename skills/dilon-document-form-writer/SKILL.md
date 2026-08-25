@@ -16,9 +16,8 @@ Helps create and maintain Dilon Technologies form/traveler markdown documents - 
    - `department` (default: "--")
    - `doc_number` (default: "FO-XXXXX" - forms use the `FO-` prefix convention, not `dilon-document-writer`'s narrative-doc `DD_XXX_XXXXX`)
    - `current_revision` (default: "00")
-   - `regulatory_rep` (default: "--")
-   - `quality_rep` (default: "--")
    - `department_head` (default: "--")
+   - `signature_fields` (default: one entry, `department: "--"`, `name: "--"`) — a list of additional approvers, each with a `department` and `name`; ask the user how many entries they need and what each one is
    - Initial revision entry: `revision_description` (default: "Initial release"), `eco_number` (default: "ECO-TBD"), `eco_date` (default: "YYYY-MM-DD")
 3. Substitute these into the template's YAML front matter. The first entry in `revisions` always mirrors `current_revision` for its `number` field.
 4. Before writing, check whether the destination file already exists — refuse and tell the user if it does.

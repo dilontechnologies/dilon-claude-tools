@@ -84,8 +84,8 @@ def validate_markdown_stub(stub_path, expected_values=None):
     # Check required YAML fields
     required_fields = [
         'title', 'author', 'department', 'doc_number',
-        'current_revision', 'regulatory_rep', 'quality_rep',
-        'department_head', 'revisions'
+        'current_revision', 'department_head',
+        'signature_fields', 'revisions'
     ]
 
     for field in required_fields:

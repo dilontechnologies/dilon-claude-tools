@@ -173,7 +173,7 @@ Write-Host ""
 
 # Install Python packages required by the dilon-document-compiler,
 # dilon-document-form-compiler, and dilon-document-extractor skills
-$requiredPackages = @("python-docx", "docxcompose", "pyyaml>=6.0", "pymupdf", "jinja2")
+$requiredPackages = @("python-docx", "docxcompose>=2.2.0", "pyyaml>=6.0", "pymupdf", "jinja2")
 
 foreach ($package in $requiredPackages) {
     Write-Host "  -> Installing $package..." -ForegroundColor Gray

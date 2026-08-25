@@ -59,9 +59,8 @@ def extract(pdf_path, output_dir):
         'department: ""\n'
         'doc_number: ""\n'
         'current_revision: "00"\n'
-        'regulatory_rep: ""\n'
-        'quality_rep: ""\n'
         'department_head: ""\n'
+        'signature_fields: []\n'
         'revisions: []\n'
         '---\n\n'
     )

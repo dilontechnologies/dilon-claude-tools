@@ -15,6 +15,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.shared import Inches
+from docx.text.run import Run
 from docxcompose.composer import Composer
 from jinja2 import Environment
 
@@ -883,12 +884,43 @@ def resolve_reference_markers(docx_file, type_resolvers):
     resolved = 0
 
     for para in doc.paragraphs:
-        matches = list(_XREF_SENTINEL_RE.finditer(para.text))
+        # A step heading's STYLEREF/SEQ number fields (<w:fldSimple>,
+        # from step_numbering.py's _prepend_step_number_fields()) sit
+        # ahead of the paragraph's authored text - along with the
+        # literal "." run interleaved between the two fields, and any
+        # bookmarkStart/End narrowed around them. para.text/para.runs
+        # (python-docx) only see plain <w:r> children and silently
+        # skip <w:fldSimple>, so treating "every run in para.runs" as
+        # the paragraph's whole content - as this loop used to -
+        # scooped that interleaved "." run into the remove-and-rebuild
+        # below while leaving the two fldSimple elements untouched and
+        # now adjacent, then re-appended the "." (merged into the
+        # rebuilt body text) after both fields instead of between them
+        # - corrupting numbers like "6.5.7" into "6.57.". Treating
+        # everything up to and including the last <w:fldSimple> (plus
+        # any trailing bookmark markers) as an untouchable header
+        # keeps that span exactly as step_numbering.py built it.
+        header_end = 0
+        for i, child in enumerate(para._p):
+            if child.tag == qn('w:fldSimple'):
+                header_end = i + 1
+        while header_end < len(para._p) and para._p[header_end].tag in (qn('w:bookmarkStart'), qn('w:bookmarkEnd')):
+            header_end += 1
+        header_elements = para._p[:header_end]
+        header_ids = {id(el) for el in header_elements}
+        header_text = ''.join(
+            Run(el, para).text for el in header_elements if el.tag == qn('w:r')
+        )
+
+        body_text = para.text[len(header_text):]
+        matches = list(_XREF_SENTINEL_RE.finditer(body_text))
         if not matches:
             continue
 
-        original_text = para.text
+        original_text = body_text
         for run in list(para.runs):
+            if id(run._element) in header_ids:
+                continue
             run._element.getparent().remove(run._element)
 
         cursor = 0
@@ -1516,6 +1548,48 @@ def markdown_to_docx(markdown_text, output_file, reference_doc=None, resource_di
 
     # Clean up temp file
     temp_md.unlink()
+
+
+def insert_page_break_after_toc(docx_file):
+    """
+    Force a page break immediately after Pandoc's auto-generated table of
+    contents, so the TOC always lands on its own page ahead of body
+    content. This is the only page break the compiler forces - everywhere
+    else in the body, a page break is the author's manual '---' opt-in
+    (see MARKDOWN_STYLING_GUIDE.md section 11.2).
+
+    Pandoc wraps the TOC in a <w:sdt> content control (a "Table of
+    Contents" docPartGallery) that sits alongside the body's paragraphs
+    rather than being one itself, so python-docx's paragraph/table APIs
+    can't target it - this walks the raw body XML instead. A no-op when
+    there's no TOC (e.g. the form compiler's include_toc=False).
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    doc = Document(docx_file)
+    body = doc.element.body
+
+    toc_sdt = None
+    for child in body:
+        if child.tag == qn('w:sdt'):
+            gallery = child.find('.//' + qn('w:docPartGallery'))
+            if gallery is not None and gallery.get(qn('w:val')) == 'Table of Contents':
+                toc_sdt = child
+                break
+
+    if toc_sdt is None:
+        return
+
+    break_paragraph = OxmlElement('w:p')
+    run = OxmlElement('w:r')
+    br = OxmlElement('w:br')
+    br.set(qn('w:type'), 'page')
+    run.append(br)
+    break_paragraph.append(run)
+    toc_sdt.addnext(break_paragraph)
+
+    doc.save(docx_file)
 
 
 def _renumber_bookmarks_preserving_pairs(self):
