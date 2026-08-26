@@ -5,17 +5,17 @@
 This is a **self-hosted Claude Code plugin** for Windows environments, providing regulatory-compliant technical documentation workflows at Dilon Technologies. It bundles five Skills rather than exposing MCP tools/resources.
 
 **Plugin Details:**
-- Plugin name: `dilon-tools` (version 2.2.0), defined in `.claude-plugin/plugin.json`
+- Plugin name: `dilon-tools` (version tracked in both `VERSION.txt` and `.claude-plugin/plugin.json` - keep them in sync, see `RELEASING.md`)
 - Marketplace: `dilon-claude-tools`, defined in `.claude-plugin/marketplace.json` (this repo is its own marketplace; the plugin's `source` is `./`)
 - License: Internal use only (Dilon Technologies LLC)
 
 **Distribution Workflow:**
-- No package registry, no publish step. Users install directly from this git repo via Claude Code's plugin marketplace commands:
+- No package registry, no build/publish artifact step. Users install directly from this git repo via Claude Code's plugin marketplace commands:
   - `/plugin marketplace add dilontechnologies/dilon-claude-tools`
   - `/plugin install dilon-tools@dilon-claude-tools`
-- Updates: `/plugin marketplace update dilon-claude-tools` then `/plugin update dilon-tools@dilon-claude-tools`
+- Updates: `/plugin marketplace update dilon-claude-tools` then `/plugin update dilon-tools@dilon-claude-tools` - both always track the repo's default branch (`master`); `claude plugin marketplace add` has no ref-pinning flag, so merging to `master` is what actually ships an update.
 - Local testing before relying on the marketplace: `/plugin marketplace add ./dilon-claude-tools` (run from the parent directory of a clone)
-- See `README.md` for the full install/update/troubleshooting instructions.
+- See `README.md` for the full install/update/troubleshooting instructions, and `RELEASING.md` for the governed branch model (`DEV`/`BUG`/`REL` branches, CI gates, tagging, GitHub Releases) that gates what lands on `master`.
 
 ## Skills
 
@@ -85,12 +85,27 @@ This is a **self-hosted Claude Code plugin** for Windows environments, providing
 dilon-claude-tools/
 ├── CLAUDE.md                          # this file
 ├── README.md                          # install/usage/troubleshooting guide
+├── RELEASING.md                       # branch/release model (REL/DEV/BUG, versioning, CI gates)
+├── VERSION.txt                        # canonical version for CI - keep in sync with plugin.json
 ├── CHANGELOG.md
 ├── install.ps1                        # Python/Pandoc/pip dependency setup + Compile-DilonDoc alias
 │
 ├── .claude-plugin/
-│   ├── plugin.json                    # plugin manifest
+│   ├── plugin.json                    # plugin manifest (version must match VERSION.txt)
 │   └── marketplace.json               # self-hosted marketplace listing this plugin
+│
+├── .github/
+│   ├── CODEOWNERS
+│   ├── PULL_REQUEST_TEMPLATE/         # feature.md, bug-fix.md, release.md
+│   └── workflows/
+│       ├── ci-feature.yml             # PR -> REL/**: dependency check + all test suites
+│       ├── ci-release.yml             # PR -> master: same, plus the version-tag-availability gate
+│       └── release.yml                # push -> master: tags + publishes a GitHub Release
+│
+├── .claude/
+│   ├── settings.json                  # PreToolUse hook wiring
+│   └── scripts/
+│       └── main-guard.sh              # blocks Claude Code edits while checked out on master
 │
 ├── templates/                          # Shared Word reference templates
 │   ├── TEMPLATE_Word_Base.docx        # header/footer + styles only, shared by both compiler skills

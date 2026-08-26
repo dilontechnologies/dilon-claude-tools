@@ -56,6 +56,11 @@ Authentication uses your existing git credentials (PAT or SSH) for this private 
 
 (Run from the parent directory of a local clone, or substitute the absolute path.)
 
+## Contributing / Releasing
+
+This repo follows a governed branch and release model - see [RELEASING.md](RELEASING.md)
+before opening a PR or cutting a release.
+
 ## Usage
 
 Once installed, just describe what you want in conversation - the skills trigger automatically:
@@ -81,9 +86,22 @@ Claude: *uses dilon-document-compiler skill*
 ```
 dilon-claude-tools/
 ├── CLAUDE.md                     # project knowledge doc for Claude Code sessions
+├── RELEASING.md                  # branch/release model (REL/DEV/BUG, versioning, CI gates)
+├── VERSION.txt                   # canonical version for CI - keep in sync with plugin.json
 ├── .claude-plugin/
-│   ├── plugin.json              # plugin manifest
+│   ├── plugin.json              # plugin manifest (version must match VERSION.txt)
 │   └── marketplace.json         # self-hosted marketplace listing this plugin
+├── .github/
+│   ├── CODEOWNERS
+│   ├── PULL_REQUEST_TEMPLATE/    # feature.md, bug-fix.md, release.md
+│   └── workflows/
+│       ├── ci-feature.yml       # PR -> REL/**: dependency check + all test suites
+│       ├── ci-release.yml       # PR -> master: same, plus the version-tag-availability gate
+│       └── release.yml          # push -> master: tags + publishes a GitHub Release
+├── .claude/
+│   ├── settings.json             # PreToolUse hook wiring
+│   └── scripts/
+│       └── main-guard.sh         # blocks Claude Code edits while checked out on master
 ├── templates/                    # shared Word reference templates
 │   ├── TEMPLATE_Word_Base.docx  # header/footer + styles only, shared by both compiler skills
 │   └── assets/

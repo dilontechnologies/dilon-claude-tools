@@ -1,0 +1,45 @@
+name: CI - Feature Branch
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - 'REL/**'
+
+jobs:
+  test:
+    name: Dependency Check & Test Suites
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Pandoc
+        shell: bash
+        run: choco install pandoc -y
+
+      - name: Install Python dependencies
+        shell: bash
+        run: python -m pip install python-docx "docxcompose>=2.2.0" "pyyaml>=6.0" pymupdf jinja2
+
+      - name: Check dependencies
+        shell: bash
+        run: |
+          python skills/dilon-document-compiler/scripts/check_deps.py
+          python skills/dilon-document-extractor/scripts/check_deps.py
+
+      - name: Run writer/compiler tests
+        shell: bash
+        run: python tests/run_tests.py
+
+      - name: Run form-compiler/form-writer tests
+        shell: bash
+        run: python tests/run_form_tests.py
+
+      - name: Run extractor tests
+        shell: bash
+        run: python tests/run_extractor_tests.py

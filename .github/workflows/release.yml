@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  setup:
+    name: Resolve Version & Tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      skip: ${{ steps.resolve.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+
+      - name: Resolve tag and check existence
+        id: resolve
+        run: |
+          TAG="v$(cat VERSION.txt)"
+          if git ls-remote --tags origin "${TAG}" | grep -q .; then
+            echo "Tag ${TAG} already exists - skipping."
+            SKIP=true
+          else
+            SKIP=false
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "skip=${SKIP}" >> $GITHUB_OUTPUT
+
+  publish:
+    name: Publish Release
+    needs: setup
+    if: needs.setup.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.setup.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract changelog section for this version
+        run: |
+          VERSION_NUM="${VERSION#v}"
+          awk -v ver="[$VERSION_NUM]" '
+            index($0, "## " ver) == 1 { found=1; print; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "_No CHANGELOG.md entry found for $VERSION._" > release-notes.md
+          fi
+
+      - name: Create GitHub Release (draft)
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          body_path: release-notes.md
+          draft: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ env.VERSION }}" --draft=false --repo "${{ github.repository }}"
