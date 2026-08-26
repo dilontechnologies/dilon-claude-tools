@@ -5,6 +5,27 @@ All notable changes to the Dilon Claude Tools MCP Server will be documented in t
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-08-26
+
+### Added
+- `dilon-document-extractor` skill - bootstraps a Dilon markdown draft from an existing Word (`extract_docx.py`) or PDF (`extract_pdf.py`) document, classifying signature/revision tables by shape and pairing inline images with adjacent `Caption` paragraphs
+- `dilon-document-form-writer` skill - creates new Dilon form/traveler documents and documents the form-only markdown markers (`FillLine`, `FieldGrid`, `Form_Section_Header`) as the single source of truth for their syntax
+- STEPS numbering rewritten as field-based, reset per Heading 3, with step/figure/section cross-references unified under a shared `[](#TYPE:label)` resolution framework
+- Ordered-list handling: a three-level nesting cap, `Dilon Step List` style remap, and `@@@CONTINUE:#list:name@@@` continuation support for interrupted lists
+- Variable-length signature approvers - `signature_fields` is now an arbitrary-length list of `department`/`name` pairs instead of a fixed shape
+- Resize-and-reapply workflow: `dilon-document-compiler` suggests a Word resize pass for images/tables with no explicit size, and `scripts/read_docx_sizes.py` reads the result back into `width=`/`height=` image attributes and `@@@TABLE_COLUMNS@@@` markers
+- Governed release process (this repo now follows the `nav3-repo-template` branch/release model) - see `RELEASING.md`, `.github/workflows/`, and `.claude/scripts/main-guard.sh`
+
+### Fixed
+- Compiled images now actually lock their aspect ratio on resize - Pandoc sets picture-level `picLocks` but never emits the frame-level `wp:cNvGraphicFramePr`/`a:graphicFrameLocks` Word actually consults for interactive drag-resize
+- A markdown `---` (thematic break) now produces a real page break instead of just a horizontal line - Pandoc renders it as a VML shape, not a break, so nothing previously converted one into the other
+- Install docs: added the missing `git clone` step, clarified that `install.ps1` (admin rights, machine-wide winget installs) must be run by the user rather than Claude, and dropped a stale `python-docx-template` dependency `install.ps1` never actually installed
+
+### Changed
+- `lib/dilon_docx_common.py` extracted as the shared Pandoc-conversion/styling helper module used by both compiler skills
+
+> Note: `[2.0.0]` is reused below for an earlier, unrelated release (the MCP-server-to-plugin rework), predating the `[2.0.0]` entry above. Entries are ordered by date, not by version number - see git history for the authoritative record.
+
 ## [2.0.0] - 2026-06-30
 
 ### Changed
