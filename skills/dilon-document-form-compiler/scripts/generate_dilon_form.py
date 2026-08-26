@@ -25,6 +25,7 @@ from dilon_docx_common import (  # noqa: E402
     markdown_to_docx,
     apply_styles,
     lock_image_aspect_ratios,
+    convert_horizontal_rules_to_page_breaks,
     compose_documents,
     set_update_fields_on_open,
     populate_header,
@@ -98,6 +99,7 @@ def generate_form_document(markdown_path, output_path, form_template_path=None):
         resource_dir=Path(markdown_path).resolve().parent,
         include_toc=False,
     )
+    convert_horizontal_rules_to_page_breaks(temp_part_d)
 
     print("Applying custom styles...")
     apply_styles(temp_part_d)

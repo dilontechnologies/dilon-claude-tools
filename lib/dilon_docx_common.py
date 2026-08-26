@@ -1598,6 +1598,54 @@ def markdown_to_docx(markdown_text, output_file, reference_doc=None, resource_di
     temp_md.unlink()
 
 
+_VML_NS = 'urn:schemas-microsoft-com:vml'
+_OFFICE_NS = 'urn:schemas-microsoft-com:office:office'
+
+
+def convert_horizontal_rules_to_page_breaks(docx_file):
+    """
+    Turn every markdown thematic break ('---') into an actual page break.
+
+    MARKDOWN_STYLING_GUIDE.md documents '---' as the author's manual
+    page-break opt-in (section 11.2, and see
+    insert_page_break_after_toc()'s docstring) - but Pandoc's docx
+    writer doesn't emit a page break for a thematic break at all. It
+    renders a VML horizontal-rule shape instead
+    (<w:pict><v:rect .../></w:pict>, flagged o:hr="t"), which Word
+    displays as a thin line with no page-break effect. This replaces
+    each such paragraph with a real <w:br w:type="page"/>.
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    doc = Document(docx_file)
+
+    count = 0
+    for rect in list(doc.element.body.iter(f'{{{_VML_NS}}}rect')):
+        if rect.get(f'{{{_OFFICE_NS}}}hr') != 't':
+            continue
+        paragraph = rect.getparent().getparent().getparent()  # v:rect -> w:pict -> w:r -> w:p
+        if paragraph.tag != qn('w:p'):
+            continue
+
+        break_paragraph = OxmlElement('w:p')
+        run = OxmlElement('w:r')
+        br = OxmlElement('w:br')
+        br.set(qn('w:type'), 'page')
+        run.append(br)
+        break_paragraph.append(run)
+
+        paragraph.addprevious(break_paragraph)
+        paragraph.getparent().remove(paragraph)
+        count += 1
+
+    if count:
+        doc.save(docx_file)
+        print(f"  Converted {count} horizontal rule(s) to page break(s)")
+
+    return count
+
+
 def insert_page_break_after_toc(docx_file):
     """
     Force a page break immediately after Pandoc's auto-generated table of

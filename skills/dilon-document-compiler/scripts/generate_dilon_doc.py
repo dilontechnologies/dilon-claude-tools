@@ -45,6 +45,7 @@ from dilon_docx_common import (  # noqa: E402
     lock_image_aspect_ratios,
     markdown_to_docx,
     insert_page_break_after_toc,
+    convert_horizontal_rules_to_page_breaks,
     extract_yaml_and_markdown,
     set_update_fields_on_open,
     compose_documents,
@@ -418,6 +419,7 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
         resource_dir=Path(markdown_path).resolve().parent,
     )
     insert_page_break_after_toc(temp_part_d)
+    convert_horizontal_rules_to_page_breaks(temp_part_d)
 
     # Apply all styles (tables and paragraphs) - scans Word document for @@@ markers, applies styles, removes markers
     print("Applying custom styles...")

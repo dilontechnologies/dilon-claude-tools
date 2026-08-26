@@ -1223,6 +1223,32 @@ def test_read_docx_sizes_excludes_signature_and_revision_tables():
               f"the one body table reports 2 column widths (got {len(tables[0]['column_widths_in'])})")
 
 
+def test_horizontal_rule_becomes_page_break():
+    """Regression test: MARKDOWN_STYLING_GUIDE.md documents '---' as the
+    author's manual page-break opt-in (section 11.2), but Pandoc's docx
+    writer renders a markdown thematic break as a VML horizontal-rule
+    shape (a thin line), not an actual page break - nothing converted
+    one into the other until convert_horizontal_rules_to_page_breaks()
+    existed."""
+    md = "Content before the break.\n\n---\n\nContent after the break.\n"
+    docx_path = TEST_OUTPUT_DIR / "horizontal_rule_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE, resource_dir=TEST_OUTPUT_DIR)
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml_before = z.read('word/document.xml').decode('utf-8')
+    check('o:hr="t"' in xml_before,
+          "sanity check: Pandoc's raw output renders the thematic break as a VML horizontal rule")
+    check('w:type="page"' not in xml_before, "sanity check: no page break exists yet")
+
+    count = dilon_docx_common.convert_horizontal_rules_to_page_breaks(docx_path)
+    check(count == 1, "converts exactly the one horizontal rule")
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml_after = z.read('word/document.xml').decode('utf-8')
+    check('<w:br w:type="page"/>' in xml_after, "the horizontal rule paragraph is now a real page break")
+    check('o:hr' not in xml_after, "the VML horizontal-rule shape is gone")
+
+
 def test_render_jinja_substitutes_body_fields():
     text = compiler.render_jinja("This document is {{doc_number}}, rev {{current_revision}}.", {
         "doc_number": "WI-00077",
@@ -2577,6 +2603,7 @@ def main():
     test_lock_image_aspect_ratios_adds_frame_lock_when_missing()
     test_lock_image_aspect_ratios_idempotent_when_already_locked()
     test_read_docx_sizes_excludes_signature_and_revision_tables()
+    test_horizontal_rule_becomes_page_break()
     test_render_jinja_substitutes_body_fields()
     test_render_jinja_raw_block_escapes_literal_braces()
     test_render_jinja_noop_without_braces()
