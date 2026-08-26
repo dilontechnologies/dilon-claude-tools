@@ -39,6 +39,32 @@ Compilation halts (non-zero exit, clear error message) rather than producing a s
 - A malformed `@@@STEPS@@@`/`@@@END_STEPS@@@` pairing (unclosed or nested)
 - A `[](#fig:label)`, `[](#sec:label)`, or `[](#step:label)` reference with no matching `{#fig:label}`/`{#sec:label}`/`{#step:label}` anchor anywhere in the document, or such an anchor declared more than once
 
+## Suggesting a resize pass
+
+After a successful compile, scan the **input markdown** for images and tables that have no explicit size:
+- An image (`![...](...)`) whose trailing `{...}` attribute block (if any) has neither `width=` nor `height=`.
+- A pipe/grid table with no `@@@TABLE_COLUMNS:...@@@` marker immediately before it.
+
+If any are found, suggest the resize-and-reapply workflow below - don't run it unprompted:
+
+> "This document has N image(s)/table(s) with no explicit size, so they compiled at their default/native size. If you'd like to fine-tune the layout, open the .docx in Word, resize them there, save, and let me know - I can read the new sizes back and write them into the markdown so they stick on the next compile."
+
+## Reading resized dimensions back into the markdown
+
+When the user asks to apply sizes from a document they resized in Word:
+
+```
+python scripts/read_docx_sizes.py <resized.docx>
+```
+
+This prints a JSON array of `{"type": "image", "index": N, "width_in": ..., "height_in": ...}` and `{"type": "table", "index": N, "column_widths_in": [...]}` entries - `index` is 0-based per type, in document order, and already excludes the signature-approval/revision-history tables.
+
+Before writing anything back:
+1. Count the images and tables in the **source markdown** (the same ones the "no explicit size" scan above looks for, plus any that already had a size). Compare against the script's image/table counts.
+2. If the counts don't match, stop and tell the user - the Nth image/table in the docx no longer corresponds to the Nth image/table in the markdown (content was likely added, removed, or reordered since compiling), and applying sizes positionally would silently mislabel them. Ask the user to confirm which markdown element each entry corresponds to, or to recompile from the current markdown first.
+3. If the counts match, apply positionally: for each image entry, set `width=` and `height=` (e.g. `width=4in height=2in`, using that entry's `width_in`/`height_in` values) in that image's trailing `{...}` block (add the block if it doesn't have one yet, preserving any existing `#fig:` id); for each table entry, insert or replace the `@@@TABLE_COLUMNS:w1,w2,...@@@` marker immediately before that table using that entry's `column_widths_in` values.
+4. Report what was changed so the user can review before recompiling.
+
 ## Input format reference
 
 The input markdown needs YAML front matter shaped like:

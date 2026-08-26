@@ -30,7 +30,7 @@ This is a **self-hosted Claude Code plugin** for Windows environments, providing
 - Explicitly does not invoke Pandoc or the Python compiler - that's the `dilon-document-compiler` skill's job.
 
 ### Skill 2: `dilon-document-compiler`
-**Location:** `skills/dilon-document-compiler/` (`SKILL.md`, `scripts/generate_dilon_doc.py`, `scripts/check_deps.py`); the reference template (`templates/TEMPLATE_Word_Base.docx`) lives at the repo root, shared with `dilon-document-form-compiler` and `dilon-document-extractor`.
+**Location:** `skills/dilon-document-compiler/` (`SKILL.md`, `scripts/generate_dilon_doc.py`, `scripts/read_docx_sizes.py`, `scripts/check_deps.py`); the reference template (`templates/TEMPLATE_Word_Base.docx`) lives at the repo root, shared with `dilon-document-form-compiler` and `dilon-document-extractor`.
 
 **Dependencies:** Python (>= 3.8) with `python-docx`, `docxcompose`, `pyyaml>=6.0`, `jinja2`; Pandoc on PATH. Installed via `install.ps1`.
 
@@ -38,8 +38,10 @@ This is a **self-hosted Claude Code plugin** for Windows environments, providing
 - Runs `scripts/check_deps.py` first; if it reports any `[FAIL]`, stops and tells the user which dependency is missing (pointing at `install.ps1`) rather than attempting a partial compile.
 - Invokes `scripts/generate_dilon_doc.py <input.md> <output.docx> <base_template>` with the base template argument always explicit (never relies on the script's own default template lookup).
 - Produces a regulatory-compliant Word document: signature page + revision history table + title page/content + table of contents, from a markdown file with Dilon YAML front matter. The signature-approval table, revision table, and title page are all built programmatically (not template-baked); only the header/footer/styles come from the base template.
+- Every compiled inline picture gets its aspect ratio locked for interactive resize (`lib/dilon_docx_common.py`'s `lock_image_aspect_ratios()`, called from both `generate_dilon_doc.py` and `generate_dilon_form.py`) - see "Image Aspect Ratio Lock" below.
 - Verifies the output file exists after the script runs; reports stdout/stderr to the user on failure, or the output path on success.
 - Points users lacking YAML front matter back to the `dilon-document-writer` skill.
+- After a successful compile, suggests a resize-and-reapply pass when the input markdown has images/tables with no explicit size hint; `scripts/read_docx_sizes.py <resized.docx>` then reads back each image's width/height and each table's column widths (in document order, excluding the signature-approval/revision-history tables) so Claude can write `width=`/`height=` image attributes and `@@@TABLE_COLUMNS@@@` markers back into the source markdown. Matching is positional (Nth image/table in the docx = Nth in the markdown) - see "Resize-and-Reapply Workflow" below.
 
 ### Skill 3: `dilon-document-form-compiler`
 **Location:** `skills/dilon-document-form-compiler/` (`SKILL.md`, `scripts/generate_dilon_form.py`, `scripts/form_fields.py`, `scripts/check_deps.py`); shares the same repo-root `templates/TEMPLATE_Word_Base.docx` that `dilon-document-compiler` uses - there is no form-specific template file.
@@ -50,6 +52,7 @@ This is a **self-hosted Claude Code plugin** for Windows environments, providing
 - Runs `scripts/check_deps.py` first; same fail-fast behavior as `dilon-document-compiler`.
 - Invokes `scripts/generate_dilon_form.py <input.md> <output.docx> <base_template>`.
 - Produces a running-header/footer-only Word document (no title page, no signature-approval page, no table of contents) - for forms/travelers meant to be printed and filled out by hand, as opposed to `dilon-document-compiler`'s narrative documents.
+- Every compiled inline picture gets its aspect ratio locked for interactive resize, same as `dilon-document-compiler` (shared `lock_image_aspect_ratios()`) - but this skill has no resize-and-reapply workflow (no `read_docx_sizes.py` equivalent).
 - Expects the same rich Dilon YAML front matter as `dilon-document-compiler` (front-matter fields beyond title/doc_number/current_revision aren't rendered into the form's header, but are kept for consistency with the rest of the front-matter-driven tooling).
 - Compiles three form-only markdown markers implemented in `scripts/form_fields.py` - `FillLine` (`underscore_until_end_of_line()`), `FieldGrid`, and `Form_Section_Header` - but doesn't itself document their syntax; that's `dilon-document-form-writer`'s job (mirroring how `dilon-document-compiler` defers markdown-authoring guidance to `dilon-document-writer`).
 
@@ -106,6 +109,7 @@ dilon-claude-tools/
 │   │   ├── SKILL.md
 │   │   └── scripts/
 │   │       ├── generate_dilon_doc.py  # Markdown -> Word compiler (signature/title/TOC)
+│   │       ├── read_docx_sizes.py     # Reads resized image/table dimensions back for the resize-and-reapply workflow
 │   │       └── check_deps.py          # Preflight dependency checker
 │   ├── dilon-document-form-compiler/
 │   │   ├── SKILL.md
@@ -142,8 +146,10 @@ The base template (repo-root `templates/TEMPLATE_Word_Base.docx`) carries only s
 - **Revision table**: generated programmatically (`create_revision_table()`) from the markdown's `revisions` YAML list (custom column widths, gray headers, centered text).
 - **Title page**: `build_title_page()` (`generate_dilon_doc.py`) builds Part C from the metadata dict - title, Author/Revised-by table, and boilerplate about ARENA PLM/master-document/approval history are all hardcoded Python + python-docx calls now; there is no separate content template file.
 - **Markdown content**: converted via Pandoc, with TOC generation from H2 section headings (`markdown_to_docx()`, `include_toc` flag).
+- **Image aspect ratio lock**: `lock_image_aspect_ratios()` (`lib/dilon_docx_common.py`, shared by both compiler skills) post-processes every inline picture Pandoc embeds. Pandoc's docx writer sets `picLocks`/`noChangeAspect` on the picture itself (`pic:cNvPicPr`) but never emits the enclosing `wp:cNvGraphicFramePr`/`a:graphicFrameLocks` element at all (it's schema-optional) - and that frame-level lock, not the picture-level one, is what Word actually consults for interactive corner/side-handle drag-resize. Confirmed by diffing a Pandoc-generated image against a native Word drag-and-drop insert in the same document: only the frame-level lock differed, and only the drag-dropped image resized locked. The function backfills the missing `wp:cNvGraphicFramePr`/`a:graphicFrameLocks` for every inline picture.
+- **Resize-and-reapply workflow**: `dilon-document-compiler`'s `scripts/read_docx_sizes.py <resized.docx>` reads back each inline picture's width/height and each table's column widths from a document the user resized in Word, in document order, excluding the signature-approval/revision-history tables (via a local `classify_table()`, mirroring `dilon-document-extractor`'s). Claude maps the results positionally (Nth image/table in the docx = Nth in the source markdown - there's no other stable id) back onto `width=`/`height=` image attributes and `@@@TABLE_COLUMNS@@@` markers. See `dilon-document-compiler/SKILL.md`'s "Suggesting a resize pass" / "Reading resized dimensions back into the markdown" sections.
 
-`dilon-document-form-compiler` reuses `populate_header()`/`populate_footer()` against the same base template but skips the signature table, revision table, title page, and TOC entirely - see Skill 3 above.
+`dilon-document-form-compiler` reuses `populate_header()`/`populate_footer()` and `lock_image_aspect_ratios()` against the same base template but skips the signature table, revision table, title page, TOC, and resize-and-reapply workflow entirely - see Skill 3 above.
 
 `TEMPLATE_Document.md` (in `dilon-document-writer`) provides the starter markdown with the full YAML front-matter shape and section templates for new documents.
 

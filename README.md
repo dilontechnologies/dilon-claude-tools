@@ -2,28 +2,32 @@
 
 **Claude Code plugin for Dilon Technologies document authoring tools**
 
-This repository is a [Claude Code plugin](https://code.claude.com/docs/en/plugins) that bundles four Skills for working with Dilon Technologies' regulatory-compliant technical documentation:
+This repository is a [Claude Code plugin](https://code.claude.com/docs/en/plugins) that bundles five Skills for working with Dilon Technologies' regulatory-compliant technical documentation:
 
 - **`dilon-document-writer`** - create a new Dilon document from the standard template, and apply Dilon markdown styling conventions while editing existing Dilon documents.
 - **`dilon-document-compiler`** - compile a Dilon-formatted markdown file into a regulatory-compliant Word document (signature page, revision history table, table of contents).
+- **`dilon-document-form-writer`** - create a new Dilon form/traveler document from its own template, and document the form-only markdown markers (`FillLine`, `FieldGrid`, `Form_Section_Header`).
 - **`dilon-document-form-compiler`** - compile a Dilon form/traveler markdown file into a Word document with a running header/footer only (no title page, signature page, or table of contents).
 - **`dilon-document-extractor`** - bootstrap a Dilon markdown draft from an existing Word or PDF document.
 
 ## Prerequisites
 
-- **Python** (>= 3.8) and the following pip packages: `python-docx`, `python-docx-template`, `docxcompose`, `pyyaml>=6.0`, `pymupdf`, `jinja2`
+- **Python** (>= 3.8) and the following pip packages: `python-docx`, `docxcompose>=2.2.0`, `pyyaml>=6.0`, `pymupdf`, `jinja2`
 - **Pandoc** (for Markdown to Word conversion), on PATH
 
-Run `install.ps1` (as Administrator) from the repo root to auto-install these via winget and pip:
+Clone the repository, then run `install.ps1` (as Administrator) from the repo root to auto-install these via winget and pip:
 
 ```powershell
+git clone https://github.com/dilontechnologies/dilon-claude-tools.git C:\Users\YourUsername\Local_Documents\Local_Repos\dilon-claude-tools
 cd C:\Users\YourUsername\Local_Documents\Local_Repos\dilon-claude-tools
 .\install.ps1
 ```
 
 This also installs the `Compile-DilonDoc` / `dilonc` PowerShell alias for compiling documents outside of Claude Code.
 
-The `dilon-document-writer` skill has no external dependencies - it works without running `install.ps1`. The `dilon-document-extractor` skill's PDF path needs `pymupdf`, also installed by `install.ps1`.
+The `dilon-document-writer` and `dilon-document-form-writer` skills have no external dependencies - they work without running `install.ps1`. The `dilon-document-extractor` skill's PDF path needs `pymupdf`, also installed by `install.ps1`.
+
+> **If Claude is installing this for you:** `install.ps1` requires an elevated (Administrator) PowerShell session and installs software system-wide via winget (Python, Pandoc). Claude should not run `git clone` or `install.ps1` itself - run those two commands yourself in your own elevated terminal. Claude can then run the `/plugin marketplace add` / `/plugin install` commands below directly, in your regular Claude Code session.
 
 ## Installing the plugin
 
@@ -95,7 +99,11 @@ dilon-claude-tools/
 │   │   ├── SKILL.md
 │   │   └── scripts/
 │   │       ├── generate_dilon_doc.py
+│   │       ├── read_docx_sizes.py
 │   │       └── check_deps.py
+│   ├── dilon-document-form-writer/
+│   │   ├── SKILL.md
+│   │   └── TEMPLATE_Form.md
 │   ├── dilon-document-form-compiler/
 │   │   ├── SKILL.md
 │   │   └── scripts/

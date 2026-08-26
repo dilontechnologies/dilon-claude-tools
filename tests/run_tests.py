@@ -7,6 +7,7 @@ SKILL.md, not a script) and the dilon-document-compiler script directly,
 then runs the existing output validator.
 """
 
+import json
 import re
 import shutil
 import struct
@@ -41,6 +42,7 @@ WRITER_DIR = REPO_ROOT / "skills" / "dilon-document-writer"
 COMPILER_DIR = REPO_ROOT / "skills" / "dilon-document-compiler"
 TEMPLATE_PATH = WRITER_DIR / "TEMPLATE_Document.md"
 COMPILER_SCRIPT = COMPILER_DIR / "scripts" / "generate_dilon_doc.py"
+READ_SIZES_SCRIPT = COMPILER_DIR / "scripts" / "read_docx_sizes.py"
 CHECK_DEPS_SCRIPT = COMPILER_DIR / "scripts" / "check_deps.py"
 SIGNATURE_TEMPLATE = REPO_ROOT / "templates" / "TEMPLATE_Word_Base.docx"
 
@@ -1160,6 +1162,65 @@ def test_lock_image_aspect_ratios_idempotent_when_already_locked():
     with zipfile.ZipFile(docx_path) as z:
         xml = z.read('word/document.xml').decode('utf-8')
     check(xml.count('graphicFrameLocks') == 1, "only one graphicFrameLocks element exists after two calls")
+
+
+def test_read_docx_sizes_excludes_signature_and_revision_tables():
+    """Regression test: a compiled document's signature-approval and
+    revision-history tables are generated programmatically and never
+    appear in the source markdown - read_docx_sizes.py must exclude
+    them (via classify_table()) so its 'table' entries line up
+    positionally with the markdown's own tables, not shift by two."""
+    images_dir = TEST_OUTPUT_DIR / "read_sizes_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    md = SAMPLE_MARKDOWN + (
+        '\n## Read Sizes Test\n\n'
+        '![A tiny red test image.](read_sizes_images/test.png)\n\n'
+        '| Name | Value |\n'
+        '|---|---|\n'
+        '| A | B |\n'
+    )
+    input_md = TEST_OUTPUT_DIR / "read_sizes_test.md"
+    output_docx = TEST_OUTPUT_DIR / "read_sizes_test.docx"
+    input_md.write_text(md, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for the read-sizes fixture document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "read_docx_sizes.py reports correct sizes (skipped: compile failed)")
+        return
+
+    result = subprocess.run(
+        [sys.executable, str(READ_SIZES_SCRIPT), str(output_docx)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "read_docx_sizes.py exits 0 for a compiled document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "read_docx_sizes.py output parses as expected (skipped: script failed)")
+        return
+
+    sizes = json.loads(result.stdout)
+    images = [s for s in sizes if s["type"] == "image"]
+    tables = [s for s in sizes if s["type"] == "table"]
+
+    check(len(images) == 1, f"exactly one image entry, matching the one body image (got {len(images)})")
+    if images:
+        check(images[0]["width_in"] > 0 and images[0]["height_in"] > 0,
+              "the image entry reports positive width/height")
+
+    check(len(tables) == 1,
+          f"exactly one table entry - the signature-approval and revision-history tables are excluded (got {len(tables)})")
+    if tables:
+        check(len(tables[0]["column_widths_in"]) == 2,
+              f"the one body table reports 2 column widths (got {len(tables[0]['column_widths_in'])})")
 
 
 def test_render_jinja_substitutes_body_fields():
@@ -2515,6 +2576,7 @@ def main():
     test_compile_resolves_relative_image_paths()
     test_lock_image_aspect_ratios_adds_frame_lock_when_missing()
     test_lock_image_aspect_ratios_idempotent_when_already_locked()
+    test_read_docx_sizes_excludes_signature_and_revision_tables()
     test_render_jinja_substitutes_body_fields()
     test_render_jinja_raw_block_escapes_literal_braces()
     test_render_jinja_noop_without_braces()
