@@ -38,7 +38,7 @@ This repo is its own [plugin marketplace](https://code.claude.com/docs/en/plugin
 /plugin install dilon-tools@dilon-claude-tools
 ```
 
-Authentication uses your existing git credentials (PAT or SSH) for this private repository - the same access you already use to `git clone` it.
+Authentication uses your existing git credentials (PAT or SSH) - the same access you already use to `git clone` it.
 
 ### Updating
 
