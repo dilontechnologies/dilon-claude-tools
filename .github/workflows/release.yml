@@ -60,7 +60,6 @@ jobs:
     needs: setup
     if: needs.setup.outputs.skip == 'false'
     runs-on: ubuntu-latest
-    environment: release
     permissions:
       contents: write
     env:

@@ -94,10 +94,15 @@ both together on the release branch before opening the `REL/v*.*.*` ->
 When that PR merges, every push to `master` triggers `release.yml`: it
 resolves the tag from `VERSION.txt` (skipping if that tag already exists, so
 non-release pushes to `master` are a no-op), creates a draft GitHub Release,
-and publishes it. Publishing runs under the `release` GitHub Environment,
-which requires a human reviewer's approval before it executes - so pushing to
-`master` starts the release, but a person still has to approve the publish
-step. Do not create version tags manually.
+and immediately publishes it - no separate approval step. Merging a
+`REL/v*.*.*` -> `master` PR **is** the release decision; there is no pause
+after that point. Do not create version tags manually.
+
+`release.yml` also supports a manual `workflow_dispatch` run (with `version`
+and `prerelease` inputs) for testing the publish pipeline itself without
+touching the real `VERSION.txt`-derived tag - it appends `-pr-<sha>` to the
+tag and marks the GitHub Release as a pre-release. `workflow_dispatch` only
+becomes available once the workflow file exists on `master`.
 
 Version increments are determined by changes to the **markdown syntax and
 YAML front matter authors write** - the actual interface between a Dilon
