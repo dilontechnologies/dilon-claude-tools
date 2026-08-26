@@ -50,8 +50,10 @@ def markdown_heading_prefix(word_level, shift):
 
 def is_suspicious_heading_text(text):
     """True if a heading-styled paragraph reads like body text rather than
-    a real heading (ends in a period, or unusually long) - flagged for
-    human review, never silently rewritten."""
+    a real heading (ends in a period, or unusually long) - a strong signal
+    it's actually a numbered procedure step (MARKDOWN_STYLING_GUIDE.md SS6)
+    that the source document authored with Word heading styles instead of
+    a real list. Flagged for human review, never silently rewritten."""
     text = text.strip()
     if not text:
         return False
@@ -393,7 +395,9 @@ def table_to_grid_markdown(table):
     rendering is out of scope for a mechanical draft; a human reviewing
     the extracted draft restores paragraph breaks where they matter."""
     rows = [[cell.text.strip().replace('\n', ' ') for cell in row.cells] for row in table.rows]
-    widths = [max(len(rows[r][c]) for r in range(len(rows))) for c in range(len(rows[0]))]
+    ncols = max(len(row) for row in rows)
+    rows = [row + [''] * (ncols - len(row)) for row in rows]
+    widths = [max(len(rows[r][c]) for r in range(len(rows))) for c in range(ncols)]
 
     def border(char):
         return "+" + "+".join(char * (w + 2) for w in widths) + "+"
@@ -415,7 +419,9 @@ def table_to_markdown(table):
         return table_to_grid_markdown(table)
 
     rows = [[cell.text.strip().replace('\n', ' ') for cell in row.cells] for row in table.rows]
-    lines = ["| " + " | ".join(rows[0]) + " |", "|" + "|".join(["---"] * len(rows[0])) + "|"]
+    ncols = max(len(row) for row in rows)
+    rows = [row + [''] * (ncols - len(row)) for row in rows]
+    lines = ["| " + " | ".join(rows[0]) + " |", "|" + "|".join(["---"] * ncols) + "|"]
     for row in rows[1:]:
         lines.append("| " + " | ".join(row) + " |")
     return "\n".join(lines)
@@ -432,6 +438,8 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
     lines = []
     in_list = False
     last_list_ilvl = 0
+    steps_open = False
+    steps_base_level = None
     existing_slugs = set()
     image_index = 1
 
@@ -441,9 +449,22 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
             lines.append("")
             in_list = False
 
+    def flush_steps():
+        nonlocal steps_open, steps_base_level
+        if steps_open:
+            lines.append("")
+            lines.append("@@@END_STEPS@@@")
+            lines.append("")
+            steps_open = False
+            steps_base_level = None
+
+    def flush_all():
+        flush_list()
+        flush_steps()
+
     for i, block in enumerate(blocks):
         if isinstance(block, Table):
-            flush_list()
+            flush_all()
             kind = classify_table(block)
             if kind == "signature":
                 fields, sig_warnings = extract_signature_fields(block)
@@ -465,7 +486,7 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
 
         rids = paragraph_image_rids(block)
         if rids:
-            flush_list()
+            flush_all()
             caption_text = None
             if i + 1 < len(blocks) and isinstance(blocks[i + 1], Paragraph):
                 next_style = blocks[i + 1].style.name if blocks[i + 1].style else None
@@ -489,7 +510,7 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
                 and paragraph_image_rids(blocks[i - 1])
             )
             if not prev_had_image:
-                flush_list()
+                flush_all()
                 warnings.append(f"orphan Caption paragraph with no preceding image: {text!r}")
                 lines.append(text)
                 lines.append("")
@@ -502,31 +523,49 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
         if level is not None:
             suspicious = is_suspicious_heading_text(text)
             empty_leaf = not suspicious and heading_is_empty_leaf(blocks, i, level)
-            if suspicious or empty_leaf:
-                if empty_leaf:
+            if suspicious:
+                warnings.append(
+                    "heading-styled paragraph reads like a numbered procedure "
+                    f"step, rendered as a @@@STEPS@@@ item: {text!r}"
+                )
+                flush_list()
+                if steps_open and level < steps_base_level:
+                    flush_steps()
+                if not steps_open:
+                    lines.append("@@@STEPS@@@")
+                    lines.append("")
+                    steps_open = True
+                    steps_base_level = level
+                nest = level - steps_base_level
+                if nest > 2:
                     warnings.append(
-                        "heading-styled paragraph has no content of its own "
-                        "(sole child heading immediately followed by another "
-                        "heading or end of document), rendered as a list "
-                        f"item instead of a heading: {text!r}"
+                        "procedure step nested deeper than the 3-level "
+                        f"@@@STEPS@@@ maximum, clamped: {text!r}"
                     )
-                else:
-                    warnings.append(
-                        "heading-styled paragraph reads like body text, rendered "
-                        f"as a nested list item instead of a heading: {text!r}"
-                    )
+                    nest = 2
+                lines.append(f"{'  ' * nest}#. {text}")
+                continue
+            if empty_leaf:
+                flush_steps()
+                warnings.append(
+                    "heading-styled paragraph has no content of its own "
+                    "(sole child heading immediately followed by another "
+                    "heading or end of document), rendered as a list "
+                    f"item instead of a heading: {text!r}"
+                )
                 nest = last_list_ilvl + 1 if in_list else 0
                 if not in_list:
                     lines.append("")
                     in_list = True
                 lines.append(f"{'  ' * nest}- {text}")
                 continue
-            flush_list()
+            flush_all()
             lines.append(f"{markdown_heading_prefix(level, shift)} {titlecase_heading(text)}")
             lines.append("")
             continue
 
         if paragraph_is_list_item(block):
+            flush_steps()
             if not in_list:
                 lines.append("")
                 in_list = True
@@ -534,11 +573,11 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
             lines.append(f"{'  ' * last_list_ilvl}- {text}")
             continue
 
-        flush_list()
+        flush_all()
         lines.append(text)
         lines.append("")
 
-    flush_list()
+    flush_all()
     return "\n".join(lines).strip() + "\n", warnings
 
 

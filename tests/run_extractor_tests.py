@@ -523,7 +523,7 @@ def test_extract_no_warning_when_footer_matches_revision():
     )
 
 
-def test_build_markdown_body_suspicious_heading_becomes_nested_list_item():
+def test_build_markdown_body_suspicious_heading_becomes_step():
     import extract_docx as ex
     doc = Document()
     doc.add_paragraph("Preparation", style="Heading 1")
@@ -535,11 +535,50 @@ def test_build_markdown_body_suspicious_heading_becomes_nested_list_item():
     body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
 
     check("##### Strong pressure" not in body, "suspicious heading-styled paragraph not rendered as a markdown heading")
+    check("@@@STEPS@@@" in body and "@@@END_STEPS@@@" in body, "suspicious heading-styled paragraph wrapped in a @@@STEPS@@@ block")
     check(
-        "  - Strong pressure on the Photomultiplier should be avoided." in body,
-        "suspicious heading-styled paragraph rendered as a nested list item instead",
+        "#. Strong pressure on the Photomultiplier should be avoided." in body,
+        "suspicious heading-styled paragraph rendered as a step item instead",
     )
-    check(any("rendered as a nested list item" in w for w in warnings), "conversion from heading to list item is flagged for review")
+    check(any("rendered as a @@@STEPS@@@ item" in w for w in warnings), "conversion from heading to step item is flagged for review")
+
+
+def test_build_markdown_body_step_run_nests_by_heading_level():
+    import extract_docx as ex
+    doc = Document()
+    doc.add_paragraph("Epoxy", style="Heading 2")
+    doc.add_paragraph("Mix the epoxy per the manufacturer's specs.", style="Heading 3")
+    doc.add_paragraph("Use the pink needle at 10 psi.", style="Heading 4")
+    doc.add_paragraph("Dispense a small amount of epoxy into a tray.", style="Heading 3")
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check(body.count("@@@STEPS@@@") == 1, "one contiguous step run produces a single @@@STEPS@@@ block")
+    check("#. Mix the epoxy per the manufacturer's specs." in body, "first sibling step rendered at top level")
+    check("  #. Use the pink needle at 10 psi." in body, "deeper heading level rendered as a nested clarification")
+    check("#. Dispense a small amount of epoxy into a tray." in body, "second sibling step rendered at top level")
+    check(
+        not any(line.startswith("  #. Dispense") for line in body.splitlines()),
+        "sibling step at the run's base level is not nested under the prior step",
+    )
+
+
+def test_build_markdown_body_step_run_closes_around_image():
+    import extract_docx as ex
+    doc = Document()
+    doc.add_paragraph("Epoxy", style="Heading 2")
+    doc.add_paragraph("Mix the epoxy per the manufacturer's specs.", style="Heading 3")
+    doc.add_paragraph("A caption-less plain paragraph interrupts the run.")
+    doc.add_paragraph("Dispense a small amount of epoxy into a tray.", style="Heading 3")
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check(body.count("@@@STEPS@@@") == 2, "an interruption closes and reopens a fresh @@@STEPS@@@ block")
+    check(body.count("@@@END_STEPS@@@") == 2, "each opened @@@STEPS@@@ block is closed")
 
 
 def test_slugify_dedup():
@@ -735,7 +774,9 @@ def main():
     test_build_markdown_body_nested_list_indentation()
     test_is_toc_paragraph()
     test_build_markdown_body_skips_toc_and_converts_direct_numpr_list()
-    test_build_markdown_body_suspicious_heading_becomes_nested_list_item()
+    test_build_markdown_body_suspicious_heading_becomes_step()
+    test_build_markdown_body_step_run_nests_by_heading_level()
+    test_build_markdown_body_step_run_closes_around_image()
     test_extract_flags_footer_revision_eco_mismatch()
     test_extract_no_warning_when_footer_matches_revision()
     test_slugify_dedup()
