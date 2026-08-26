@@ -1003,6 +1003,54 @@ def center_image_paragraphs(docx_file):
     return count
 
 
+def lock_image_aspect_ratios(docx_file):
+    """
+    Force Word to preserve each inline picture's proportions when a user
+    drags a resize handle.
+
+    Pandoc's docx writer already sets picLocks/noChangeAspect on the
+    picture itself (pic:cNvPicPr) - but that governs the legacy Format
+    Picture dialog's "Lock aspect ratio" checkbox, not interactive
+    drag-resize. What Word actually consults for corner/side-handle
+    dragging is the enclosing graphic frame's own lock element
+    (wp:cNvGraphicFramePr > a:graphicFrameLocks) - and Pandoc omits
+    wp:cNvGraphicFramePr entirely (it's schema-optional), so that lock
+    never exists at all. A picture inserted natively via Word's
+    drag-and-drop gets both; confirmed by diffing a Pandoc-generated
+    image against a drag-and-dropped one in the same document - only
+    the frame-level lock differed, and only the drag-dropped image
+    resized locked. (Word itself will backfill an *empty*
+    wp:cNvGraphicFramePr into untouched Pandoc images the next time it
+    saves the file - but never populates the lock inside it.)
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    doc = Document(docx_file)
+
+    count = 0
+    for graphic in doc.element.body.iter(qn('a:graphic')):
+        if not graphic.findall('.//' + qn('pic:pic')):
+            continue
+        frame_container = graphic.getparent()  # wp:inline or wp:anchor
+        frame_pr = frame_container.find(qn('wp:cNvGraphicFramePr'))
+        if frame_pr is None:
+            frame_pr = OxmlElement('wp:cNvGraphicFramePr')
+            graphic.addprevious(frame_pr)
+        if frame_pr.find(qn('a:graphicFrameLocks')) is not None:
+            continue
+        locks = OxmlElement('a:graphicFrameLocks')
+        locks.set('noChangeAspect', '1')
+        frame_pr.append(locks)
+        count += 1
+
+    if count:
+        doc.save(docx_file)
+        print(f"  Locked aspect ratio on {count} image(s)")
+
+    return count
+
+
 def set_update_fields_on_open(docx_file):
     """
     Force Word to recalculate all fields (STYLEREF/SEQ figure numbers, TOC

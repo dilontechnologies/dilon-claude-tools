@@ -24,6 +24,7 @@ from dilon_docx_common import (  # noqa: E402
     render_jinja,
     markdown_to_docx,
     apply_styles,
+    lock_image_aspect_ratios,
     compose_documents,
     set_update_fields_on_open,
     populate_header,
@@ -100,6 +101,9 @@ def generate_form_document(markdown_path, output_path, form_template_path=None):
 
     print("Applying custom styles...")
     apply_styles(temp_part_d)
+
+    print("Locking image aspect ratios...")
+    lock_image_aspect_ratios(temp_part_d)
 
     print("Applying ordered-list styling...")
     remap_ordered_lists_to_dilon_step_list(temp_part_d)

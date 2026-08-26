@@ -42,6 +42,7 @@ from dilon_docx_common import (  # noqa: E402
     apply_styles,
     apply_figure_captions,
     center_image_paragraphs,
+    lock_image_aspect_ratios,
     markdown_to_docx,
     insert_page_break_after_toc,
     extract_yaml_and_markdown,
@@ -441,6 +442,9 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
 
     print("Centering image paragraphs...")
     center_image_paragraphs(temp_part_d)
+
+    print("Locking image aspect ratios...")
+    lock_image_aspect_ratios(temp_part_d)
 
     try:
         step_clarification_abstract_num_id = get_step_clarification_abstract_num_id(signature_template_path)

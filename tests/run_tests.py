@@ -1113,6 +1113,55 @@ def test_compile_resolves_relative_image_paths():
               "compiled document's body (not just the header) embeds an image relationship")
 
 
+def test_lock_image_aspect_ratios_adds_frame_lock_when_missing():
+    """Regression test: Pandoc's docx writer sets picLocks/noChangeAspect
+    on the picture itself but never emits wp:cNvGraphicFramePr at all (it's
+    schema-optional), so the frame-level a:graphicFrameLocks that Word
+    actually consults for interactive drag-resize never exists - images
+    compile with resize handles that freely distort. Confirmed by diffing
+    a Pandoc-generated image against a native Word drag-and-drop insert in
+    the same document; only the frame-level lock differed."""
+    images_dir = TEST_OUTPUT_DIR / "aspect_lock_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    md = "![A test image.](aspect_lock_images/test.png)\n"
+    docx_path = TEST_OUTPUT_DIR / "aspect_lock_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE, resource_dir=TEST_OUTPUT_DIR)
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml_before = z.read('word/document.xml').decode('utf-8')
+    check('cNvGraphicFramePr' not in xml_before,
+          "sanity check: Pandoc's raw output has no wp:cNvGraphicFramePr at all")
+
+    count = dilon_docx_common.lock_image_aspect_ratios(docx_path)
+    check(count == 1, "locks exactly the one image in the document")
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml_after = z.read('word/document.xml').decode('utf-8')
+    check('<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>' in xml_after,
+          "the image's graphic frame now carries a populated aspect-ratio lock")
+
+
+def test_lock_image_aspect_ratios_idempotent_when_already_locked():
+    images_dir = TEST_OUTPUT_DIR / "aspect_lock_idempotent_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    md = "![A test image.](aspect_lock_idempotent_images/test.png)\n"
+    docx_path = TEST_OUTPUT_DIR / "aspect_lock_idempotent_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE, resource_dir=TEST_OUTPUT_DIR)
+
+    first_count = dilon_docx_common.lock_image_aspect_ratios(docx_path)
+    second_count = dilon_docx_common.lock_image_aspect_ratios(docx_path)
+    check(first_count == 1, "first call locks the image")
+    check(second_count == 0, "second call is a no-op, not a duplicate lock")
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check(xml.count('graphicFrameLocks') == 1, "only one graphicFrameLocks element exists after two calls")
+
+
 def test_render_jinja_substitutes_body_fields():
     text = compiler.render_jinja("This document is {{doc_number}}, rev {{current_revision}}.", {
         "doc_number": "WI-00077",
@@ -2464,6 +2513,8 @@ def main():
     test_compile_table_column_widths()
     test_compile_with_default_templates()
     test_compile_resolves_relative_image_paths()
+    test_lock_image_aspect_ratios_adds_frame_lock_when_missing()
+    test_lock_image_aspect_ratios_idempotent_when_already_locked()
     test_render_jinja_substitutes_body_fields()
     test_render_jinja_raw_block_escapes_literal_braces()
     test_render_jinja_noop_without_braces()
