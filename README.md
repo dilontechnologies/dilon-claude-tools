@@ -15,10 +15,15 @@ This repository is a [Claude Code plugin](https://code.claude.com/docs/en/plugin
 - **Python** (>= 3.8) and the following pip packages: `python-docx`, `docxcompose>=2.2.0`, `pyyaml>=6.0`, `pymupdf`, `jinja2`
 - **Pandoc** (for Markdown to Word conversion), on PATH
 
-Clone the repository, then run `install.ps1` (as Administrator) from the repo root to auto-install these via winget and pip:
+Clone the repository:
 
 ```powershell
 git clone https://github.com/dilontechnologies/dilon-claude-tools.git C:\Users\YourUsername\Local_Documents\Local_Repos\dilon-claude-tools
+```
+
+Then, from an elevated (Administrator) PowerShell session, run `install.ps1` from the repo root to auto-install the prerequisites above via winget and pip:
+
+```powershell
 cd C:\Users\YourUsername\Local_Documents\Local_Repos\dilon-claude-tools
 .\install.ps1
 ```
@@ -27,7 +32,7 @@ This also installs the `Compile-DilonDoc` / `dilonc` PowerShell alias for compil
 
 The `dilon-document-writer` and `dilon-document-form-writer` skills have no external dependencies - they work without running `install.ps1`. The `dilon-document-extractor` skill's PDF path needs `pymupdf`, also installed by `install.ps1`.
 
-> **If Claude is installing this for you:** `install.ps1` requires an elevated (Administrator) PowerShell session and installs software system-wide via winget (Python, Pandoc). Claude should not run `git clone` or `install.ps1` itself - run those two commands yourself in your own elevated terminal. Claude can then run the `/plugin marketplace add` / `/plugin install` commands below directly, in your regular Claude Code session.
+> **If Claude is installing this for you:** `install.ps1` requires an elevated (Administrator) PowerShell session and installs software system-wide via winget (Python, Pandoc). Claude can run `git clone` itself, but should not run `install.ps1` - run that command yourself in your own elevated terminal. Claude can then run the `/plugin marketplace add` / `/plugin install` commands below directly, in your regular Claude Code session.
 
 ## Installing the plugin
 
