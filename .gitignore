@@ -19,9 +19,19 @@ Thumbs.db
 *.tmp
 ~$*
 tests/test-output/
+tests/form-test-output/
+tests/extractor-test-output/
+tests/manual-fixtures/
+
+# Python
+__pycache__/
+*.pyc
 
 # Local configuration files
 *.local.*
 
 # Brainstorming specs (not committed)
 docs/superpowers/
+
+# Git worktrees
+.worktrees/

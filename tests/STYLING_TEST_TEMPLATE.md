@@ -4,9 +4,12 @@ author: "Dilon Engineering Team"
 department: "Engineering"
 doc_number: "DD_NAV3_TEST_001"
 current_revision: "1.1"
-regulatory_rep: "Shannon Smith"
-quality_rep: "Kevin Johnson"
 department_head: "Josh Williams"
+signature_fields:
+  - department: "Regulatory"
+    name: "Shannon Smith"
+  - department: "Quality"
+    name: "Kevin Johnson"
 revisions:
   - number: "1.0"
     description: "Initial release"
@@ -172,23 +175,42 @@ Nested unordered list:
 
 ### Ordered Lists
 
-Simple numbered list:
+Simple auto-numbered list:
 
-1. First step
-2. Second step
-3. Third step
+#. First step
+#. Second step
+#. Third step
 
-Ordered list with nested bullets:
+Auto-numbered list with nested bullets:
 
-1. Initialize I2C bus
-   - Set clock frequency to 400 kHz
-   - Enable internal pull-ups
-2. Scan for devices
-   - Check addresses 0x00-0x7F
-   - Record responding devices
-3. Configure each device
-   - Write control registers
-   - Verify configuration
+#. Initialize I2C bus
+    - Set clock frequency to 400 kHz
+    - Enable internal pull-ups
+#. Scan for devices
+    - Check addresses 0x00-0x7F
+    - Record responding devices
+#. Configure each device
+    - Write control registers
+    - Verify configuration
+
+Three-level nested ordered list:
+
+#. Top level item
+    #. Second level item
+        #. Third level item
+    #. Second level item, sibling
+#. Top level item, sibling
+
+Interrupted and continued ordered list:
+
+#. First item
+#. Second item []{#list:i2c-setup}
+
+An interrupting paragraph describing what comes next.
+
+@@@CONTINUE:#list:i2c-setup@@@
+#. Third item (continues from 2, not a restart at 1)
+#. Fourth item
 
 ### Definition Lists
 
@@ -207,13 +229,121 @@ Ordered list with nested bullets:
 **Slave Device**
 :   A device that responds to requests from the master device.
 
-## Figures and Images
+## Numbered Step List Examples
+
+A forward reference, resolved before its target step is even declared
+below - proving the reference is a live field keyed on the step's
+bookmark, not on document order: see [](#step:hold-board-by-edges) in
+the "Cross-References" section below. The same is true for figures and
+sections: see [](#fig:i2c-bus-topology) and [](#sec:figures-and-images)
+below, both resolved here even though neither target has appeared yet.
+
+### Cleaning Procedure
+
+No manually-typed numbers - Word applies a live `<H2>.<H3>.<n>` number
+itself (e.g. `5.1.1`), scoped to this "Cleaning Procedure" (Heading 3)
+subsection. A nested `#.` item reletters as `a.`, `b.`, ...; a nested
+`-` item stays a plain bullet:
+
+@@@STEPS@@@
+
+#. Wear clean gloves before handling any board.
+#. Hold the board by the edges. []{#step:hold-board-by-edges}
+    #. Simple dirt such as lint or light dust can be blown away before wiping.
+    #. Wipe with **IPA** and a lint-free cloth.
+        - A visible smear does not always mean contamination is present.
+
+@@@END_STEPS@@@
+
+A procedure interrupted by prose picks back up automatically within the
+same Heading 3 subsection - no marker needed - continuing the number
+sequence above, not restarting at 1:
+
+NOTE: Clean the entire crystal but give special attention to ensure the
+polished end is free of dust, as that is the bonding surface.
+
+@@@STEPS@@@
+
+#. Visually inspect both the crystal and the photomultiplier for any physical defects or anomalies such as scratches, chips, or cracks.
+#. Set the cleaned crystals aside on a clean lint-free cloth for installation later.
+
+@@@END_STEPS@@@
+
+### Digit-Adjacent Step Text
+
+A new Heading 3 always starts step numbering fresh at 1, even while
+still under the same "Numbered Step List Examples" (Heading 2) section -
+proving the reset is scoped to Heading 3, not Heading 2. Also exercises
+a step whose text starts with a number - a common shape in real work
+instructions ("5 minutes", "10 mA") that must not corrupt the step's own
+internal numbering:
+
+@@@STEPS@@@
+
+#. Apply epoxy to the mounting surface.
+#. 5 minutes of curing time is required before proceeding.
+#. 24 AWG wire only - do not substitute a heavier gauge.
+
+@@@END_STEPS@@@
+
+### Cross-References
+
+Give a step an anchor with `[]{#step:label}` (as done above on "Hold the
+board by the edges"), then reference it elsewhere with an **empty-text**
+link - the number fills in live as `Step <n>.<m>.<p>`, so it stays
+correct even if steps are added or removed above it:
+
+As described in [](#step:hold-board-by-edges), always support the board
+by its edges, not its face - see also [](#step:hold-board-by-edges) for
+the same step referenced a second time in one sentence.
+
+Supplying real link text instead of an empty one is left completely
+untouched, exactly like a figure or section cross-reference: see
+[the board-handling step](#step:hold-board-by-edges) above, or
+[the Figures and Images section](#sec:figures-and-images) below.
+
+### Syntax Shown as a Documentation Example
+
+The `@@@STEPS@@@` marker syntax itself, shown inside a fenced code block
+for documentation purposes, must render as plain example text - not be
+converted into a real numbered list:
+
+```markdown
+@@@STEPS@@@
+
+#. Example step one
+#. Example step two
+
+@@@END_STEPS@@@
+```
+
+## Second Numbered Step List Section
+
+A new Heading 2 (with a fresh Heading 3 beneath it) always starts step
+numbering fresh at 1, regardless of how far the previous section's
+steps counted:
+
+### Housing Inspection
+
+@@@STEPS@@@
+
+#. Inspect the housing for visible cracks.
+#. Check that all mounting screws are present.
+#. Torque the mounting screws to 4 in-lb.
+
+@@@END_STEPS@@@
+
+## Figures and Images {#sec:figures-and-images}
+
+This section itself carries a `{#sec:figures-and-images}` id, matching
+the forward reference above: see [](#sec:figures-and-images) for an
+empty-text live reference back to this same section.
 
 ### Figure with Caption
 
 ![Complete I2C Bus Topology showing nRF52832 master connected to all peripheral devices.](diagrams/placeholder_diagram.png){#fig:i2c-bus-topology}
 
-**Note**: The caption above is auto-numbered by the compiler - no number was typed in the markdown. See [the figure](#fig:i2c-bus-topology) for an example of a working figure cross-reference.
+**Note**: The caption above is auto-numbered by the compiler - no number was typed in the markdown. See [the figure](#fig:i2c-bus-topology) for an example of a working figure cross-reference, or [](#fig:i2c-bus-topology) for the same figure referenced with an empty-text link (renders as a live "Figure N.M").
 
 ### Second Figure Example
 
@@ -262,9 +392,6 @@ def calculate_checksum(data):
 #### Bash/Shell Commands
 
 ```bash
-# Generate PlantUML diagram
-plantuml -tpng diagram.puml
-
 # Compile markdown to Word document
 python generate_dilon_doc.py input.md output.docx
 
@@ -573,31 +700,31 @@ This document has undergone the following revisions:
 
 None of the headings in this section have a number typed into their markdown text. The Word templates link the Heading 2/3/4 styles to an automatic multilevel list, so Word generates the "N." / "N.M" / "N.M.P" numbers itself, purely from each heading's position in the document. The expected number is called out after each heading below so it can be checked against what Word actually renders; if a number doesn't match (or is missing/doubled), the template's numbering setup has a problem.
 
-This is the 15th major (`##`) section in the document, so it should render as **15.**
+This is the 17th major (`##`) section in the document, so it should render as **17.**
 
 ### First Subsection
 
-Expected Word auto-number: **15.1**
+Expected Word auto-number: **17.1**
 
 #### First Nested Item
 
-Expected Word auto-number: **15.1.1**
+Expected Word auto-number: **17.1.1**
 
 #### Second Nested Item
 
-Expected Word auto-number: **15.1.2** — proves the sub-subsection counter increments across siblings under the same subsection.
+Expected Word auto-number: **17.1.2** — proves the sub-subsection counter increments across siblings under the same subsection.
 
 ### Second Subsection
 
-Expected Word auto-number: **15.2**
+Expected Word auto-number: **17.2**
 
 #### First Nested Item
 
-Expected Word auto-number: **15.2.1** — reuses the heading title "First Nested Item" from the previous subsection on purpose: the counter must reset to 1 here rather than continuing as 15.1.3.
+Expected Word auto-number: **17.2.1** — reuses the heading title "First Nested Item" from the previous subsection on purpose: the counter must reset to 1 here rather than continuing as 17.1.3.
 
 ### Third Subsection
 
-Expected Word auto-number: **15.3**
+Expected Word auto-number: **17.3**
 
 This subsection has no `####` children, proving a subsection doesn't need nested headings for the numbering to stay correct going into the next major section.
 
@@ -611,6 +738,7 @@ This test document demonstrates all styling elements defined in the Markdown Sty
 - ✅ Grid tables for complex content
 - ✅ Figures with proper captions
 - ✅ All list types (unordered, ordered, definition)
+- ✅ Numbered step lists (`@@@STEPS@@@`) - nesting, automatic continuation within a section, restart across sections, and cross-references
 - ✅ Code blocks with multiple language identifiers
 - ✅ Inline code and register notation
 - ✅ Bold, italic, and bold+italic text
@@ -638,15 +766,29 @@ To test this document:
 
 Check the following in the generated Word document:
 
-- [ ] Title page with correct document number and revision
+- [ ] No separate title page - the document goes straight from the signature/revision pages into the table of contents
 - [ ] Signature page with all three approvers
 - [ ] Revision history table with all entries
 - [ ] Table of contents with correct page numbers
 - [ ] All headings styled correctly (Heading 1, 2, 3)
-- [ ] Headings show single, correctly-nested auto-numbers ("15.", "15.1", "15.1.1") in the "Automatic Section Numbering Verification" section — no missing or doubled numbers
+- [ ] Headings show single, correctly-nested auto-numbers ("17.", "17.1", "17.1.1") in the "Automatic Section Numbering Verification" section — no missing or doubled numbers
 - [ ] Tables display correct column alignment (left, center, right)
 - [ ] Figures display correctly with italicized, centered "Figure N.M - Description" captions - no manually-typed numbers, no missing/doubled numbers
 - [ ] Ctrl+click on "the figure" in the "Figure with Caption" note jumps to that figure
+- [ ] Ctrl+click on both empty-text figure references (the forward reference in "Numbered Step List Examples" and the one in the "Figure with Caption" note) jumps to that figure, each showing the correct live "Figure N.M" text
+- [ ] Ctrl+click on both empty-text section references to "Figures and Images" (the forward reference above, and the self-reference in that section's own intro) jumps to that section, each showing the correct live "Section N" text
+- [ ] "the Figures and Images section" (real link text, under "Cross-References") renders as a plain hyperlink, not a live section-number field
+- [ ] "Ordered Lists" renders auto-numbered (no hand-typed digits) via the "Dilon Step List" style, visually consistent with the step lists below
+- [ ] "Three-level nested ordered list" shows correct dotted-decimal numbering (`1.`, `1.1.`, `1.1.1.`) at all three levels
+- [ ] "Interrupted and continued ordered list" continues from 3 (not restart at 1) across the interrupting paragraph
+- [ ] "Cleaning Procedure" steps show a live `<H2>.<H3>.<n>` number (e.g. `5.1.1`) in place - no manually-typed digits, no "Step" word
+- [ ] The steps interrupted by the NOTE continue the number sequence from "Cleaning Procedure" above (not restart at 1) despite the intervening NOTE, with no `continue` marker in the markdown
+- [ ] "Digit-Adjacent Step Text" restarts its own numbering at 1 (a new Heading 3 under the same Heading 2 as "Cleaning Procedure") - proving the reset is scoped to Heading 3, not Heading 2 - and renders correctly with no corrupted/skipped numbers from the "5 minutes"/"24 AWG" text
+- [ ] "Second Numbered Step List Section" / "Housing Inspection" restarts step numbering at 1, independent of how far "Numbered Step List Examples" counted
+- [ ] Ctrl+click on any of the three empty-text step references to "hold the board by the edges" (including the forward reference above "Cleaning Procedure") jumps to that step, and each displays the correct live `Step <n>.<m>.<p>` text (e.g. "Step 5.1.1")
+- [ ] "the board-handling step" (real link text) renders as a plain hyperlink, not a live step-number field
+- [ ] The `@@@STEPS@@@` syntax shown in the fenced code block under "Syntax Shown as a Documentation Example" renders as plain code text - not converted into a real numbered list
+- [ ] "IPA" in the first nested step renders bold, and the bulleted clarification beneath it ("A visible smear...") renders as a plain bullet, not relettered
 - [ ] Code blocks use "Source Code" style
 - [ ] Bold and italic text render correctly
 - [ ] Footnotes appear at bottom of pages

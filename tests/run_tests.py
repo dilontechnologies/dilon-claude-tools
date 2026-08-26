@@ -7,6 +7,7 @@ SKILL.md, not a script) and the dilon-document-compiler script directly,
 then runs the existing output validator.
 """
 
+import json
 import re
 import shutil
 import struct
@@ -17,10 +18,23 @@ import zlib
 from pathlib import Path
 
 from docx import Document
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.shared import Inches
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "dilon-document-compiler" / "scripts"))
 import generate_dilon_doc as compiler
+import step_numbering
+import dilon_docx_common
+from dilon_docx_common import (
+    validate_list_nesting_depth,
+    ListNestingError,
+    remap_ordered_lists_to_dilon_step_list,
+    ensure_blank_line_after_list_continue_markers,
+    resolve_list_continuations,
+    ListContinuationError,
+    _paragraph_num_id_and_ilvl,
+)
 
 REPO_ROOT = Path(__file__).parent.parent
 TEST_OUTPUT_DIR = Path(__file__).parent / "test-output"
@@ -28,9 +42,9 @@ WRITER_DIR = REPO_ROOT / "skills" / "dilon-document-writer"
 COMPILER_DIR = REPO_ROOT / "skills" / "dilon-document-compiler"
 TEMPLATE_PATH = WRITER_DIR / "TEMPLATE_Document.md"
 COMPILER_SCRIPT = COMPILER_DIR / "scripts" / "generate_dilon_doc.py"
+READ_SIZES_SCRIPT = COMPILER_DIR / "scripts" / "read_docx_sizes.py"
 CHECK_DEPS_SCRIPT = COMPILER_DIR / "scripts" / "check_deps.py"
-SIGNATURE_TEMPLATE = COMPILER_DIR / "templates" / "TEMPLATE_Word_Signature.docx"
-CONTENT_TEMPLATE = COMPILER_DIR / "templates" / "TEMPLATE_Word_Content.docx"
+SIGNATURE_TEMPLATE = REPO_ROOT / "templates" / "TEMPLATE_Word_Base.docx"
 
 # Scripts that must not carry a `#!/usr/bin/env python3` shebang: Windows'
 # py launcher parses that line and can re-dispatch to a different,
@@ -50,9 +64,12 @@ SAMPLE_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "DD_TST_99999"\n'
     'current_revision: "00"\n'
-    'regulatory_rep: "Test Rep"\n'
-    'quality_rep: "Test QA"\n'
     'department_head: "Test Head"\n'
+    'signature_fields:\n'
+    '  - department: "Regulatory"\n'
+    '    name: "Test Rep"\n'
+    '  - department: "Quality"\n'
+    '    name: "Test QA"\n'
     'revisions:\n'
     '  - number: "00"\n'
     '    description: "Initial test"\n'
@@ -99,8 +116,6 @@ def generate_stub(output_path, **overrides):
         "department": overrides.get("department", "--"),
         "doc_number": overrides.get("doc_number", "DD_XXX_XXXXX"),
         "current_revision": overrides.get("current_revision", "00"),
-        "regulatory_rep": overrides.get("regulatory_rep", "--"),
-        "quality_rep": overrides.get("quality_rep", "--"),
         "department_head": overrides.get("department_head", "--"),
         "revision_description": overrides.get("revision_description", "Initial release"),
         "eco_number": overrides.get("eco_number", "ECO-TBD"),
@@ -113,8 +128,6 @@ def generate_stub(output_path, **overrides):
     content = re.sub(r'department: ".*?"', f'department: "{values["department"]}"', content, count=1)
     content = re.sub(r'doc_number: ".*?"', f'doc_number: "{values["doc_number"]}"', content, count=1)
     content = re.sub(r'current_revision: ".*?"', f'current_revision: "{values["current_revision"]}"', content, count=1)
-    content = re.sub(r'regulatory_rep: ".*?"', f'regulatory_rep: "{values["regulatory_rep"]}"', content, count=1)
-    content = re.sub(r'quality_rep: ".*?"', f'quality_rep: "{values["quality_rep"]}"', content, count=1)
     content = re.sub(r'department_head: ".*?"', f'department_head: "{values["department_head"]}"', content, count=1)
     content = re.sub(
         r'- number: ".*?"\s+description: ".*?"\s+eco_number: ".*?"\s+eco_date: ".*?"',
@@ -186,6 +199,43 @@ def test_ensure_blank_line_idempotent_when_already_blank():
     result = compiler.ensure_blank_line_after_table_markers(already_blank)
     check(result == already_blank,
           "already-blank-line marker stack is left unchanged (no extra blank line inserted between stacked markers)")
+
+
+def test_ensure_blank_line_between_images_inserts_when_missing():
+    result = compiler.ensure_blank_line_between_images(
+        '![First.](a.png){#fig:a}\n![Second.](b.png){#fig:b}\n'
+    )
+    check(result == '![First.](a.png){#fig:a}\n\n![Second.](b.png){#fig:b}\n',
+          "two back-to-back image-only lines get a blank line inserted between them")
+
+
+def test_ensure_blank_line_between_images_three_in_a_row():
+    result = compiler.ensure_blank_line_between_images(
+        '![A.](a.png)\n![B.](b.png)\n![C.](c.png)\n'
+    )
+    check(result == '![A.](a.png)\n\n![B.](b.png)\n\n![C.](c.png)\n',
+          "a run of 3+ back-to-back images gets a blank line inserted between every pair")
+
+
+def test_ensure_blank_line_between_images_idempotent_when_already_blank():
+    already_blank = '![First.](a.png)\n\n![Second.](b.png)\n'
+    result = compiler.ensure_blank_line_between_images(already_blank)
+    check(result == already_blank,
+          "already-blank-line-separated images are left unchanged")
+
+
+def test_ensure_blank_line_between_images_leaves_non_image_lines_alone():
+    text = '![Figure.](a.png)\nSome prose right after it.\n'
+    result = compiler.ensure_blank_line_between_images(text)
+    check(result == text,
+          "an image line followed by ordinary prose (not another image-only line) is left unchanged")
+
+
+def test_ensure_blank_line_between_images_ignores_inline_image_with_text():
+    text = '![Figure.](a.png) plus trailing text on the same line\n![Second.](b.png)\n'
+    result = compiler.ensure_blank_line_between_images(text)
+    check(result == text,
+          "a line with an image PLUS other text isn't image-only, so no blank line is forced in")
 
 
 def test_parse_column_widths_valid_with_flex():
@@ -303,7 +353,6 @@ def test_compile_valid_document():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -315,6 +364,327 @@ def test_compile_valid_document():
         print(result.stdout)
         print(result.stderr)
     check(output_docx.exists(), "compile_test.docx created on disk")
+
+
+def test_create_signature_table_structure():
+    """create_signature_table() builds the signature-approval table
+    programmatically (it used to be baked into TEMPLATE_Word_Base.docx
+    as a docxtpl-rendered table)."""
+    metadata = {
+        "department": "Engineering",
+        "author": "Jane Author",
+        "department_head": "Dept Head",
+        "signature_fields": [
+            {"department": "Regulatory", "name": "Reg Rep"},
+            {"department": "Quality", "name": "QA Rep"},
+        ],
+    }
+    available_width = Inches(6.768055555555556)
+    table = compiler.create_signature_table(metadata, available_width)
+
+    check(len(table.rows) == 6, f"signature table has 6 rows, got {len(table.rows)}")
+    check(len(table.columns) == 3, f"signature table has 3 columns, got {len(table.columns)}")
+
+    rows_text = [[c.text for c in row.cells] for row in table.rows]
+    check(rows_text[0] == ["Group", "Preparer", "Signature"], f"row 0 is the Group/Preparer/Signature header, got {rows_text[0]}")
+    check(rows_text[1] == ["Engineering", "Jane Author", "Electronic"], f"row 1 has the preparer's department/author, got {rows_text[1]}")
+    check(rows_text[2] == ["Department", "Name", "Signature"], f"row 2 is the Department/Name/Signature header, got {rows_text[2]}")
+    check(rows_text[3] == ["Engineering", "Dept Head", "Electronic"], f"row 3 has the department head, got {rows_text[3]}")
+    check(rows_text[4] == ["Regulatory", "Reg Rep", "Electronic"], f"row 4 has the first signature_fields entry, got {rows_text[4]}")
+    check(rows_text[5] == ["Quality", "QA Rep", "Electronic"], f"row 5 has the second signature_fields entry, got {rows_text[5]}")
+
+    check(table.rows[0].cells[0].paragraphs[0].runs[0].font.bold is True, "header row 0 is bold")
+    check(table.rows[1].cells[0].paragraphs[0].runs[0].font.bold is not True, "data row 1 is not bold")
+
+
+def test_create_signature_table_empty_signature_fields():
+    """signature_fields may be an empty list - the table then has just the
+    Preparer and Department Head rows (4 rows total)."""
+    metadata = {
+        "department": "Engineering",
+        "author": "Jane Author",
+        "department_head": "Dept Head",
+        "signature_fields": [],
+    }
+    available_width = Inches(6.768055555555556)
+    table = compiler.create_signature_table(metadata, available_width)
+
+    check(len(table.rows) == 4, f"signature table has 4 rows when signature_fields is empty, got {len(table.rows)}")
+    rows_text = [[c.text for c in row.cells] for row in table.rows]
+    check(rows_text[3] == ["Engineering", "Dept Head", "Electronic"], f"row 3 has the department head, got {rows_text[3]}")
+
+
+def test_compile_signature_table_generated_programmatically():
+    """The signature-approval table is now built by create_signature_table()
+    and inserted into Part A directly, instead of being pre-baked into
+    TEMPLATE_Word_Base.docx as Jinja fields."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_signature.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_signature.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a document with a signature table")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+
+    doc = Document(output_docx)
+
+    def header_row(table):
+        return [c.text for c in table.rows[0].cells]
+
+    generated_tables = [t for t in doc.tables if header_row(t) == ["Group", "Preparer", "Signature"]]
+    check(len(generated_tables) == 1, f"exactly one Group/Preparer/Signature table is present in the output, found {len(generated_tables)}")
+
+    rows_text = [[c.text for c in row.cells] for t in generated_tables for row in t.rows]
+    check(["Engineering", "Test Suite", "Electronic"] in rows_text, "preparer row (department/author) rendered from front matter")
+    check(["Regulatory", "Test Rep", "Electronic"] in rows_text, "regulatory rep row rendered from front matter")
+    check(["Quality", "Test QA", "Electronic"] in rows_text, "quality rep row rendered from front matter")
+    check(["Engineering", "Test Head", "Electronic"] in rows_text, "department head row rendered from front matter")
+
+
+def test_compile_has_no_leading_blank_paragraph():
+    """TEMPLATE_Word_Base.docx's body always carries one empty paragraph
+    before its sectPr (every real Word file needs at least one paragraph
+    if it has no other body content). Part A used to keep that paragraph
+    ahead of the signature table it inserts, so the compiled document's
+    body started with a stray blank paragraph instead of the table
+    (same root cause dilon-document-form-compiler had - see
+    strip_leading_empty_paragraphs() in lib/dilon_docx_common.py).
+
+    The header-to-body gap on every page (including this one) is governed
+    by TEMPLATE_Word_Base.docx's top margin instead, so no spacer
+    paragraph belongs here - the table should be the body's first
+    content, immediately after the header/footer/signature-table setup."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_no_leading_blank.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_no_leading_blank.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for the no-leading-blank check document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(output_docx.exists(), "compile_test_no_leading_blank.docx created on disk")
+    if not output_docx.exists():
+        return
+
+    doc = Document(output_docx)
+    first_child = doc.element.body[0]
+    check(
+        first_child.tag == qn('w:tbl'),
+        f"body's first content element is the signature table, no stray leading blank paragraph, got {first_child.tag!r}",
+    )
+
+
+def test_compile_has_no_title_page():
+    input_md = TEST_OUTPUT_DIR / "compile_test_no_title_page.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_no_title_page.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a valid document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+    check(not any(p.style and p.style.name == 'Title' for p in doc.paragraphs),
+          "no paragraph carries the 'Title' style - the title page is gone")
+    check(not any('Master Document' in p.text for p in doc.paragraphs),
+          "the title page's 'Master Document' boilerplate is gone")
+    check(not any('Effectivity and Location' in p.text for p in doc.paragraphs),
+          "the title page's 'Effectivity and Location' boilerplate is gone")
+
+
+def test_compile_header_signature_revision_widths():
+    """Regression test for a formatting request: the running header,
+    signature-approval table, and revision-history table must all extend
+    to the page's full content width (previously narrower than the
+    margins, leaving unused space on the right), with their fixed
+    columns matching a hand-tuned reference document's widths exactly and
+    their remaining column absorbing whatever width is left."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_column_geometry.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_column_geometry.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for the column-geometry check document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+    section = doc.sections[0]
+    available_width_twips = section.page_width.twips - section.left_margin.twips - section.right_margin.twips
+
+    def grid_dxa(table):
+        grid = table._element.find(qn('w:tblGrid'))
+        return [int(g.get(qn('w:w'))) for g in grid.findall(qn('w:gridCol'))]
+
+    def cell_dxa(table, row_idx):
+        """Per-cell tcW width, not just the tblGrid definition - this is
+        what Word's AutoFit actually renders from when a table isn't
+        pinned to a fixed layout, so a passing grid_dxa() check alone
+        does NOT prove the widths render correctly (see
+        test_apply_table_column_widths_fixed_and_flex for the same
+        distinction on @@@TABLE_COLUMNS@@@-marked tables)."""
+        widths = []
+        for cell in table.rows[row_idx].cells:
+            tc_pr = cell._element.tcPr
+            tc_w = tc_pr.find(qn('w:tcW')) if tc_pr is not None else None
+            widths.append(int(tc_w.get(qn('w:w'))) if tc_w is not None else None)
+        return widths
+
+    def is_fixed_layout(table):
+        tbl_layout = table._element.tblPr.find(qn('w:tblLayout'))
+        return tbl_layout is not None and tbl_layout.get(qn('w:type')) == 'fixed'
+
+    header_table = section.header.tables[0]
+    header_widths = grid_dxa(header_table)
+    check(header_widths[0] == 1525 and header_widths[2] == 1255 and header_widths[3] == 1625,
+          f"header logo/Rev/Page columns match the reference document's widths (got {header_widths})")
+    check(sum(header_widths) == available_width_twips,
+          f"header table fills the full page content width (got {sum(header_widths)}, expected {available_width_twips})")
+    check(cell_dxa(header_table, 0) == header_widths,
+          f"header row's actual per-cell widths match the tblGrid definition, not just the grid (got {cell_dxa(header_table, 0)})")
+    check(is_fixed_layout(header_table), "header table uses a fixed layout, so Word can't AutoFit its columns away")
+
+    def header_row(table):
+        return [c.text for c in table.rows[0].cells]
+
+    signature_table = next(t for t in doc.tables if header_row(t) == ["Group", "Preparer", "Signature"])
+    sig_widths = grid_dxa(signature_table)
+    check(sig_widths[0] == 2330 and sig_widths[2] == 2440,
+          f"signature table Group/Signature columns match the reference document's widths (got {sig_widths})")
+    check(sum(sig_widths) == available_width_twips,
+          f"signature table fills the full page content width (got {sum(sig_widths)}, expected {available_width_twips})")
+    check(cell_dxa(signature_table, 1) == sig_widths,
+          f"signature table's actual per-cell widths match the tblGrid definition, not just the grid (got {cell_dxa(signature_table, 1)})")
+    check(is_fixed_layout(signature_table), "signature table uses a fixed layout, so Word can't AutoFit its columns away")
+
+    revision_table = next(t for t in doc.tables if header_row(t)[0] == "REVISION HISTORY")
+    rev_widths = grid_dxa(revision_table)
+    check(rev_widths[0] == 805 and rev_widths[2] == 1620 and rev_widths[3] == 1535,
+          f"revision table REV#/ECO#/DATE columns match the reference document's widths (got {rev_widths})")
+    check(sum(rev_widths) == available_width_twips,
+          f"revision table fills the full page content width (got {sum(rev_widths)}, expected {available_width_twips})")
+    check(cell_dxa(revision_table, 2) == rev_widths,
+          f"revision table's actual per-cell widths match the tblGrid definition, not just the grid (got {cell_dxa(revision_table, 2)})")
+    check(is_fixed_layout(revision_table), "revision table uses a fixed layout, so Word can't AutoFit its columns away")
+
+
+def test_compile_footer_table_layout():
+    """Regression test: the running footer is a 3-column/2-row table -
+    row 1 is doc_number/rev (left) | ECO # (center) | revision date
+    (right) in three equal-width columns, row 2 is a single cell spanning
+    all 3 columns for the confidentiality notice. The table must fill the
+    full page content width and use a fixed layout (see
+    test_compile_header_signature_revision_widths_and_author_centering's
+    is_fixed_layout for why that matters)."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_footer_table.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_footer_table.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for the footer-table check document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+    section = doc.sections[0]
+    available_width_twips = section.page_width.twips - section.left_margin.twips - section.right_margin.twips
+
+    footer_tables = section.footer.tables
+    check(len(footer_tables) == 1, f"footer contains exactly one table (got {len(footer_tables)})")
+    if not footer_tables:
+        return
+    table = footer_tables[0]
+
+    check(len(table.rows) == 2 and len(table.columns) == 3,
+          f"footer table is 3 columns x 2 rows (got {len(table.columns)}x{len(table.rows)})")
+
+    grid = table._element.find(qn('w:tblGrid'))
+    grid_widths = [int(g.get(qn('w:w'))) for g in grid.findall(qn('w:gridCol'))]
+    check(sum(grid_widths) == available_width_twips,
+          f"footer table fills the full page content width (got {sum(grid_widths)}, expected {available_width_twips})")
+    check(max(grid_widths) - min(grid_widths) <= 2,
+          f"footer table's 3 columns are equal width, up to a rounding twip or two (got {grid_widths})")
+
+    tbl_layout = table._element.tblPr.find(qn('w:tblLayout'))
+    check(tbl_layout is not None and tbl_layout.get(qn('w:type')) == 'fixed',
+          "footer table uses a fixed layout, so Word can't AutoFit its columns away")
+
+    row1_texts = [c.text for c in table.rows[0].cells]
+    check("DD_TST_99999 Rev 00" in row1_texts[0], f"footer row 1 col 1 has the doc_number/rev (got {row1_texts[0]!r})")
+    check(row1_texts[1] == "ECO-000", f"footer row 1 col 2 has the ECO number (got {row1_texts[1]!r})")
+    check("2025-01-01" in row1_texts[2], f"footer row 1 col 3 has the revision date (got {row1_texts[2]!r})")
+
+    row1_alignments = [c.paragraphs[0].alignment for c in table.rows[0].cells]
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    check(row1_alignments == [WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.RIGHT],
+          f"footer row 1 is left/center/right justified across its 3 columns (got {row1_alignments})")
+
+    row2_cells = table.rows[1].cells
+    check(row2_cells[0]._element is row2_cells[1]._element is row2_cells[2]._element,
+          "footer row 2's three grid positions resolve to one merged cell spanning the full width")
+    check("confidential" in row2_cells[0].text and "prohibited" in row2_cells[0].text,
+          f"footer row 2's merged cell carries the confidentiality notice (got {row2_cells[0].text!r})")
 
 
 def test_compile_bom_front_matter():
@@ -332,7 +702,6 @@ def test_compile_bom_front_matter():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -381,7 +750,6 @@ def test_compile_table_marker_no_blank_line():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -448,7 +816,6 @@ def test_compile_adjacent_tables_no_merge():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -541,7 +908,6 @@ def test_compile_table_column_widths():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -629,10 +995,10 @@ def test_compile_table_column_widths():
 
 def test_compile_with_default_templates():
     """Regression test for a bug where the compiler's default template
-    lookup pointed at scripts/ instead of the sibling templates/ directory.
-    Invokes with only <input> <output> (no template args) so the script
-    must resolve its own defaults, rather than the explicit four-argument
-    form SKILL.md always uses."""
+    lookup pointed at the wrong directory instead of the repo-root
+    templates/ directory. Invokes with only <input> <output> (no template
+    arg) so the script must resolve its own default, rather than the
+    explicit three-argument form SKILL.md always uses."""
     input_md = TEST_OUTPUT_DIR / "compile_test_defaults.md"
     output_docx = TEST_OUTPUT_DIR / "compile_test_defaults.docx"
     input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
@@ -663,9 +1029,12 @@ HEADING_NUMBERING_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "DD_TST_88888"\n'
     'current_revision: "00"\n'
-    'regulatory_rep: "Test Rep"\n'
-    'quality_rep: "Test QA"\n'
     'department_head: "Test Head"\n'
+    'signature_fields:\n'
+    '  - department: "Regulatory"\n'
+    '    name: "Test Rep"\n'
+    '  - department: "Quality"\n'
+    '    name: "Test QA"\n'
     'revisions:\n'
     '  - number: "00"\n'
     '    description: "Initial test"\n'
@@ -726,7 +1095,6 @@ def test_compile_resolves_relative_image_paths():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -747,13 +1115,201 @@ def test_compile_resolves_relative_image_paths():
               "compiled document's body (not just the header) embeds an image relationship")
 
 
+def test_lock_image_aspect_ratios_adds_frame_lock_when_missing():
+    """Regression test: Pandoc's docx writer sets picLocks/noChangeAspect
+    on the picture itself but never emits wp:cNvGraphicFramePr at all (it's
+    schema-optional), so the frame-level a:graphicFrameLocks that Word
+    actually consults for interactive drag-resize never exists - images
+    compile with resize handles that freely distort. Confirmed by diffing
+    a Pandoc-generated image against a native Word drag-and-drop insert in
+    the same document; only the frame-level lock differed."""
+    images_dir = TEST_OUTPUT_DIR / "aspect_lock_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    md = "![A test image.](aspect_lock_images/test.png)\n"
+    docx_path = TEST_OUTPUT_DIR / "aspect_lock_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE, resource_dir=TEST_OUTPUT_DIR)
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml_before = z.read('word/document.xml').decode('utf-8')
+    check('cNvGraphicFramePr' not in xml_before,
+          "sanity check: Pandoc's raw output has no wp:cNvGraphicFramePr at all")
+
+    count = dilon_docx_common.lock_image_aspect_ratios(docx_path)
+    check(count == 1, "locks exactly the one image in the document")
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml_after = z.read('word/document.xml').decode('utf-8')
+    check('<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>' in xml_after,
+          "the image's graphic frame now carries a populated aspect-ratio lock")
+
+
+def test_lock_image_aspect_ratios_idempotent_when_already_locked():
+    images_dir = TEST_OUTPUT_DIR / "aspect_lock_idempotent_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    md = "![A test image.](aspect_lock_idempotent_images/test.png)\n"
+    docx_path = TEST_OUTPUT_DIR / "aspect_lock_idempotent_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE, resource_dir=TEST_OUTPUT_DIR)
+
+    first_count = dilon_docx_common.lock_image_aspect_ratios(docx_path)
+    second_count = dilon_docx_common.lock_image_aspect_ratios(docx_path)
+    check(first_count == 1, "first call locks the image")
+    check(second_count == 0, "second call is a no-op, not a duplicate lock")
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check(xml.count('graphicFrameLocks') == 1, "only one graphicFrameLocks element exists after two calls")
+
+
+def test_read_docx_sizes_excludes_signature_and_revision_tables():
+    """Regression test: a compiled document's signature-approval and
+    revision-history tables are generated programmatically and never
+    appear in the source markdown - read_docx_sizes.py must exclude
+    them (via classify_table()) so its 'table' entries line up
+    positionally with the markdown's own tables, not shift by two."""
+    images_dir = TEST_OUTPUT_DIR / "read_sizes_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    md = SAMPLE_MARKDOWN + (
+        '\n## Read Sizes Test\n\n'
+        '![A tiny red test image.](read_sizes_images/test.png)\n\n'
+        '| Name | Value |\n'
+        '|---|---|\n'
+        '| A | B |\n'
+    )
+    input_md = TEST_OUTPUT_DIR / "read_sizes_test.md"
+    output_docx = TEST_OUTPUT_DIR / "read_sizes_test.docx"
+    input_md.write_text(md, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for the read-sizes fixture document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "read_docx_sizes.py reports correct sizes (skipped: compile failed)")
+        return
+
+    result = subprocess.run(
+        [sys.executable, str(READ_SIZES_SCRIPT), str(output_docx)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "read_docx_sizes.py exits 0 for a compiled document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "read_docx_sizes.py output parses as expected (skipped: script failed)")
+        return
+
+    sizes = json.loads(result.stdout)
+    images = [s for s in sizes if s["type"] == "image"]
+    tables = [s for s in sizes if s["type"] == "table"]
+
+    check(len(images) == 1, f"exactly one image entry, matching the one body image (got {len(images)})")
+    if images:
+        check(images[0]["width_in"] > 0 and images[0]["height_in"] > 0,
+              "the image entry reports positive width/height")
+
+    check(len(tables) == 1,
+          f"exactly one table entry - the signature-approval and revision-history tables are excluded (got {len(tables)})")
+    if tables:
+        check(len(tables[0]["column_widths_in"]) == 2,
+              f"the one body table reports 2 column widths (got {len(tables[0]['column_widths_in'])})")
+
+
+def test_horizontal_rule_becomes_page_break():
+    """Regression test: MARKDOWN_STYLING_GUIDE.md documents '---' as the
+    author's manual page-break opt-in (section 11.2), but Pandoc's docx
+    writer renders a markdown thematic break as a VML horizontal-rule
+    shape (a thin line), not an actual page break - nothing converted
+    one into the other until convert_horizontal_rules_to_page_breaks()
+    existed."""
+    md = "Content before the break.\n\n---\n\nContent after the break.\n"
+    docx_path = TEST_OUTPUT_DIR / "horizontal_rule_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE, resource_dir=TEST_OUTPUT_DIR)
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml_before = z.read('word/document.xml').decode('utf-8')
+    check('o:hr="t"' in xml_before,
+          "sanity check: Pandoc's raw output renders the thematic break as a VML horizontal rule")
+    check('w:type="page"' not in xml_before, "sanity check: no page break exists yet")
+
+    count = dilon_docx_common.convert_horizontal_rules_to_page_breaks(docx_path)
+    check(count == 1, "converts exactly the one horizontal rule")
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml_after = z.read('word/document.xml').decode('utf-8')
+    check('<w:br w:type="page"/>' in xml_after, "the horizontal rule paragraph is now a real page break")
+    check('o:hr' not in xml_after, "the VML horizontal-rule shape is gone")
+
+
+def test_render_jinja_substitutes_body_fields():
+    text = compiler.render_jinja("This document is {{doc_number}}, rev {{current_revision}}.", {
+        "doc_number": "WI-00077",
+        "current_revision": "01",
+    })
+    check(text == "This document is WI-00077, rev 01.", f"body Jinja2 fields resolved, got {text!r}")
+
+
+def test_render_jinja_raw_block_escapes_literal_braces():
+    text = compiler.render_jinja(
+        "Use {% raw %}{{doc_number}}{% endraw %} to reference the doc number.",
+        {"doc_number": "WI-00077"},
+    )
+    check(
+        text == "Use {{doc_number}} to reference the doc number.",
+        f"raw block preserves literal braces, got {text!r}",
+    )
+
+
+def test_render_jinja_noop_without_braces():
+    text = compiler.render_jinja("Plain text with no template fields.", {"doc_number": "WI-00077"})
+    check(text == "Plain text with no template fields.", "body with no {{...}} is returned unchanged")
+
+
+def test_compile_body_jinja_substitution():
+    input_md = TEST_OUTPUT_DIR / "compile_test_jinja.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_jinja.docx"
+    markdown = SAMPLE_MARKDOWN.replace(
+        "This document tests the compilation process.",
+        "This document, {{doc_number}}, tests the compilation process.",
+    )
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a document with body-level {{doc_number}}")
+
+    doc = Document(output_docx)
+    body_text = "\n".join(p.text for p in doc.paragraphs)
+    check("DD_TST_99999" in body_text, "body {{doc_number}} resolved to the front-matter value in the compiled output")
+    check("{{doc_number}}" not in body_text, "no literal Jinja2 braces remain in the compiled output")
+
+
 def test_figure_auto_numbering():
     """Render test: a figure caption written as
     ![Description.](path.png){#fig:label} (per the updated
     MARKDOWN_STYLING_GUIDE.md convention) must come out of Pandoc as a
     distinct 'Image Caption'-styled paragraph (thanks to the
     'Captioned Figure'/'Image Caption' styles added to
-    TEMPLATE_Word_Signature.docx), which apply_figure_captions() then
+    TEMPLATE_Word_Base.docx), which apply_figure_captions() then
     rewrites into a 'Caption'-styled paragraph carrying live
     STYLEREF/SEQ fields - not static numbered text. Also verifies the
     {#fig:label} bookmark and a [text](#fig:label) cross-reference
@@ -783,7 +1339,6 @@ def test_figure_auto_numbering():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -816,6 +1371,195 @@ def test_figure_auto_numbering():
 
     check('<w:updateFields w:val="true"/>' in settings, "document is set to recalculate fields (figure numbers) on open")
 
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    image_paragraphs = [p for p in doc.paragraphs if p._p.findall('.//' + qn('a:blip'))]
+    check(len(image_paragraphs) == 2, f"both the labeled and unlabeled image end up in their own paragraph (got {len(image_paragraphs)})")
+    check(all(p.alignment == WD_ALIGN_PARAGRAPH.CENTER for p in image_paragraphs),
+          f"every image paragraph is centered, captioned or not (got {[p.alignment for p in image_paragraphs]})")
+
+
+def test_figure_auto_numbering_consecutive_images_no_blank_line():
+    """Regression test: two figures declared back-to-back with no blank
+    line between them (a natural way to author consecutive figures) used
+    to silently lose ALL figure treatment for BOTH images - Markdown
+    merges adjacent non-blank lines into one paragraph, so neither image
+    was alone in its paragraph, and Pandoc's implicit-figures extension
+    only promotes a solo image to a captioned figure. Fixed by
+    ensure_blank_line_between_images() in lib/dilon_docx_common.py."""
+    images_dir = TEST_OUTPUT_DIR / "consecutive_figure_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "first.png").write_bytes(make_test_png())
+    (images_dir / "second.png").write_bytes(make_test_png())
+
+    markdown = SAMPLE_MARKDOWN + (
+        '\n## First Section\n\n'
+        '![First figure.](consecutive_figure_images/first.png){#fig:consecutive-first}\n'
+        '![Second figure.](consecutive_figure_images/second.png){#fig:consecutive-second}\n'
+    )
+
+    input_md = TEST_OUTPUT_DIR / "compile_test_consecutive_figures.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_consecutive_figures.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for back-to-back (no blank line) figures")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        check(False, "back-to-back figures both get caption treatment (skipped: compile failed)")
+        return
+
+    doc = Document(output_docx)
+    caption_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Caption']
+    check(len(caption_paragraphs) == 2,
+          f"both back-to-back figures end up styled 'Caption', not merged into one plain paragraph (got {len(caption_paragraphs)})")
+
+    with zipfile.ZipFile(output_docx) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('w:name="fig:consecutive-first"' in xml, "the first of the two back-to-back figures still gets its {#fig:...} bookmark")
+    check('w:name="fig:consecutive-second"' in xml, "the second of the two back-to-back figures still gets its {#fig:...} bookmark")
+    check(xml.count('<a:blip') == 2, f"both images are still embedded (got {xml.count('<a:blip')})")
+
+
+def test_apply_figure_captions_narrows_bookmark_to_number_only():
+    images_dir = TEST_OUTPUT_DIR / "fig_bookmark_narrow_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    md = "![A test caption.](fig_bookmark_narrow_images/test.png){#fig:my-label}\n"
+    docx_path = TEST_OUTPUT_DIR / "fig_bookmark_narrow_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE, resource_dir=TEST_OUTPUT_DIR)
+    dilon_docx_common.apply_figure_captions(docx_path)
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+
+    check('w:name="fig:my-label"' in xml, "the fig:my-label bookmark still exists after narrowing")
+    drawing_pos = xml.find('<w:drawing>')
+    bookmark_pos = xml.find('w:name="fig:my-label"')
+    check(bookmark_pos > drawing_pos, "the bookmark now starts AFTER the image, not before it")
+    caption_pos = xml.find('Figure ')
+    check(bookmark_pos != -1 and caption_pos != -1 and abs(bookmark_pos - caption_pos) < 60,
+          "the bookmark sits immediately around the 'Figure ' text, not far from it")
+
+
+def test_apply_figure_captions_narrowing_is_noop_without_fig_id():
+    images_dir = TEST_OUTPUT_DIR / "fig_bookmark_no_id_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    md = "![A caption with no id.](fig_bookmark_no_id_images/test.png)\n"
+    docx_path = TEST_OUTPUT_DIR / "fig_bookmark_no_id_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE, resource_dir=TEST_OUTPUT_DIR)
+    dilon_docx_common.apply_figure_captions(docx_path)  # should not raise
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('bookmarkStart' not in xml, "no bookmark is fabricated for a figure with no {#fig:...} id")
+
+
+def test_narrow_section_bookmarks_shrinks_to_heading_only():
+    md = "## Section One {#sec:one}\n\nSome body text.\n\n## Section Two {#sec:two}\n\nMore body text.\n"
+    docx_path = TEST_OUTPUT_DIR / "sec_bookmark_narrow_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    count = dilon_docx_common.narrow_section_bookmarks(docx_path)
+    check(count == 2, f"both section bookmarks are narrowed (got {count})")
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    one_start = xml.find('w:name="sec:one"')
+    body_text_pos = xml.find('Some body text.')
+    check(one_start != -1 and body_text_pos != -1, "both markers present")
+    one_end_search_region = xml[one_start:body_text_pos]
+    check('bookmarkEnd' in one_end_search_region, "sec:one's bookmarkEnd now closes before the section's body text")
+
+
+def test_narrow_section_bookmarks_ignores_headings_without_sec_id():
+    md = "## Plain Heading\n\nBody text.\n"
+    docx_path = TEST_OUTPUT_DIR / "sec_bookmark_no_id_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    count = dilon_docx_common.narrow_section_bookmarks(docx_path)
+    check(count == 0, f"a heading with no {{#sec:...}} id is left alone (got count={count})")
+
+
+def test_preprocess_reference_markers_converts_recognized_types():
+    md = "See [](#fig:a) and [](#sec:b) and [](#step:c)."
+    result = dilon_docx_common.preprocess_reference_markers(md)
+    check(result == "See XREF:fig:a and XREF:sec:b and XREF:step:c.", f"all three types convert to sentinels (got {result!r})")
+
+
+def test_preprocess_reference_markers_leaves_real_link_text_and_unknown_types_untouched():
+    md = "[see the figure](#fig:a) and [](#other:x)"
+    result = dilon_docx_common.preprocess_reference_markers(md)
+    check(result == md, "non-empty link text and an unrecognized type prefix are both left alone")
+
+
+def test_resolve_reference_markers_dispatches_by_type():
+    images_dir = TEST_OUTPUT_DIR / "xref_dispatch_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "test.png").write_bytes(make_test_png())
+
+    md = (
+        "## Section One {#sec:intro}\n\n"
+        "![A caption.](xref_dispatch_images/test.png){#fig:pic}\n\n"
+        "See XREF:fig:pic and XREF:sec:intro.\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "xref_dispatch_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE, resource_dir=TEST_OUTPUT_DIR)
+    dilon_docx_common.apply_figure_captions(docx_path)
+    dilon_docx_common.narrow_section_bookmarks(docx_path)
+
+    resolved = dilon_docx_common.resolve_reference_markers(docx_path, {
+        'fig': dilon_docx_common.resolve_fig_reference,
+        'sec': dilon_docx_common.resolve_sec_reference,
+    })
+    check(resolved == 2, f"both sentinels resolved (got {resolved})")
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('REF fig:pic \\h' in xml, "fig resolves to a plain hyperlinked REF (no \\r - it's not a native list item)")
+    check('Section ' in xml and 'REF sec:intro \\r \\h' in xml, "sec resolves to literal 'Section ' + a hyperlinked REF \\r")
+    check('XREF' not in xml, "no sentinel remains")
+
+
+def test_resolve_reference_markers_missing_anchor_raises():
+    md = "See XREF:fig:does-not-exist."
+    docx_path = TEST_OUTPUT_DIR / "xref_missing_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    try:
+        dilon_docx_common.resolve_reference_markers(docx_path, {'fig': dilon_docx_common.resolve_fig_reference})
+        check(False, "a reference to a nonexistent anchor raises ReferenceResolutionError")
+    except dilon_docx_common.ReferenceResolutionError as exc:
+        check("does-not-exist" in str(exc), f"the error names the missing label (got: {exc})")
+
+
+def test_resolve_reference_markers_duplicate_anchor_raises():
+    md = "## One {#sec:dup}\n\nText.\n\n## Two {#sec:dup}\n\nSee XREF:sec:dup.\n"
+    docx_path = TEST_OUTPUT_DIR / "xref_duplicate_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    try:
+        dilon_docx_common.resolve_reference_markers(docx_path, {'sec': dilon_docx_common.resolve_sec_reference})
+        check(False, "two {#sec:dup} anchors raises ReferenceResolutionError")
+    except dilon_docx_common.ReferenceResolutionError as exc:
+        check("dup" in str(exc), f"the error names the duplicated label (got: {exc})")
+
 
 def test_heading_auto_numbering():
     """Render test: headings written WITHOUT manual numbers (per the
@@ -836,7 +1580,6 @@ def test_heading_auto_numbering():
             str(input_md),
             str(output_docx),
             str(SIGNATURE_TEMPLATE),
-            str(CONTENT_TEMPLATE),
         ],
         capture_output=True,
         text=True,
@@ -879,6 +1622,923 @@ def test_heading_auto_numbering():
           f"Heading 2/3/4 all link to the SAME numbering list, not separate ones (got {num_ids})")
 
 
+def test_heading2_has_no_automatic_page_break():
+    doc = Document(SIGNATURE_TEMPLATE)
+    heading2 = doc.styles['Heading 2']
+    check(heading2.paragraph_format.page_break_before is not True,
+          f"Heading 2 no longer forces a page break (got {heading2.paragraph_format.page_break_before!r})")
+
+
+def test_compile_toc_forces_page_break_after_toc():
+    """The table of contents must always land on its own page - the
+    compiler inserts a forced page break immediately after Pandoc's TOC
+    content control. This is the only page break the compiler itself
+    forces (see MARKDOWN_STYLING_GUIDE.md 11.2 for the manual '---'
+    opt-in everywhere else)."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_toc_break.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_toc_break.docx"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for the TOC page break check document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    if not output_docx.exists():
+        check(False, "compile_test_toc_break.docx created on disk")
+        return
+
+    doc = Document(output_docx)
+    body = doc.element.body
+
+    toc_sdt = None
+    for child in body:
+        if child.tag == qn('w:sdt'):
+            gallery = child.find('.//' + qn('w:docPartGallery'))
+            if gallery is not None and gallery.get(qn('w:val')) == 'Table of Contents':
+                toc_sdt = child
+                break
+    check(toc_sdt is not None, "compiled document contains Pandoc's TOC content control")
+    if toc_sdt is None:
+        return
+
+    siblings = list(body)
+    next_el = siblings[siblings.index(toc_sdt) + 1]
+    page_break = next_el.find('.//' + qn('w:br'))
+    check(
+        next_el.tag == qn('w:p') and page_break is not None and page_break.get(qn('w:type')) == 'page',
+        "a forced page break paragraph immediately follows the TOC content control",
+    )
+
+
+def test_get_step_clarification_abstract_num_id_found():
+    """SIGNATURE_TEMPLATE must have the 'Dilon Step Clarification List'
+    style + sample paragraph built per the spec's Template Requirement
+    section."""
+    abstract_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    check(abstract_id is not None, "finds an abstractNumId for 'Dilon Step Clarification List' in the real template")
+
+
+def test_get_step_clarification_abstract_num_id_missing_style():
+    empty_template = TEST_OUTPUT_DIR / "step_numbering_no_clarification_style_template.docx"
+    from docx import Document
+    Document().save(empty_template)
+    abstract_id = step_numbering.get_step_clarification_abstract_num_id(empty_template)
+    check(abstract_id is None, "returns None (not an exception) when the template has no 'Dilon Step Clarification List' style")
+
+
+def test_create_num_instance_first_allocation():
+    from docx import Document
+    doc = Document(SIGNATURE_TEMPLATE)
+    numbering_element = doc.part.numbering_part.element
+    existing_ids = {int(n.get(qn('w:numId'))) for n in numbering_element.findall(qn('w:num'))}
+    new_id = step_numbering.create_num_instance(numbering_element, "1")
+    check(new_id not in existing_ids, f"allocates a numId ({new_id}) that didn't already exist")
+    check(new_id == max(existing_ids, default=0) + 1, f"allocates max(existing)+1 (got {new_id}, existing max {max(existing_ids, default=0)})")
+
+
+def test_create_num_instance_sequential_allocations_dont_collide():
+    from docx import Document
+    doc = Document(SIGNATURE_TEMPLATE)
+    numbering_element = doc.part.numbering_part.element
+    first = step_numbering.create_num_instance(numbering_element, "1")
+    second = step_numbering.create_num_instance(numbering_element, "1")
+    check(first != second, f"two sequential allocations never collide (got {first}, {second})")
+
+
+def test_create_num_instance_writes_start_override():
+    """Word continues a level's counter across separate numId instances
+    that share the same abstractNumId, unless a startOverride forces a
+    restart (confirmed against the real template: our throwaway sample
+    paragraph's numId=67 bled its count of 1 into a freshly-allocated
+    numId sharing abstractNumId=50, rendering 2/3/4 instead of 1/2/3). A
+    new step-list sequence must always start at 1 regardless of what else
+    used the same abstract list earlier in the document."""
+    from docx import Document
+    doc = Document(SIGNATURE_TEMPLATE)
+    numbering_element = doc.part.numbering_part.element
+    new_id = step_numbering.create_num_instance(numbering_element, "1")
+
+    num_el = next(n for n in numbering_element.findall(qn('w:num')) if n.get(qn('w:numId')) == str(new_id))
+    lvl_override = num_el.find(qn('w:lvlOverride'))
+    check(lvl_override is not None, "new numId carries a lvlOverride")
+    if lvl_override is not None:
+        start_override = lvl_override.find(qn('w:startOverride'))
+        check(start_override is not None and start_override.get(qn('w:val')) == '1',
+              "lvlOverride forces the level to start at 1")
+
+
+def test_ensure_blank_line_around_steps_markers_inserts_both_sides():
+    md = "@@@STEPS@@@\n#. First\n#. Second\n@@@END_STEPS@@@\n"
+    result = step_numbering.ensure_blank_line_around_steps_markers(md)
+    check(result == "@@@STEPS@@@\n\n#. First\n#. Second\n\n@@@END_STEPS@@@\n",
+          f"blank lines inserted after @@@STEPS@@@ and before @@@END_STEPS@@@ (got {result!r})")
+
+
+def test_ensure_blank_line_around_steps_markers_idempotent():
+    md = "@@@STEPS@@@\n\n#. First\n\n@@@END_STEPS@@@\n"
+    result = step_numbering.ensure_blank_line_around_steps_markers(md)
+    check(result == md, "already-blank-line case is left unchanged")
+
+
+def test_apply_field_based_step_numbering_single_step():
+    md = (
+        "## Major Section\n\n### Subsection Title\n\n"
+        "@@@STEPS@@@\n\n"
+        "#. First.\n"
+        "#. Second.\n"
+        "    #. Ordered clarification of second.\n"
+        "\n@@@END_STEPS@@@\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_single_step_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    count = step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    check(count == 3, f"both steps and the one clarification get numbered (got {count})")
+
+    doc = Document(docx_path)
+    check(all('@@@STEPS' not in p.text and '@@@END_STEPS' not in p.text for p in doc.paragraphs),
+          "both wrapper marker paragraphs are removed")
+
+    step_paras = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading']
+    check(len(step_paras) == 2, f"both top-level steps carry 'Dilon Step Heading' (got {len(step_paras)})")
+
+    clarification_paras = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Clarification List']
+    check(len(clarification_paras) == 1, f"the nested item carries 'Dilon Step Clarification List' (got {len(clarification_paras)})")
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    instrs = re.findall(r'w:instr="([^"]*)"', xml)
+    styleref_count = sum(1 for i in instrs if i.strip() == 'STYLEREF 3 \\s')
+    seq_count = sum(1 for i in instrs if i.strip() == 'SEQ DilonStep \\* ARABIC \\s 3')
+    check(styleref_count == 2, f"both steps get a 'STYLEREF 3 \\\\s' field (got {styleref_count})")
+    check(seq_count == 2, f"both steps get a 'SEQ DilonStep \\\\* ARABIC \\\\s 3' field (got {seq_count})")
+
+
+def test_apply_field_based_step_numbering_number_precedes_step_text():
+    md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. Wear clean gloves.\n\n@@@END_STEPS@@@\n"
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_field_order_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+
+    doc = Document(docx_path)
+    step_para = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading'][0]
+    check(step_para.text.strip().endswith('Wear clean gloves.'),
+          f"the field's cached placeholder text comes before the author's step text (got {step_para.text!r})")
+
+
+def test_apply_field_based_step_numbering_clarifications_restart_per_step():
+    md = (
+        "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n"
+        "#. First.\n"
+        "    #. First's clarification A.\n"
+        "    #. First's clarification B.\n"
+        "#. Second.\n"
+        "    #. Second's clarification A.\n"
+        "\n@@@END_STEPS@@@\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_clarification_restart_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+
+    doc = Document(docx_path)
+    clarification_paras = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Clarification List']
+    num_ids = [dilon_docx_common._paragraph_num_id_and_ilvl(p._p)[0] for p in clarification_paras]
+    check(num_ids[0] == num_ids[1], f"First's two clarifications share one numId (got {num_ids[:2]})")
+    check(num_ids[2] != num_ids[0], f"Second's clarification gets its own fresh numId (got {num_ids})")
+    check(all(dilon_docx_common._paragraph_num_id_and_ilvl(p._p)[1] in (None, '0') for p in clarification_paras),
+          "every clarification sits at ilvl 0 of its own fresh list, not nested under the step")
+
+
+def test_apply_field_based_step_numbering_bullets_left_alone():
+    md = (
+        "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n"
+        "#. First.\n"
+        "    - An unordered clarification.\n"
+        "\n@@@END_STEPS@@@\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_bullets_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+
+    doc = Document(docx_path)
+    bullet_para = [p for p in doc.paragraphs if 'unordered clarification' in p.text][0]
+    check(bullet_para.style is None or bullet_para.style.name != 'Dilon Step Clarification List',
+          "the bullet item is left with its own style, not reassigned to the clarification list style")
+
+
+def test_apply_field_based_step_numbering_bullets_ilvl_decremented():
+    """A bullet's ilvl inside @@@STEPS@@@ is Pandoc's original markdown-
+    nesting depth, which still counts the step itself as a real list
+    level even though the step is stripped of its own numPr. Left
+    uncorrected, every bullet inside a block renders one indent level
+    deeper than it should. Covers both a bullet directly under a step
+    (ilvl 1 -> 0) and a bullet nested under an ordered clarification
+    (ilvl 2 -> 1)."""
+    md = (
+        "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n"
+        "#. First.\n"
+        "    - Directly under the step.\n"
+        "#. Second.\n"
+        "    #. An ordered clarification.\n"
+        "        - Under the ordered clarification.\n"
+        "\n@@@END_STEPS@@@\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_bullets_ilvl_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+
+    doc = Document(docx_path)
+    direct_bullet = [p for p in doc.paragraphs if 'Directly under the step' in p.text][0]
+    _, direct_ilvl = dilon_docx_common._paragraph_num_id_and_ilvl(direct_bullet._p)
+    check(direct_ilvl in (None, '0'), f"a bullet directly under a step is decremented to ilvl 0 (got {direct_ilvl!r})")
+
+    nested_bullet = [p for p in doc.paragraphs if 'Under the ordered clarification' in p.text][0]
+    _, nested_ilvl = dilon_docx_common._paragraph_num_id_and_ilvl(nested_bullet._p)
+    check(nested_ilvl == '1', f"a bullet under an ordered clarification is decremented to ilvl 1 (got {nested_ilvl!r})")
+
+
+def test_apply_field_based_step_numbering_unclosed_block_raises():
+    md = "@@@STEPS@@@\n\n#. First\n"
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_unclosed_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    try:
+        step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+        check(False, "an @@@STEPS@@@ with no matching @@@END_STEPS@@@ raises StepBlockError")
+    except step_numbering.StepBlockError as exc:
+        check("END_STEPS" in str(exc), f"the error mentions the missing closing marker (got: {exc})")
+
+
+def test_apply_field_based_step_numbering_open_block_across_heading3_boundary_raises():
+    md = (
+        "### Subsection One\n\n@@@STEPS@@@\n\n#. First\n#. Second\n\n"
+        "### Subsection Two\n\n#. Third\n\n@@@END_STEPS@@@\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_open_across_h3_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    try:
+        step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+        check(False, "an @@@STEPS@@@ left open across a ### (Heading 3) boundary raises StepBlockError")
+    except step_numbering.StepBlockError as exc:
+        check("section heading" in str(exc), f"the error mentions the section boundary (got: {exc})")
+
+
+def test_apply_field_based_step_numbering_skips_gracefully_without_clarification_style():
+    md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. First\n    #. Clarification\n\n@@@END_STEPS@@@\n"
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_no_clarification_id_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, None)  # should not raise
+
+    doc = Document(docx_path)
+    check(all('@@@STEPS' not in p.text and '@@@END_STEPS' not in p.text for p in doc.paragraphs),
+          "wrapper markers are still stripped even with clarification numbering skipped")
+    check(any(p.style and p.style.name == 'Dilon Step Heading' for p in doc.paragraphs),
+          "the top-level step is still converted even when clarification numbering is skipped")
+
+
+def test_apply_field_based_step_numbering_preserves_inline_formatting():
+    md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. Use **IPA** and a lint-free cloth.\n\n@@@END_STEPS@@@\n"
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_formatting_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+
+    doc = Document(docx_path)
+    step_para = [p for p in doc.paragraphs if 'IPA' in p.text][0]
+    bold_runs = [r for r in step_para.runs if r.bold]
+    check(len(bold_runs) == 1 and bold_runs[0].text == 'IPA', "bold formatting on 'IPA' survives")
+
+
+def test_resolve_step_reference_builds_composite_field():
+    md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. Hold the board. []{#step:x}\n\n@@@END_STEPS@@@\n\nSee [](#step:x).\n"
+    md = dilon_docx_common.preprocess_reference_markers(md)
+    docx_path = TEST_OUTPUT_DIR / "step_resolver_callback_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    dilon_docx_common.resolve_reference_markers(docx_path, {'step': step_numbering.resolve_step_reference})
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('REF step:x \\h' in xml, "the reference resolves via a plain REF \\h against the narrowed bookmark")
+    check('Step ' in xml, "the literal 'Step ' prefix is present at the reference site")
+
+    doc = Document(docx_path)
+    els = list(doc.element.body.iter())
+    start_idx = next(i for i, el in enumerate(els) if el.tag == qn('w:bookmarkStart') and el.get(qn('w:name')) == 'step:x')
+    start_id = els[start_idx].get(qn('w:id'))
+    end_idx = next(i for i in range(start_idx + 1, len(els)) if els[i].tag == qn('w:bookmarkEnd') and els[i].get(qn('w:id')) == start_id)
+    check(end_idx > start_idx + 1,
+          "the narrowed bookmark wraps the step's number-field span, not an empty gap between "
+          "bookmarkStart and bookmarkEnd (regression: an anchor on a nested clarification, which "
+          "is never narrowed, produces exactly this empty-span shape and REF \\h then resolves to "
+          "nothing)")
+
+
+STEP_REDESIGN_MARKDOWN = (
+    '\n## Carrier Board Assembly\n\n'
+    '### Cleaning Procedure\n\n'
+    '@@@STEPS@@@\n\n'
+    '#. Wear clean gloves.\n'
+    '#. Hold the board by the edges. []{#step:hold-board-by-edges}\n'
+    '    #. Simple dirt such as lint or light dust can be blown away before wiping.\n\n'
+    '@@@END_STEPS@@@\n\n'
+    'NOTE: Clean the entire crystal but give special attention to the polished end.\n\n'
+    '@@@STEPS@@@\n\n'
+    '#. Visually inspect both the crystal and the photomultiplier for defects.\n'
+    '#. Set the cleaned crystals aside on a clean lint free cloth.\n\n'
+    '@@@END_STEPS@@@\n\n'
+    'As described in [](#step:hold-board-by-edges), always support the board by its edges.\n'
+)
+
+
+def test_compile_field_based_step_numbering_end_to_end():
+    """Integration test: two @@@STEPS@@@ blocks in one Heading 3
+    subsection (interrupted by a NOTE), a nested ordered clarification,
+    and a cross-reference, compiled through the real pipeline."""
+    markdown = SAMPLE_MARKDOWN + STEP_REDESIGN_MARKDOWN
+    input_md = TEST_OUTPUT_DIR / "compile_test_field_step_numbering.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_field_step_numbering.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a document with field-based @@@STEPS@@@ blocks")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+    check(all('@@@STEPS' not in p.text and '@@@END_STEPS' not in p.text for p in doc.paragraphs),
+          "no wrapper marker text remains anywhere")
+    step_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading']
+    check(len(step_paragraphs) == 4, f"all 4 top-level steps across both blocks get 'Dilon Step Heading' (got {len(step_paragraphs)})")
+    clarification_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Clarification List']
+    check(len(clarification_paragraphs) == 1, f"the one nested clarification gets 'Dilon Step Clarification List' (got {len(clarification_paragraphs)})")
+
+    with zipfile.ZipFile(output_docx) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('w:name="step:hold-board-by-edges"' in xml, "the step's anchor survives as a real bookmark")
+    check('REF step:hold-board-by-edges \\h' in xml, "the cross-reference resolves to a live REF field")
+    check('STYLEREF 3 \\s' in xml, "steps carry a live Heading-3-scoped number field")
+
+
+def test_compile_steps_with_bullets_end_to_end():
+    """Open validation item from the spec: bullets nested inside
+    @@@STEPS@@@ (directly under a step, and under an ordered
+    clarification) must still compile without error. Indentation is
+    inspected manually against the produced .docx, not asserted here."""
+    markdown = SAMPLE_MARKDOWN + (
+        '\n## Bullet Coverage\n\n### Subsection Title\n\n'
+        '@@@STEPS@@@\n\n'
+        '#. Do the first thing.\n'
+        '    - A bulleted clarification directly under the step.\n'
+        '#. Do the second thing.\n'
+        '    #. An ordered clarification.\n'
+        '        - A bullet nested under the ordered clarification.\n'
+        '\n@@@END_STEPS@@@\n'
+    )
+    input_md = TEST_OUTPUT_DIR / "compile_test_steps_with_bullets.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_steps_with_bullets.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for @@@STEPS@@@ content containing bullets")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+    print(f"  Compiled {output_docx} - open it in Word to visually confirm bullet indentation is acceptable "
+          "(spec's open validation item; not asserted automatically).")
+
+
+def test_compile_duplicate_step_anchor_fails_clearly():
+    markdown = SAMPLE_MARKDOWN + (
+        '\n## Section\n\n### Subsection\n\n@@@STEPS@@@\n\n'
+        '#. First. []{#step:dup}\n#. Second. []{#step:dup}\n\n@@@END_STEPS@@@\n'
+    )
+    input_md = TEST_OUTPUT_DIR / "compile_test_duplicate_step_anchor.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_duplicate_step_anchor.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode != 0, "compiler exits non-zero for a duplicate {#step:x} anchor")
+    check("dup" in result.stderr.lower() or "dup" in result.stdout.lower(),
+          "the failure message names the duplicated label")
+
+
+FULL_XREF_MARKDOWN = (
+    '\n## Assembly Section {#sec:assembly}\n\n'
+    '![A widget.](diagrams/example.png){#fig:widget}\n\n'
+    '@@@STEPS@@@\n\n'
+    '#. Install the widget. []{#step:install-widget}\n\n'
+    '@@@END_STEPS@@@\n\n'
+    'See [](#fig:widget), [](#sec:assembly), and [](#step:install-widget) for full context.\n'
+)
+
+
+def test_compile_full_cross_reference_set_end_to_end():
+    """Integration test: a figure, a section, and a step, each
+    referenced via [](#TYPE:label), compiled through the real
+    pipeline."""
+    images_dir = TEST_OUTPUT_DIR / "diagrams"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "example.png").write_bytes(make_test_png())
+
+    markdown = SAMPLE_MARKDOWN + FULL_XREF_MARKDOWN
+    input_md = TEST_OUTPUT_DIR / "compile_test_full_xref.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_full_xref.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a document exercising all three reference types")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    with zipfile.ZipFile(output_docx) as z:
+        xml = z.read('word/document.xml').decode('utf-8')
+    check('REF fig:widget \\h' in xml, "the figure reference resolved")
+    check('REF sec:assembly \\r \\h' in xml, "the section reference resolved")
+    check('REF step:install-widget \\h' in xml, "the step reference resolved")
+    check('XREF' not in xml, "no sentinel remains")
+
+
+def test_compile_broken_reference_fails_clearly():
+    markdown = SAMPLE_MARKDOWN + '\nSee [](#fig:does-not-exist) for details.\n'
+    input_md = TEST_OUTPUT_DIR / "compile_test_broken_xref.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_broken_xref.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode != 0, "compiler exits non-zero for a reference to a nonexistent figure")
+    check("does-not-exist" in result.stderr.lower() or "does-not-exist" in result.stdout.lower(),
+          "the failure message names the missing label")
+
+
+def test_compile_duplicate_sec_anchor_fails_clearly():
+    markdown = SAMPLE_MARKDOWN + (
+        '\n## One {#sec:dup}\n\nText.\n\n## Two {#sec:dup}\n\nSee [](#sec:dup).\n'
+    )
+    input_md = TEST_OUTPUT_DIR / "compile_test_duplicate_sec_anchor.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_duplicate_sec_anchor.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode != 0, "compiler exits non-zero for a duplicate {#sec:x} anchor")
+    check("dup" in result.stderr.lower() or "dup" in result.stdout.lower(),
+          "the failure message names the duplicated label")
+
+
+def test_compile_duplicate_fig_anchor_fails_clearly():
+    images_dir = TEST_OUTPUT_DIR / "dup_fig_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "a.png").write_bytes(make_test_png())
+    (images_dir / "b.png").write_bytes(make_test_png())
+
+    markdown = SAMPLE_MARKDOWN + (
+        '\n![First.](dup_fig_images/a.png){#fig:dup}\n\n'
+        '![Second.](dup_fig_images/b.png){#fig:dup}\n\n'
+        'See [](#fig:dup).\n'
+    )
+    input_md = TEST_OUTPUT_DIR / "compile_test_duplicate_fig_anchor.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_duplicate_fig_anchor.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode != 0, "compiler exits non-zero for a duplicate {#fig:x} anchor")
+    check("dup" in result.stderr.lower() or "dup" in result.stdout.lower(),
+          "the failure message names the duplicated label")
+
+
+def _bookmark_start_end_mismatches(doc):
+    """Walks a compiled document's body in order, treating bookmarkStart/
+    bookmarkEnd as a LIFO stack (proper nesting). Returns a list of
+    (end_id, expected_id_or_None) tuples for every bookmarkEnd whose id
+    doesn't close the innermost still-open bookmarkStart - i.e. every
+    place the document's bookmark structure isn't well-formed.
+
+    docxcompose's Composer.renumber_bookmarks() reassigns every
+    bookmarkStart's id sequentially in document order, then separately
+    reassigns every bookmarkEnd's id sequentially in document order,
+    assuming the Nth start always pairs with the Nth end. That's only
+    true when bookmarks never nest. Our documents nest constantly (an
+    un-narrowed heading bookmark stays open around a {#fig:x} bookmark
+    that opens and closes inside it), so the naive renumbering hands a
+    figure's bookmarkEnd the wrong id - the figure's real end lands on
+    an unrelated, later bookmark instead."""
+    stack = []
+    mismatches = []
+    for el in doc.element.body.iter():
+        if el.tag == qn('w:bookmarkStart'):
+            stack.append(el.get(qn('w:id')))
+        elif el.tag == qn('w:bookmarkEnd'):
+            end_id = el.get(qn('w:id'))
+            if stack and stack[-1] == end_id:
+                stack.pop()
+            else:
+                mismatches.append((end_id, stack[-1] if stack else None))
+    return mismatches
+
+
+def _bookmark_span_contains_drawing(doc, bookmark_name):
+    """True if the named bookmark's start...end span (in document order)
+    contains a <w:drawing> (embedded picture) element - i.e. the
+    bookmark isn't narrowly wrapping just caption text, it's swallowing
+    an image. This is the literal Word-visible symptom of the
+    docxcompose renumbering bug: a REF field against a bookmark whose
+    end got reassigned to some later, unrelated position spans - and so
+    inserts a copy of - everything in between, images included."""
+    body = doc.element.body
+    all_els = list(body.iter())
+    start_idx = end_idx = None
+    for i, el in enumerate(all_els):
+        if el.tag == qn('w:bookmarkStart') and el.get(qn('w:name')) == bookmark_name:
+            start_idx = i
+            start_id = el.get(qn('w:id'))
+            break
+    if start_idx is None:
+        raise AssertionError(f"no bookmarkStart named {bookmark_name!r} found")
+    for i in range(start_idx + 1, len(all_els)):
+        el = all_els[i]
+        if el.tag == qn('w:bookmarkEnd') and el.get(qn('w:id')) == start_id:
+            end_idx = i
+            break
+    if end_idx is None:
+        raise AssertionError(f"no matching bookmarkEnd for {bookmark_name!r} (id={start_id})")
+    return any(el.tag == qn('w:drawing') for el in all_els[start_idx:end_idx])
+
+
+MERGE_BUG_MARKDOWN = (
+    '\n## Widget Assembly\n\n'
+    '![First widget.](merge_bug_images/one.png){#fig:widget-one}\n\n'
+    'Reference the first widget here ([](#fig:widget-one)).\n\n'
+    '![Second widget.](merge_bug_images/two.png){#fig:widget-two}\n\n'
+    '![Third widget.](merge_bug_images/three.png){#fig:widget-three}\n'
+)
+
+
+def test_compile_figure_reference_bookmark_not_corrupted_by_merge():
+    """Regression test for a bug report: a [](#fig:x) cross-reference
+    rendered as a live copy of the figure's image pasted into the text,
+    instead of hyperlinked "Figure N.M" text. Root cause: Part D's own
+    bookmarks are correctly paired (verified separately by tracing every
+    pipeline stage), but compose_documents()'s merge step
+    (docxcompose's Composer.append() -> renumber_bookmarks()) reassigns
+    bookmarkStart/bookmarkEnd ids independently and positionally,
+    corrupting any nested bookmark pair - which an un-narrowed heading
+    bookmark wrapping a {#fig:x} bookmark always produces. Reproduces
+    with an ordinary (unnamed) heading followed by three back-to-back
+    figures, the first one referenced - the same shape as the real
+    document that surfaced the bug."""
+    images_dir = TEST_OUTPUT_DIR / "merge_bug_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "one.png").write_bytes(make_test_png())
+    (images_dir / "two.png").write_bytes(make_test_png())
+    (images_dir / "three.png").write_bytes(make_test_png())
+
+    markdown = SAMPLE_MARKDOWN + MERGE_BUG_MARKDOWN
+    input_md = TEST_OUTPUT_DIR / "compile_test_merge_bug.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_merge_bug.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for the merge-bug repro document")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+
+    mismatches = _bookmark_start_end_mismatches(doc)
+    check(not mismatches,
+          f"every bookmarkEnd in the merged document closes its correct bookmarkStart "
+          f"(found {len(mismatches)} mismatch(es): {mismatches[:5]}{'...' if len(mismatches) > 5 else ''})")
+
+    check(not _bookmark_span_contains_drawing(doc, 'fig:widget-one'),
+          "the fig:widget-one bookmark wraps only its caption text, not an embedded picture "
+          "(a REF field against it would otherwise paste the image, not hyperlinked text)")
+
+
+def _save_doc_with_bookmark(path, bookmark_name, text):
+    """Builds a minimal one-paragraph .docx whose entire text is wrapped
+    in a bookmark with raw id '0' - simulating one independently-built
+    docx part (Part A, B, or D) that numbers its own bookmarks starting
+    fresh at 0, exactly as Pandoc/our own bookmark-emitting code does
+    for each part before compose_documents() merges them."""
+    doc = Document()
+    p = doc.add_paragraph()
+    start = OxmlElement('w:bookmarkStart')
+    start.set(qn('w:id'), '0')
+    start.set(qn('w:name'), bookmark_name)
+    p._p.append(start)
+    p.add_run(text)
+    end = OxmlElement('w:bookmarkEnd')
+    end.set(qn('w:id'), '0')
+    p._p.append(end)
+    doc.save(path)
+
+
+def test_compose_documents_preserves_bookmark_pairs_across_colliding_source_ids():
+    """Regression test for a code-review finding on
+    _renumber_bookmarks_preserving_pairs(): it renumbers bookmarks by
+    building an id_map keyed on each bookmark's *raw* id as it walks
+    the merged body - but Composer.append() calls renumber_bookmarks()
+    once per appended document, each time over the WHOLE accumulated
+    body, not just the newly-appended part. So by the time a second
+    document is appended, the body holds both already-renumbered
+    bookmarks from the first append AND the second document's own
+    bookmarks, which independently started numbering at '0' too - two
+    unrelated bookmarks can raise the same raw id string within one
+    walk. A dict keyed on that raw id would let the second one silently
+    overwrite the first's mapping in id_map, corrupting the first
+    bookmark's pairing. Reproduces the shape directly: two documents,
+    each with exactly one bookmark whose native id is '0'."""
+    doc_a = TEST_OUTPUT_DIR / "bookmark_collision_a.docx"
+    doc_b = TEST_OUTPUT_DIR / "bookmark_collision_b.docx"
+    _save_doc_with_bookmark(doc_a, 'first', 'First document text.')
+    _save_doc_with_bookmark(doc_b, 'second', 'Second document text.')
+
+    composer = dilon_docx_common.compose_documents(doc_a, doc_b)
+    output_docx = TEST_OUTPUT_DIR / "bookmark_collision_merged.docx"
+    composer.save(output_docx)
+
+    doc = Document(output_docx)
+    mismatches = _bookmark_start_end_mismatches(doc)
+    check(not mismatches,
+          f"every bookmarkEnd in the merged document closes its correct bookmarkStart, "
+          f"even though both source documents' bookmarks started at id '0' "
+          f"(found {len(mismatches)} mismatch(es): {mismatches})")
+
+    names = {el.get(qn('w:name')) for el in doc.element.body.iter(qn('w:bookmarkStart'))}
+    check(names == {'first', 'second'}, f"both bookmarks survive the merge with their names intact (got {names})")
+
+
+def test_validate_list_nesting_depth_passes_at_three_levels():
+    md = (
+        "#. Top\n"
+        "    #. Second\n"
+        "        #. Third\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "nesting_ok_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    validate_list_nesting_depth(docx_path)  # should not raise
+
+
+def test_validate_list_nesting_depth_rejects_four_levels():
+    md = (
+        "#. Top\n"
+        "    #. Second\n"
+        "        #. Third\n"
+        "            #. Fourth\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "nesting_bad_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    try:
+        validate_list_nesting_depth(docx_path)
+        check(False, "a 4-level-deep ordered list raises ListNestingError")
+    except ListNestingError as exc:
+        check("Fourth" in str(exc), f"the error names the offending item's text (got: {exc})")
+
+
+def test_validate_list_nesting_depth_ignores_bullet_lists():
+    md = (
+        "- Top\n"
+        "    - Second\n"
+        "        - Third\n"
+        "            - Fourth\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "nesting_bullets_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    validate_list_nesting_depth(docx_path)  # bullets aren't capped - should not raise
+
+
+def test_remap_ordered_lists_restyles_decimal_paragraphs():
+    md = "#. First\n#. Second\n"
+    docx_path = TEST_OUTPUT_DIR / "remap_ordered_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    count = remap_ordered_lists_to_dilon_step_list(docx_path)
+    check(count == 2, f"both ordered-list paragraphs get restyled (got {count})")
+
+    doc = Document(docx_path)
+    step_styled = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List']
+    check(len(step_styled) == 2, "both paragraphs now carry the 'Dilon Step List' style")
+
+
+def test_remap_ordered_lists_leaves_bullets_alone():
+    md = "- First\n- Second\n"
+    docx_path = TEST_OUTPUT_DIR / "remap_bullets_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    count = remap_ordered_lists_to_dilon_step_list(docx_path)
+    check(count == 0, f"a bullet list is not restyled (got count={count})")
+
+    doc = Document(docx_path)
+    step_styled = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List']
+    check(len(step_styled) == 0, "no paragraph carries 'Dilon Step List' style")
+
+
+def test_remap_ordered_lists_preserves_native_numbering():
+    """The remap must only change *style*, never numId/ilvl - Pandoc's
+    own numbering is already numerically correct and must keep driving
+    the rendered number."""
+    md = "#. First\n#. Second\n    #. Nested\n#. Third\n"
+    docx_path = TEST_OUTPUT_DIR / "remap_preserves_numbering_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    before = [_paragraph_num_id_and_ilvl(p._p) for p in Document(docx_path).paragraphs]
+    remap_ordered_lists_to_dilon_step_list(docx_path)
+    after = [_paragraph_num_id_and_ilvl(p._p) for p in Document(docx_path).paragraphs]
+    check(before == after, f"numId/ilvl unchanged by the style remap (before={before}, after={after})")
+
+
+def test_ensure_blank_line_after_list_continue_marker_inserts_when_missing():
+    md = "@@@CONTINUE:#list:x@@@\n#. Third\n"
+    result = ensure_blank_line_after_list_continue_markers(md)
+    check(result == "@@@CONTINUE:#list:x@@@\n\n#. Third\n", f"a blank line is inserted (got {result!r})")
+
+
+def test_ensure_blank_line_after_list_continue_marker_idempotent():
+    md = "@@@CONTINUE:#list:x@@@\n\n#. Third\n"
+    result = ensure_blank_line_after_list_continue_markers(md)
+    check(result == md, "already-blank-line case is left unchanged")
+
+
+def test_resolve_list_continuations_reuses_numid():
+    md = (
+        "#. First\n"
+        "#. Second []{#list:cleaning-procedure}\n\n"
+        "Some interrupting paragraph.\n\n"
+    )
+    md = ensure_blank_line_after_list_continue_markers(
+        md + "@@@CONTINUE:#list:cleaning-procedure@@@\n#. Third\n#. Fourth\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "list_continue_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    resolved = resolve_list_continuations(docx_path)
+    check(resolved == 1, f"exactly one continuation marker resolved (got {resolved})")
+
+    doc = Document(docx_path)
+    check(all('@@@CONTINUE' not in p.text for p in doc.paragraphs), "the marker paragraph is removed")
+
+    num_ids = set()
+    for p in doc.paragraphs:
+        num_id, _ = _paragraph_num_id_and_ilvl(p._p)
+        if num_id is not None:
+            num_ids.add(num_id)
+    check(len(num_ids) == 1, f"both blocks now share exactly one numId (got {num_ids})")
+
+
+def test_resolve_list_continuations_missing_anchor_raises():
+    md = ensure_blank_line_after_list_continue_markers(
+        "@@@CONTINUE:#list:does-not-exist@@@\n#. Third\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "list_continue_missing_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    try:
+        resolve_list_continuations(docx_path)
+        check(False, "a @@@CONTINUE@@@ with no matching {#list:name} anchor raises ListContinuationError")
+    except ListContinuationError as exc:
+        check("does-not-exist" in str(exc), f"the error names the missing label (got: {exc})")
+
+
+def test_resolve_list_continuations_duplicate_anchor_raises():
+    md = (
+        "#. First []{#list:dup}\n\n"
+        "#. Second []{#list:dup}\n\n"
+    )
+    md = ensure_blank_line_after_list_continue_markers(
+        md + "@@@CONTINUE:#list:dup@@@\n#. Third\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "list_continue_duplicate_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+
+    try:
+        resolve_list_continuations(docx_path)
+        check(False, "two {#list:dup} anchors raises ListContinuationError")
+    except ListContinuationError as exc:
+        check("dup" in str(exc), f"the error names the duplicated label (got: {exc})")
+
+
+def test_compile_ordered_list_and_continuation_end_to_end():
+    """Integration test: a #. list interrupted by a paragraph and
+    resumed via {#list:name}/@@@CONTINUE@@@, compiled through the real
+    pipeline - numbering.xml and the shared numId must survive the
+    full A/B/C/D docxcompose merge."""
+    markdown = SAMPLE_MARKDOWN + (
+        "\n## Ordered List Continuation Example\n\n"
+        "#. First item\n"
+        "#. Second item []{#list:demo-list}\n\n"
+        "An interrupting paragraph.\n\n"
+        "@@@CONTINUE:#list:demo-list@@@\n"
+        "#. Third item\n"
+        "#. Fourth item\n"
+    )
+    input_md = TEST_OUTPUT_DIR / "compile_test_ordered_list.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_ordered_list.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a document with a continued #. list")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+    check(all('@@@CONTINUE' not in p.text for p in doc.paragraphs), "no marker text remains")
+    step_styled = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step List'
+                   and p.text.strip() in ('First item', 'Second item', 'Third item', 'Fourth item')]
+    check(len(step_styled) == 4, f"all four items got the 'Dilon Step List' style (got {len(step_styled)})")
+
+    num_ids = set()
+    for p in step_styled:
+        num_id, _ = _paragraph_num_id_and_ilvl(p._p)
+        if num_id is not None:
+            num_ids.add(num_id)
+    check(len(num_ids) == 1, f"all four items share one numId across the interruption (got {num_ids})")
+
+
+def test_compile_four_level_nested_list_fails_clearly():
+    markdown = SAMPLE_MARKDOWN + (
+        "\n## Over-Nested List Example\n\n"
+        "#. Top\n"
+        "    #. Second\n"
+        "        #. Third\n"
+        "            #. Fourth\n"
+    )
+    input_md = TEST_OUTPUT_DIR / "compile_test_over_nested.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_over_nested.docx"
+    input_md.write_text(markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode != 0, "compiler exits non-zero for a 4-level-deep ordered list")
+    check("nested" in result.stderr.lower() or "nested" in result.stdout.lower(),
+          "the failure message mentions nesting, not a raw traceback only")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -908,6 +2568,11 @@ def main():
     test_ensure_blank_line_stacked_style_then_columns()
     test_ensure_blank_line_stacked_columns_then_style()
     test_ensure_blank_line_idempotent_when_already_blank()
+    test_ensure_blank_line_between_images_inserts_when_missing()
+    test_ensure_blank_line_between_images_three_in_a_row()
+    test_ensure_blank_line_between_images_idempotent_when_already_blank()
+    test_ensure_blank_line_between_images_leaves_non_image_lines_alone()
+    test_ensure_blank_line_between_images_ignores_inline_image_with_text()
     test_parse_column_widths_valid_with_flex()
     test_parse_column_widths_valid_all_numeric()
     test_parse_column_widths_case_insensitive_flex()
@@ -922,14 +2587,80 @@ def main():
     test_apply_table_column_widths_raises_when_all_fixed_overflows()
     test_compile_missing_input_error()
     test_compile_valid_document()
+    test_create_signature_table_structure()
+    test_create_signature_table_empty_signature_fields()
+    test_compile_signature_table_generated_programmatically()
+    test_compile_has_no_leading_blank_paragraph()
+    test_compile_has_no_title_page()
+    test_compile_header_signature_revision_widths()
+    test_compile_footer_table_layout()
     test_compile_bom_front_matter()
     test_compile_table_marker_no_blank_line()
     test_compile_adjacent_tables_no_merge()
     test_compile_table_column_widths()
     test_compile_with_default_templates()
     test_compile_resolves_relative_image_paths()
+    test_lock_image_aspect_ratios_adds_frame_lock_when_missing()
+    test_lock_image_aspect_ratios_idempotent_when_already_locked()
+    test_read_docx_sizes_excludes_signature_and_revision_tables()
+    test_horizontal_rule_becomes_page_break()
+    test_render_jinja_substitutes_body_fields()
+    test_render_jinja_raw_block_escapes_literal_braces()
+    test_render_jinja_noop_without_braces()
+    test_compile_body_jinja_substitution()
     test_heading_auto_numbering()
     test_figure_auto_numbering()
+    test_figure_auto_numbering_consecutive_images_no_blank_line()
+    test_apply_figure_captions_narrows_bookmark_to_number_only()
+    test_apply_figure_captions_narrowing_is_noop_without_fig_id()
+    test_narrow_section_bookmarks_shrinks_to_heading_only()
+    test_narrow_section_bookmarks_ignores_headings_without_sec_id()
+    test_preprocess_reference_markers_converts_recognized_types()
+    test_preprocess_reference_markers_leaves_real_link_text_and_unknown_types_untouched()
+    test_resolve_reference_markers_dispatches_by_type()
+    test_resolve_reference_markers_missing_anchor_raises()
+    test_resolve_reference_markers_duplicate_anchor_raises()
+    test_heading2_has_no_automatic_page_break()
+    test_compile_toc_forces_page_break_after_toc()
+    test_get_step_clarification_abstract_num_id_found()
+    test_get_step_clarification_abstract_num_id_missing_style()
+    test_create_num_instance_first_allocation()
+    test_create_num_instance_sequential_allocations_dont_collide()
+    test_create_num_instance_writes_start_override()
+    test_ensure_blank_line_around_steps_markers_inserts_both_sides()
+    test_ensure_blank_line_around_steps_markers_idempotent()
+    test_apply_field_based_step_numbering_single_step()
+    test_apply_field_based_step_numbering_number_precedes_step_text()
+    test_apply_field_based_step_numbering_clarifications_restart_per_step()
+    test_apply_field_based_step_numbering_bullets_left_alone()
+    test_apply_field_based_step_numbering_bullets_ilvl_decremented()
+    test_apply_field_based_step_numbering_unclosed_block_raises()
+    test_apply_field_based_step_numbering_open_block_across_heading3_boundary_raises()
+    test_apply_field_based_step_numbering_skips_gracefully_without_clarification_style()
+    test_apply_field_based_step_numbering_preserves_inline_formatting()
+    test_resolve_step_reference_builds_composite_field()
+    test_compile_field_based_step_numbering_end_to_end()
+    test_compile_steps_with_bullets_end_to_end()
+    test_compile_duplicate_step_anchor_fails_clearly()
+    test_compile_full_cross_reference_set_end_to_end()
+    test_compile_broken_reference_fails_clearly()
+    test_compile_duplicate_sec_anchor_fails_clearly()
+    test_compile_duplicate_fig_anchor_fails_clearly()
+    test_compile_figure_reference_bookmark_not_corrupted_by_merge()
+    test_compose_documents_preserves_bookmark_pairs_across_colliding_source_ids()
+    test_validate_list_nesting_depth_passes_at_three_levels()
+    test_validate_list_nesting_depth_rejects_four_levels()
+    test_validate_list_nesting_depth_ignores_bullet_lists()
+    test_remap_ordered_lists_restyles_decimal_paragraphs()
+    test_remap_ordered_lists_leaves_bullets_alone()
+    test_remap_ordered_lists_preserves_native_numbering()
+    test_ensure_blank_line_after_list_continue_marker_inserts_when_missing()
+    test_ensure_blank_line_after_list_continue_marker_idempotent()
+    test_resolve_list_continuations_reuses_numid()
+    test_resolve_list_continuations_missing_anchor_raises()
+    test_resolve_list_continuations_duplicate_anchor_raises()
+    test_compile_ordered_list_and_continuation_end_to_end()
+    test_compile_four_level_nested_list_fails_clearly()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")

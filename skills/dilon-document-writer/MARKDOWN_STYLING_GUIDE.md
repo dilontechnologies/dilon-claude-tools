@@ -7,7 +7,7 @@ This guide defines the markdown formatting standards for technical documents tha
 Documents are written in **Pandoc-flavored Markdown** and converted to Word (`.docx`) using:
 - **Pandoc** for markdown → Word conversion
 - **python-docx** for template rendering and document assembly
-- **Reference template** (`TEMPLATE_Word_Signature.docx`) for styling
+- **Reference template** (`TEMPLATE_Word_Base.docx`) for styling
 
 ---
 
@@ -22,9 +22,12 @@ author: "Author Name"
 department: "Engineering"
 doc_number: "DD_XXX_XXXXX"
 current_revision: "1"
-regulatory_rep: "Regulatory Representative"
-quality_rep: "Quality Representative"
 department_head: "Department Head"
+signature_fields:
+  - department: "Regulatory"
+    name: "Regulatory Representative"
+  - department: "Quality"
+    name: "Quality Representative"
 revisions:
   - number: "1"
     description: "Initial release"
@@ -39,27 +42,26 @@ revisions:
 - `department`: Usually "Engineering"
 - `doc_number`: Dilon document number (format: `DD_XXX_XXXXX`)
 - `current_revision`: Current revision number (string)
-- `regulatory_rep`, `quality_rep`, `department_head`: Approver names
+- `department_head`: Department head approver name
+- `signature_fields`: Array of additional approvers, each a `department`/`name` pair (may be empty) - lets each document declare its own set of signators (e.g. Regulatory, Quality) instead of a fixed pair of roles
 - `revisions`: Array of revision history entries
 
+**Referencing Front Matter in the Document Body:**
+
+The document body may reference any front-matter field with `{{field_name}}` (e.g. `{{doc_number}}`, `{{title}}`, `{{current_revision}}`), so a value doesn't have to be hand-duplicated between the YAML front matter and the prose. This is resolved by Jinja2 against the same metadata dict that drives the header, footer, signature table, and title page, before Pandoc ever sees the text. To write a literal `{{` or `}}` (e.g. to document this syntax itself), wrap it in `{% raw %}...{% endraw %}`.
+
+A misspelled field name (e.g. `{{doc_nubmer}}`) does not error and does not produce a visible gray block - Jinja2 silently renders it as an empty string. Proofread body text that uses this syntax against the front matter fields listed above.
+
+The compiled Word document's own header/footer/signature-table/title-page content is generated directly in Python from the same front-matter dict (not via a Word-template Jinja substitution) - `{{field}}` syntax only applies to markdown body text.
+
 **Troubleshooting Gray Blocks:**
-If you see gray highlighted blocks in the generated Word document, there are two possible causes:
-
-**Cause 1: Unresolved Jinja2 Variable**
-1. Check that all variables in the Word template (e.g., `{{variable_name}}`) have corresponding entries in the YAML front matter
-2. Open `TEMPLATE_Word_Signature.docx` and search for `{{` to find all template variables
-3. Ensure every template variable has a value in your markdown's YAML front matter
-4. Common culprits: missing author, department, or approver names
-
-**Cause 2: Legacy Word Form Fields**
-If the gray block appears without any `{{variable}}` nearby, it's likely a Word form field:
-1. Open `TEMPLATE_Word_Signature.docx` in Word
+If you see gray highlighted blocks in the generated Word document, it's a legacy Word form field left over in `TEMPLATE_Word_Base.docx`, not a Jinja2 variable (the base template carries no `{{...}}` fields of its own):
+1. Open `TEMPLATE_Word_Base.docx` in Word
 2. Enable "Developer" tab: File → Options → Customize Ribbon → Check "Developer"
 3. Click "Design Mode" button in Developer tab to see form fields
 4. Click the gray form field and press Delete
 5. Turn off "Design Mode"
 6. Save the template
-7. **Note**: Form fields often appear after text like "Electronic" in signature tables
 
 **Revision Entry Format:**
 ```yaml
@@ -146,7 +148,7 @@ Use **pipe tables** for all tabular data. This format is readable in markdown an
 ### 3.2 Table Formatting in Word Output
 
 **Grid Lines:**
-- Grid lines and borders are controlled by the **Word reference template** (`TEMPLATE_Word_Signature.docx`)
+- Grid lines and borders are controlled by the **Word reference template** (`TEMPLATE_Word_Base.docx`)
 - **IMPORTANT**: "Table Grid" is a reserved Word built-in style that cannot be modified
 - Two custom table styles are available:
   - **DilonTable_List**: For tables with a header row only (most common)
@@ -174,7 +176,7 @@ Use **pipe tables** for all tabular data. This format is readable in markdown an
 
 When creating custom table styles in the reference template:
 
-1. Open `TEMPLATE_Word_Signature.docx`
+1. Open `TEMPLATE_Word_Base.docx`
 2. Insert a sample table (3 columns × 3 rows)
 3. Right-click table → "Table Styles" → "New Table Style..."
 4. Name the style (e.g., "DilonTable_List" or "DilonTable_Chart")
@@ -243,7 +245,7 @@ When creating custom table styles in the reference template:
 **Multi-line Cells:**
 - Pipe tables support single-line cells only
 - **ISSUE**: `<br>` tags do NOT work in pipe table cells when converting to Word
-- For multi-line content in table cells, you MUST use grid tables (see Section 14)
+- For multi-line content in table cells, you MUST use grid tables (see Section 16)
 - Example that does NOT work:
   ```markdown
   | Field | Description |
@@ -276,7 +278,7 @@ Put the caption text directly in the image's alt-text brackets - do NOT write a 
 - Image path is relative to the markdown file
 - Caption text goes **inside the brackets** (the image's alt text) - do NOT type a manual `*Figure N.M: ...*` line after the image
 - **Do NOT type a figure number.** The compiler converts the caption into a Word-native `Figure N.M - Description` caption, chapter-numbered off the nearest Heading 2, exactly like the automatic section numbering described in Section 2
-- The optional `{#fig:some-label}` after the image assigns it a stable id for cross-referencing (see 8.2) - use a `fig:` prefix and kebab-case, e.g. `{#fig:i2c-bus-topology}`
+- The optional `{#fig:some-label}` after the image assigns it a stable id for cross-referencing (see 9.3) - use a `fig:` prefix and kebab-case, e.g. `{#fig:i2c-bus-topology}`
 - Omit both the caption text and the `{#fig:...}` id (`![](path.png)`) for a purely decorative image that should NOT get a figure number - the compiler only numbers images that have caption text
 - Caption should be concise but descriptive; no trailing period is added automatically, so include one if you want it
 
@@ -290,27 +292,25 @@ Put the caption text directly in the image's alt-text brackets - do NOT write a 
 ![](diagrams/company_logo.png)
 ```
 
-### 4.2 What the Compiler Does
+### 4.2 Sizing an Image
+
+By default an image is embedded at its native pixel size. To constrain that,
+add a Pandoc image attribute after the path - `{width=...}`, `{height=...}`,
+or both - inside the same trailing `{...}` block as the `#fig:` id, space-separated:
+
+```markdown
+![Complete I2C Bus Topology showing nRF52832 master connected to all peripheral devices.](diagrams/i2c_bus_topology.png){#fig:i2c-bus-topology width=4in}
+```
+
+**Rules:**
+- Accepted units: absolute (`in`, `cm`, `px`, `pt`) or a bare percentage of the page's content width (`width=50%`)
+- Setting only `width` or only `height` scales the other dimension proportionally; setting both stretches the image to exactly that box
+- No unit resolves to pixels (`width=400` means `400px`)
+- This is a native Pandoc feature, not Dilon-specific tooling - nothing in the compiler scripts processes it, so it works the same whether or not the image has a caption or `{#fig:...}` id
+
+### 4.3 What the Compiler Does
 
 The compiled Word document will show something like `Figure 2.1 - Complete I2C Bus Topology showing nRF52832 master connected to all peripheral devices.`, styled with Word's built-in "Caption" style. The "2" comes from the nearest Heading 2 (live, via a `STYLEREF` field); the "1" is a running count that resets at each new Heading 2 (live, via a `SEQ` field) - both computed by Word itself, not baked in as static text, so the numbers stay correct even if the document is later reordered in Word.
-
-### 4.3 PlantUML Diagrams
-
-For architectural diagrams, use PlantUML:
-
-1. Create `.puml` source file in `diagrams/` folder
-2. Generate PNG: `plantuml -tpng diagram.puml`
-3. Reference PNG in markdown with a caption in the brackets, same as any other figure:
-   ```markdown
-   ![Diagram description.](diagrams/diagram_name.png){#fig:diagram-name}
-   ```
-
-**PlantUML Best Practices:**
-- Use `!theme plain` for clean output
-- Set `skinparam backgroundColor white`
-- Use `top to bottom direction` for vertical layouts
-- Place diagrams in `diagrams/` subfolder
-- Commit both `.puml` source and `.png` output
 
 ---
 
@@ -334,18 +334,47 @@ This is a paragraph after the list.
 
 ### 5.2 Ordered Lists
 
+Use Pandoc's native `#.` auto-number marker instead of typing numbers - like `-` for bullets, the number is never baked text, so inserting, removing, or reordering items never requires renumbering by hand:
+
 ```markdown
 This is a paragraph before the list.
 
-1. First step
-2. Second step
-   - Sub-point (use hyphen for nested bullets)
-3. Third step
+#. First step
+#. Second step
+    #. Sub-point (2-space or 1-tab indent per nesting level, same convention as bullets)
+#. Third step
 
 This is a paragraph after the list.
 ```
 
-### 5.3 Definition Lists
+**Rules:**
+- Never type a literal number (`1.`, `2.`) - always `#.`, exactly like bullets always use `-`, never a hand-typed count
+- Nesting is 2 spaces or 1 tab per level, same convention as unordered lists (Section 5.1)
+- **Maximum nesting depth is three levels.** A fourth level fails compilation with an error rather than rendering incorrectly - reformat as separate lists or sub-bullets instead
+- Renders as native, auto-numbered dotted-decimal (`1.`, `1.1.`, `1.1.1.`) via the shared "Dilon Step List" Word style. `@@@STEPS@@@` procedures (Section 6) use their own distinct styling instead
+
+### 5.3 Continuing a List Across an Interruption
+
+A `#.` list (or a `@@@STEPS@@@` list) can be split by intervening prose, a photo, or a `NOTE:`, and resumed later with numbering intact: tag the item to resume from with a bracketed-span anchor, then reference that tag immediately before the resuming block.
+
+```markdown
+#. First item
+#. Second item []{#list:cleaning-procedure}
+
+Some interrupting paragraph or photo.
+
+@@@CONTINUE:#list:cleaning-procedure@@@
+#. Third item
+#. Fourth item
+```
+
+**Rules:**
+- `[]{#list:name}` is a bracketed-span anchor - place it right after the item you want a later block to continue from. It must be written as `[]{#list:name}` (empty brackets, then the id in braces), not a bare `{#list:name}` - Pandoc only turns a *bare* `{#id}` into an anchor when it trails a heading; on any other line it needs the bracketed-span form
+- `@@@CONTINUE:#list:name@@@` must be on its own line, immediately before the `#.` list it continues
+- A `@@@CONTINUE:#list:name@@@` whose `name` doesn't match any `[]{#list:name}` anchor anywhere earlier in the document **fails compilation** with a clear error - it does not silently restart the list at 1
+- Two `[]{#list:name}` anchors sharing the same `name` also **fails compilation** - every list-continuation tag must be unique
+
+### 5.4 Definition Lists
 
 For glossaries or field definitions:
 
@@ -382,9 +411,107 @@ Paragraph after definition list.
 
 ---
 
-## 6. Code and Technical Content
+## 6. Numbered Step Lists
 
-### 6.1 Inline Code
+Work-instruction procedures need steps that number themselves
+automatically, resolve into a section, and produce a single unique
+identifier per step across the whole document. Use `@@@STEPS@@@` for
+this instead of a plain `#.` list.
+
+```markdown
+## Carrier Board Assembly
+
+### Cleaning Procedure
+
+@@@STEPS@@@
+
+#. Wear clean gloves.
+#. Simple dirt such as lint or light dust can be blown away before wiping.
+    #. Hold the board by the edges of the board when cleaning.
+    #. Wipe with IPA and a lint-free cloth.
+
+@@@END_STEPS@@@
+```
+
+**Rules:**
+- `@@@STEPS@@@` takes no attributes - just the bare marker, opening and closing (`@@@END_STEPS@@@`) around `#.` list content, same tab-nesting convention as any ordered list (Section 5.2).
+- A step's number is scoped to the nearest preceding `###` (Heading 3) - a new `###` always starts a fresh count at 1. Every `@@@STEPS@@@` block within the *same* Heading 3 subsection shares one continuous count automatically - no marker needed to "continue" a procedure interrupted by prose, a photo, or a `NOTE:`.
+- **In the procedure itself**, a step shows its live `<H2 number>.<H3 number>.<step number>` (e.g. `2.3.1`) - no "Step " word in place.
+- A nested `#.` item under a step is a **clarification**: it's relettered `a.`, `b.`, `c.` and restarts at "a." for every step (it does not continue the previous step's lettering). A nested `-` (bulleted) item is left as a plain bullet.
+- **When referenced elsewhere** (see below), a step resolves to `Step <n>.<m>.<p>` (e.g. `Step 2.3.1`) - the "Step " word only ever appears in a cross-reference, never in the procedure's own in-place numbering.
+- Maximum nesting depth is three levels, same cap as any ordered list.
+
+**Referencing a step:**
+
+Give the step an anchor with a bracketed-span id - `[]{#step:label}`, not a bare `{#step:label}` (a step is a list item, not a heading or an image, so it needs the same bracketed-span form as `{#list:name}` in Section 5.3, not the bare trailing-attribute form headings and images use):
+
+```markdown
+#. Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
+```
+
+The anchor must sit on a **top-level step**, not on a nested clarification - only a top-level step's number is field-based and cross-reference-ready; a clarification keeps its own native list lettering and isn't currently a valid reference target.
+
+Every `{#step:label}` anchor must be unique across the whole document - a duplicate fails compilation with an error.
+
+Reference it elsewhere with an **empty-text** link - the compiler fills in the current number automatically, so it can never go stale:
+
+```markdown
+As described in [](#step:hold-board-by-edges), always support the board by its edges.
+```
+
+This renders as, e.g., "As described in Step 2.3.1, always support the
+board by its edges" - a live Word field, not typed text. Supplying real
+link text instead (`[see the earlier step](#step:hold-board-by-edges)`)
+is respected as-is, same as a figure or section cross-reference. A
+reference to a label that doesn't exist anywhere in the document fails
+compilation with an error, rather than silently rendering placeholder
+text.
+
+**Worked example** - a procedure interrupted by a note and a photo, then
+continued, with a later reference back to it:
+
+```markdown
+## Carrier Board Assembly
+
+### Cleaning Procedure
+
+@@@STEPS@@@
+
+#. Wear clean gloves.
+#. Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
+    #. Simple dirt such as lint or light dust can be blown away before wiping.
+
+@@@END_STEPS@@@
+
+NOTE: Clean the entire crystal but give special attention to ensure the
+polished end is free of dust, as that is the bonding surface.
+
+@@@STEPS@@@
+
+#. Visually inspect both the crystal and the photomultiplier for any
+   physical defects or anomalies such as scratches, chips, or cracks.
+#. Set the cleaned crystals aside on a clean lint free cloth for
+   installation later.
+
+@@@END_STEPS@@@
+
+As described in [](#step:hold-board-by-edges), always support the board
+by its edges - never by its face.
+```
+
+**Scope**: `@@@STEPS@@@` is document-internal only - it's for referencing
+a step from elsewhere in the *same* work instruction. There's no way to
+cite a specific step number from a different document (a Traveler, a
+CAPA, etc.); reference the other document by its document number and
+title in plain text instead - e.g. "per `FO-00127, Detector Head
+Assembly Traveler`" - the same external-document-reference convention
+Section 9 covers for links generally.
+
+---
+
+## 7. Code and Technical Content
+
+### 7.1 Inline Code
 
 Use **single backticks** for inline code (code within a paragraph):
 
@@ -407,7 +534,7 @@ Register ```CTRL_REG1``` has address ```0x20```.
 ```
 (Triple backticks are for code blocks, not inline code)
 
-### 6.2 Code Blocks
+### 7.2 Code Blocks
 
 Use **triple backticks** with optional language identifier for multi-line code blocks:
 
@@ -456,7 +583,7 @@ void ee24aa02_read_buf(uint8_t address, uint8_t *buffer, size_t length) {
 ```
 ````
 
-### 6.3 Register/Bit Field Notation
+### 7.3 Register/Bit Field Notation
 
 Use inline code for addresses, registers, bit fields:
 
@@ -468,9 +595,9 @@ Use inline code for addresses, registers, bit fields:
 
 ---
 
-## 7. Emphasis and Formatting
+## 8. Emphasis and Formatting
 
-### 7.1 Bold
+### 8.1 Bold
 
 Use double asterisks for **bold**:
 
@@ -483,7 +610,7 @@ Use bold for:
 - Field names in descriptions
 - Key terms on first mention
 
-### 7.2 Italic
+### 8.2 Italic
 
 Use single asterisks for *italic*:
 
@@ -495,7 +622,7 @@ Use italic for:
 - Emphasis
 - Document references
 
-### 7.3 Bold + Italic
+### 8.3 Bold + Italic
 
 Use triple asterisks for ***bold italic***:
 
@@ -505,50 +632,68 @@ Use triple asterisks for ***bold italic***:
 
 ---
 
-## 8. Links and References
+## 9. Links and References
 
-### 8.1 External Links
+### 9.1 External Links
 
 ```markdown
 [Link text](https://example.com)
 ```
 
-### 8.2 Internal Cross-References
+### 9.2 Internal Cross-References
 
-Reference sections by number using hyperlinks:
+Section headings can carry a custom id for cross-referencing, same as figures and steps:
 
 ```markdown
-See [Section 3.5](#grid-table-for-complex-content) for details on the MAX17263 fuel gauge.
+## My Heading {#sec:my-heading}
 ```
 
-**Rules:**
-- Pandoc automatically generates identifiers for each heading
-- Identifier format: lowercase, spaces replaced with hyphens, special characters removed
-- Link syntax: `[Link text](#heading-identifier)`
-- Example heading `### Grid Table (For Complex Content)` → identifier `#grid-table-for-complex-content`
-- For custom identifiers, use: `## My Heading {#custom-id}`
-- The link text (e.g. `Section 3.5`) is literal text you type - it will only match the number Word actually renders if the section's position in the document doesn't change afterward
+Reference it elsewhere with an **empty-text** link - the compiler fills in the current section number automatically, so it can never go stale:
+
+```markdown
+See [](#sec:my-heading) for details on the MAX17263 fuel gauge.
+```
+
+This renders as, e.g., "See Section 3.5 for details..." - a live Word
+field, not typed text. Supplying real link text instead
+(`[the fuel gauge section](#sec:my-heading)`) is respected as-is - a
+plain hyperlink to that heading, not a live number.
+
+A reference to a `sec:` id that doesn't exist anywhere in the document
+fails compilation with an error. Every `{#sec:label}` id must be unique
+across the document.
+
+Pandoc's own auto-generated heading identifiers (lowercase, hyphenated
+- see the example below) still work for a plain hyperlink with real
+link text; only an id using the `sec:` prefix, referenced with empty
+link text, gets the live-number treatment.
 
 **Examples:**
 ```markdown
 For table styling, see [Section 3.2](#table-formatting-in-word-output).
 
-The definition list format is explained in [Section 4.3](#definition-lists).
-
-Code examples can be found in [Section 6](#code-and-technical-content).
+See [](#sec:fuel-gauge-calibration) for the calibration procedure.
 ```
 
-### 8.3 Figure Cross-References
+### 9.3 Figure Cross-References
 
-Figures use the `{#fig:label}` id from Section 4.1, with the same link syntax as section cross-references:
+Reference a figure's `{#fig:label}` id (Section 4.1) with an
+**empty-text** link, the same pattern as sections and steps:
 
 ```markdown
-See [the figure](#fig:i2c-bus-topology) for the complete bus topology.
+See [](#fig:i2c-bus-topology) for the complete bus topology.
 ```
 
-This produces a real hyperlink to the figure - unlike section cross-references, the link text isn't tied to a number that could drift, since it's just pointing at the image itself.
+This renders as, e.g., "See Figure 2.1 for the complete bus
+topology..." - a live, hyperlinked Word field. Supplying real link
+text instead (`[the bus topology diagram](#fig:i2c-bus-topology)`) is
+respected as-is - a plain hyperlink to the image itself, not a live
+number.
 
-### 8.4 Code References
+A reference to a `fig:` label that doesn't exist anywhere in the
+document fails compilation with an error.
+
+### 9.4 Code References
 
 Reference specific files and line numbers:
 
@@ -560,15 +705,15 @@ Format: `filename:start_line-end_line` or `filename:line_number`
 
 ---
 
-## 9. Notes and Callouts
+## 10. Notes and Callouts
 
-### 9.1 Notes
+### 10.1 Notes
 
 ```markdown
 **Note**: This is an informational note.
 ```
 
-### 9.2 Important/Warning
+### 10.2 Important/Warning
 
 ```markdown
 **IMPORTANT**: Critical information that must be followed.
@@ -576,7 +721,7 @@ Format: `filename:start_line-end_line` or `filename:line_number`
 **WARNING**: Safety or regulatory warning.
 ```
 
-### 9.3 Block Quotes
+### 10.3 Block Quotes
 
 For longer notes or quoted text:
 
@@ -587,9 +732,9 @@ For longer notes or quoted text:
 
 ---
 
-## 10. Spacing and Line Breaks
+## 11. Spacing and Line Breaks
 
-### 10.1 Paragraph Spacing
+### 11.1 Paragraph Spacing
 
 - **One blank line** between paragraphs
 - **Two blank lines** after figure captions
@@ -598,9 +743,14 @@ For longer notes or quoted text:
 - **One blank line** before and after code blocks
 - **One blank line** before and after tables
 
-### 10.2 Section Breaks
+### 11.2 Section Breaks
 
-Use horizontal rules sparingly (Pandoc will add page breaks):
+The compiler forces exactly one page break: immediately after the
+auto-generated table of contents, so the TOC always lands on its own
+page ahead of the body content. That is the only certified page break
+in a Dilon document - Heading 2 does not force one automatically, and
+none of the body content otherwise does either. Insert one manually
+with a horizontal rule where you want it (use sparingly):
 
 ```markdown
 ---
@@ -608,9 +758,9 @@ Use horizontal rules sparingly (Pandoc will add page breaks):
 
 ---
 
-## 11. Special Pandoc Features
+## 12. Special Pandoc Features
 
-### 11.1 Math Equations (if needed)
+### 12.1 Math Equations (if needed)
 
 Inline math: `$E = mc^2$`
 
@@ -621,7 +771,7 @@ V_{out} = \frac{DAC_{code}}{4096} \times V_{REF}
 $$
 ```
 
-### 11.2 Footnotes
+### 12.2 Footnotes
 
 ```markdown
 Main text with a footnote.
@@ -657,11 +807,13 @@ This sentence needs a footnote.[^1]
 
 ---
 
-## 12. Custom Paragraph Styles
+## 13. Custom Paragraph Styles
 
 For content that requires specific formatting beyond Pandoc's automatic styling, you can apply custom paragraph styles using `@@@STYLE@@@` markers.
 
-### 12.1 Syntax
+**Form-only marker:** Documents compiled with the `dilon-document-form-compiler` skill (forms/travelers meant to be printed and filled out by hand) support one additional marker on top of everything in this guide: `@@@FORM_FIELD:FillLine@@@Label@@@END_FORM_FIELD@@@`, which becomes a label followed by a right-aligned, underscore-leadered fill-in blank. See that skill's `SKILL.md` for details - it does not apply to documents compiled with `dilon-document-compiler`.
+
+### 13.1 Syntax
 
 **IMPORTANT**: All custom paragraph styling requires both `@@@STYLE:StyleName@@@` START marker and `@@@END_STYLE@@@` END marker.
 
@@ -692,7 +844,7 @@ Content paragraph 2
 @@@END_STYLE@@@
 ```
 
-### 12.2 How It Works
+### 13.2 How It Works
 
 1. The compiler uses a **state machine** to scan the Word document after Pandoc conversion
 2. When it finds `@@@STYLE:StyleName@@@` at the start of a paragraph, it enters "searching for end" state
@@ -701,7 +853,7 @@ Content paragraph 2
 5. Markers are automatically removed from the final document
 6. Empty paragraphs (containing only markers) are deleted
 7. Leading/trailing whitespace is stripped after marker removal
-8. The style name must exist in the reference template (`TEMPLATE_Word_Signature.docx`)
+8. The style name must exist in the reference template (`TEMPLATE_Word_Base.docx`)
 
 **Processing Steps:**
 1. Find START marker (`@@@STYLE:StyleName@@@`)
@@ -711,7 +863,7 @@ Content paragraph 2
 5. Apply the specified style to all remaining paragraphs
 6. Reset and continue searching for next block
 
-### 12.3 Marker Rules
+### 13.3 Marker Rules
 
 **START Marker (`@@@STYLE:StyleName@@@`):**
 - Must be at the **beginning** of a paragraph (first non-whitespace text)
@@ -731,7 +883,7 @@ Content paragraph 2
 - ✅ Multiple paragraphs between markers (0 to 100+ paragraphs)
 - ✅ Markers in documentation examples (inside backticks) are preserved
 
-### 12.4 Common Use Cases
+### 13.4 Common Use Cases
 
 **IMPORTANT**: Code blocks with triple backticks automatically receive styling from Pandoc. Use native markdown code blocks for actual code:
 
@@ -783,11 +935,11 @@ REQ-001: System SHALL initialize within 100ms of power-on
 @@@END_STYLE@@@
 ```
 
-### 12.5 Creating Custom Styles
+### 13.5 Creating Custom Styles
 
 To add a new custom style for use with `@@@STYLE@@@` markers:
 
-1. Open `TEMPLATE_Word_Signature.docx`
+1. Open `TEMPLATE_Word_Base.docx`
 2. Go to Home → Styles → Create a Style
 3. Set **Style type** to "Paragraph" (not Character)
 4. Name the style (e.g., "SourceCode", "NoteBox", "Requirement")
@@ -803,7 +955,7 @@ To add a new custom style for use with `@@@STYLE@@@` markers:
 
 **Note**: Style names are case-sensitive and must match exactly.
 
-### 12.6 Documenting the Markers
+### 13.6 Documenting the Markers
 
 To show the marker syntax in documentation (like this guide), place the markers inside inline code backticks:
 
@@ -815,7 +967,7 @@ The markers will be preserved in backticks and displayed to the user as document
 
 ---
 
-## 13. Document Structure Template
+## 14. Document Structure Template
 
 ```markdown
 ---
@@ -824,9 +976,12 @@ author: "Your Name"
 department: "Engineering"
 doc_number: "DD_NAV3_XXX_NNN"
 current_revision: "1"
-regulatory_rep: "Name"
-quality_rep: "Name"
 department_head: "Name"
+signature_fields:
+  - department: "Regulatory"
+    name: "Name"
+  - department: "Quality"
+    name: "Name"
 revisions:
   - number: "1"
     description: "Initial release"
@@ -869,9 +1024,9 @@ Content goes here.
 
 ---
 
-## 13. Conversion to Word
+## 15. Conversion to Word
 
-### 13.1 Using the Compiler
+### 15.1 Using the Compiler
 
 ```bash
 python generate_dilon_doc.py input.md output.docx
@@ -882,20 +1037,20 @@ Or using PowerShell alias:
 Compile-DilonDoc input.md
 ```
 
-### 13.2 What Happens During Conversion
+### 15.2 What Happens During Conversion
 
 1. **YAML front matter** is parsed and used to populate templates
 2. **Markdown body** is converted to Word via Pandoc
 3. **Tables** are styled with "Table Grid" style (grid lines included)
 4. **Headings** are styled according to template (Heading 1, Heading 2, etc.)
 5. **Code blocks** are styled with "Source Code" style
-6. **Images** are embedded at original size
+6. **Images** are embedded at native size, or sized per a `{width=...}`/`{height=...}` attribute (see 4.2)
 7. **Figure captions** are styled with "Caption" style
-8. **All styles** come from `TEMPLATE_Word_Signature.docx` reference document
+8. **All styles** come from `TEMPLATE_Word_Base.docx` reference document
 
 ---
 
-## 14. Advanced: Grid Tables (For Complex Content)
+## 16. Advanced: Grid Tables (For Complex Content)
 
 Use grid tables when you need multi-paragraph cells or complex block elements:
 
@@ -924,7 +1079,7 @@ Use grid tables when you need multi-paragraph cells or complex block elements:
 
 ---
 
-## 15. Checklist Before Generating Document
+## 17. Checklist Before Generating Document
 
 - [ ] YAML front matter complete and accurate
 - [ ] No manual numbers typed into heading text (Word auto-numbers Heading 2/3/4)
@@ -932,14 +1087,13 @@ Use grid tables when you need multi-paragraph cells or complex block elements:
 - [ ] Tables use pipe format with proper alignment
 - [ ] Code blocks have language identifiers
 - [ ] File/line references use format `filename:line` or `filename:start-end`
-- [ ] All PlantUML diagrams regenerated as PNG
 - [ ] No trailing whitespace or tabs
 - [ ] Document ends with newline
 - [ ] All internal links reference correct section numbers
 
 ---
 
-## 16. Common Mistakes to Avoid
+## 18. Common Mistakes to Avoid
 
 ❌ **Don't** use HTML in tables (use pipe tables or grid tables instead)
 ❌ **Don't** manually add grid lines or borders to markdown tables
@@ -955,7 +1109,7 @@ Use grid tables when you need multi-paragraph cells or complex block elements:
 
 ---
 
-## 17. Style Reference
+## 19. Style Reference
 
 | Element | Markdown Syntax | Word Style Applied |
 |---------|----------------|-------------------|
@@ -978,9 +1132,9 @@ Use grid tables when you need multi-paragraph cells or complex block elements:
 
 ---
 
-## 18. Required Template Styles
+## 20. Required Template Styles
 
-Ensure these styles are properly defined in `TEMPLATE_Word_Signature.docx`:
+Ensure these styles are properly defined in `TEMPLATE_Word_Base.docx`:
 
 ### Paragraph Styles:
 - **Heading 1-8** - Linked to a shared multilevel list (Heading 2/3/4 -> "N."/"N.M"/"N.M.P") so Word auto-numbers sections; see Section 2

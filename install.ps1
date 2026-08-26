@@ -171,8 +171,9 @@ Write-Host ""
 Write-Host "Step 3: Installing Python dependencies..." -ForegroundColor Cyan
 Write-Host ""
 
-# Install Python packages required by the dilon-document-compiler skill
-$requiredPackages = @("python-docx", "python-docx-template", "docxcompose", "pyyaml>=6.0")
+# Install Python packages required by the dilon-document-compiler,
+# dilon-document-form-compiler, and dilon-document-extractor skills
+$requiredPackages = @("python-docx", "docxcompose>=2.2.0", "pyyaml>=6.0", "pymupdf", "jinja2")
 
 foreach ($package in $requiredPackages) {
     Write-Host "  -> Installing $package..." -ForegroundColor Gray
@@ -187,7 +188,7 @@ Write-Host ""
 
 # Install Compile-DilonDoc PowerShell function
 $compilerScriptPath = Join-Path $RepoRoot "skills\dilon-document-compiler\scripts\generate_dilon_doc.py"
-$signatureTemplatePath = Join-Path $RepoRoot "skills\dilon-document-compiler\templates\TEMPLATE_Word_Signature.docx"
+$signatureTemplatePath = Join-Path $RepoRoot "skills\dilon-document-compiler\templates\TEMPLATE_Word_Base.docx"
 $contentTemplatePath = Join-Path $RepoRoot "skills\dilon-document-compiler\templates\TEMPLATE_Word_Content.docx"
 
 Write-Host "  -> Adding Compile-DilonDoc command to PowerShell profile..." -ForegroundColor Gray

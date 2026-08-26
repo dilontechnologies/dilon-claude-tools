@@ -21,18 +21,49 @@ If it reports any `[FAIL]` line, stop and tell the user exactly which dependency
 
 ## Compiling
 
-Invoke the script with explicit template paths — always pass all four arguments, never rely on the script's own default template lookup:
+Invoke the script with an explicit base template path — never rely on the script's own default template lookup:
 
 ```
-python scripts/generate_dilon_doc.py <input.md> <output.docx> <signature_template> <content_template>
+python scripts/generate_dilon_doc.py <input.md> <output.docx> <base_template>
 ```
 
 - `<input.md>`: the markdown file to compile (must have YAML front matter — if it doesn't, point the user at the `dilon-document-writer` skill first).
 - `<output.docx>`: defaults to the same name as the input with a `.docx` extension if the user doesn't specify one.
-- `<signature_template>`: defaults to `templates/TEMPLATE_Word_Signature.docx` in this skill's directory, unless the user supplies a custom one.
-- `<content_template>`: defaults to `templates/TEMPLATE_Word_Content.docx` in this skill's directory, unless the user supplies a custom one.
+- `<base_template>`: defaults to `templates/TEMPLATE_Word_Base.docx` at the repo root, unless the user supplies a custom one. Header/footer/styles only — the title page, signature-approval table, and revision table are all built programmatically by the script and inserted around the base template's header/footer.
 
 After the script exits, verify the output file now exists. Report the script's stdout/stderr to the user on failure; report the output path on success.
+
+Compilation halts (non-zero exit, clear error message) rather than producing a silently-broken document for:
+- An ordered (`#.`) list nested more than three levels deep
+- A `@@@CONTINUE:#list:name@@@` marker whose `name` has no matching `[]{#list:name}` anchor, or a `[]{#list:name}` anchor declared more than once
+- A malformed `@@@STEPS@@@`/`@@@END_STEPS@@@` pairing (unclosed or nested)
+- A `[](#fig:label)`, `[](#sec:label)`, or `[](#step:label)` reference with no matching `{#fig:label}`/`{#sec:label}`/`{#step:label}` anchor anywhere in the document, or such an anchor declared more than once
+
+## Suggesting a resize pass
+
+After a successful compile, scan the **input markdown** for images and tables that have no explicit size:
+- An image (`![...](...)`) whose trailing `{...}` attribute block (if any) has neither `width=` nor `height=`.
+- A pipe/grid table with no `@@@TABLE_COLUMNS:...@@@` marker immediately before it.
+
+If any are found, suggest the resize-and-reapply workflow below - don't run it unprompted:
+
+> "This document has N image(s)/table(s) with no explicit size, so they compiled at their default/native size. If you'd like to fine-tune the layout, open the .docx in Word, resize them there, save, and let me know - I can read the new sizes back and write them into the markdown so they stick on the next compile."
+
+## Reading resized dimensions back into the markdown
+
+When the user asks to apply sizes from a document they resized in Word:
+
+```
+python scripts/read_docx_sizes.py <resized.docx>
+```
+
+This prints a JSON array of `{"type": "image", "index": N, "width_in": ..., "height_in": ...}` and `{"type": "table", "index": N, "column_widths_in": [...]}` entries - `index` is 0-based per type, in document order, and already excludes the signature-approval/revision-history tables.
+
+Before writing anything back:
+1. Count the images and tables in the **source markdown** (the same ones the "no explicit size" scan above looks for, plus any that already had a size). Compare against the script's image/table counts.
+2. If the counts don't match, stop and tell the user - the Nth image/table in the docx no longer corresponds to the Nth image/table in the markdown (content was likely added, removed, or reordered since compiling), and applying sizes positionally would silently mislabel them. Ask the user to confirm which markdown element each entry corresponds to, or to recompile from the current markdown first.
+3. If the counts match, apply positionally: for each image entry, set `width=` and `height=` (e.g. `width=4in height=2in`, using that entry's `width_in`/`height_in` values) in that image's trailing `{...}` block (add the block if it doesn't have one yet, preserving any existing `#fig:` id); for each table entry, insert or replace the `@@@TABLE_COLUMNS:w1,w2,...@@@` marker immediately before that table using that entry's `column_widths_in` values.
+4. Report what was changed so the user can review before recompiling.
 
 ## Input format reference
 
@@ -45,9 +76,12 @@ author: "Author Name"
 department: "Engineering"
 doc_number: "DD_XXX_XXXXX"
 current_revision: "01"
-regulatory_rep: "Name"
-quality_rep: "Name"
 department_head: "Name"
+signature_fields:
+  - department: "Regulatory"
+    name: "Name"
+  - department: "Quality"
+    name: "Name"
 revisions:
   - number: "00"
     description: "Initial release"

@@ -25,6 +25,36 @@ Python validation script that validates generated outputs:
 ### `STYLING_TEST_TEMPLATE.md` / `STYLING_TEST_TEMPLATE.docx`
 Example template files used to test styling and compilation features.
 
+**Note:** `run_tests.py` has grown well beyond the 6-check summary below
+- it now also directly unit-tests helpers in `lib/dilon_docx_common.py`
+and `skills/dilon-document-compiler/scripts/step_numbering.py` (figure/
+step numbering, `@@@STEPS@@@` handling), and includes end-to-end
+compiler coverage for:
+- `#.` ordered lists, restyled onto the shared "Dilon Step List" style
+- Three-level ordered-list nesting cap (a 4th level fails compilation
+  with a clear error)
+- List continuation (`[]{#list:name}` / `@@@CONTINUE:#list:name@@@`),
+  including missing-anchor and duplicate-anchor failure cases
+- Section-scoped `@@@STEPS@@@` numbering: automatic continuation across
+  multiple blocks within one `##` section, restart at a new section,
+  and a composite `Step <section>-<n>` cross-reference field
+  (`[](#step:label)`); a malformed `@@@STEPS@@@`/`@@@END_STEPS@@@`
+  pairing (unclosed, nested, or left open across a `##` section
+  boundary) halts compilation with `StepBlockError` - duplicate/missing
+  `{#step:label}` anchors are covered by the generalized framework below
+- A generalized `[](#fig:label)`/`[](#sec:label)`/`[](#step:label)`
+  cross-reference framework (`preprocess_reference_markers()`/
+  `resolve_reference_markers()` in `lib/dilon_docx_common.py`, driven
+  by a per-type registry): figure and section bookmarks are narrowed
+  post-conversion (`apply_figure_captions()`/`narrow_section_bookmarks()`)
+  so a `REF` field against them can't pull in unrelated caption/body
+  text, and an unresolved or duplicate `fig:`/`sec:`/`step:` anchor
+  halts compilation with `ReferenceResolutionError`/`StepBlockError`
+  rather than degrading silently
+`STYLING_TEST_TEMPLATE.md`'s own "List Examples", "Numbered Step
+List Examples", and "Figures and Images" sections exercise the same
+features for manual Word-side (Ctrl+click, F9) verification.
+
 ## Running Tests
 
 Run all tests from the repository root:
@@ -68,7 +98,7 @@ Test outputs are created in `tests/test-output/`:
 - Must have valid YAML front matter (between `---` delimiters)
 - Required YAML fields:
   - `title`, `author`, `department`, `doc_number`
-  - `current_revision`, `regulatory_rep`, `quality_rep`, `department_head`
+  - `current_revision`, `department_head`, `signature_fields` (array of `department`/`name` pairs)
   - `revisions` (array)
 - Each revision must have:
   - `number`, `description`, `eco_number`, `eco_date`

@@ -1,4 +1,4 @@
-"""Preflight dependency check for the dilon-document-compiler skill."""
+"""Preflight dependency check for the dilon-document-form-compiler skill."""
 
 import importlib
 import shutil
