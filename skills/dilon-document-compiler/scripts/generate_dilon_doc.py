@@ -106,9 +106,11 @@ def create_revision_table(revisions, available_width):
     table = temp_doc.add_table(rows=2 + len(revisions), cols=4)
     table.style = 'Table Grid'
 
-    # REV #/ECO #/DATE widths match an approved, hand-tuned Dilon Word
-    # document's own revision table; DESCRIPTION absorbs whatever width
-    # is left so the table always fills the page's full content width.
+    # ECO #/DATE widths match an approved, hand-tuned Dilon Word document's
+    # own revision table; REV # is widened past that reference (805 ->
+    # 1150 twips) to comfortably fit extended prototype-revision values
+    # like "02-A" without wrapping. DESCRIPTION absorbs whatever width is
+    # left so the table always fills the page's full content width.
     # apply_table_column_widths() (not a plain table.columns[idx].width=
     # assignment, which only sets the tblGrid definition, not per-cell
     # width or autofit=False - Word's AutoFit then silently recalculates
@@ -116,7 +118,7 @@ def create_revision_table(revisions, available_width):
     # the widths actually render as specified.
     apply_table_column_widths(
         table,
-        [Twips(805).inches, 'x', Twips(1620).inches, Twips(1535).inches],
+        [Twips(1150).inches, 'x', Twips(1620).inches, Twips(1535).inches],
         available_width.inches,
     )
 

@@ -354,6 +354,26 @@ def test_extract_header_footer_metadata_split_cells():
     check(fields.get("doc_number") == "WI-00077", f"doc_number still parsed when split across cells, got {fields.get('doc_number')!r}")
 
 
+def test_extract_header_footer_metadata_prototype_revision():
+    """Prototype revision numbers like "02-A" (major number + alphabetic
+    prototype suffix) aren't digit-only, so the header/footer Rev
+    patterns must capture the full value instead of stopping at the
+    leading digits."""
+    import extract_docx as ex
+    doc = Document()
+    section = doc.sections[0]
+    header_table = section.header.add_table(rows=2, cols=4, width=Inches(6))
+    header_table.rows[0].cells[1].text = "WI:\nNav 3, Detector Head Assembly"
+    header_table.rows[0].cells[2].text = "Rev 02-A"
+    header_table.rows[1].cells[1].text = "Number:\nWI-00077"
+    section.footer.paragraphs[0].text = "WI-00077 Rev 02-A\tECO-000046\tRevision Date: 03/4/2025"
+
+    fields = ex.extract_header_footer_metadata(doc)
+    check(fields.get("current_revision") == "02-A", f"prototype current_revision parsed in full, got {fields.get('current_revision')!r}")
+    check(fields.get("footer_eco_number") == "ECO-000046", f"footer_eco_number still parsed alongside a prototype revision, got {fields.get('footer_eco_number')!r}")
+    check(fields.get("footer_eco_date") == "03/4/2025", f"footer_eco_date still parsed alongside a prototype revision, got {fields.get('footer_eco_date')!r}")
+
+
 def test_strip_figure_prefix():
     import extract_docx as ex
     check(
@@ -779,6 +799,7 @@ def main():
     test_build_markdown_body_step_run_closes_around_image()
     test_extract_flags_footer_revision_eco_mismatch()
     test_extract_no_warning_when_footer_matches_revision()
+    test_extract_header_footer_metadata_prototype_revision()
     test_slugify_dedup()
     test_extract_full_fixture()
     test_table_to_markdown_pipe()

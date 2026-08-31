@@ -208,9 +208,12 @@ def extract_revisions(table):
 
 
 DOC_NUMBER_RE = re.compile(r'Number:\s*([A-Za-z]{2,}-\d+)')
-REV_RE = re.compile(r'Rev\s+(\d+)')
+# Revision values aren't digit-only: prototype revisions extend the
+# format to e.g. "02-A" (major number + alphabetic prototype suffix), so
+# the capture group accepts alphanumerics plus internal '.'/'-'.
+REV_RE = re.compile(r'Rev\s+([A-Za-z0-9][A-Za-z0-9.\-]*)')
 FOOTER_LINE_RE = re.compile(
-    r'([A-Za-z]{2,}-\d+)\s+Rev\s+(\d+)\s+(ECO-\d+)\s+Revision Date:\s*([\d/]+)'
+    r'([A-Za-z]{2,}-\d+)\s+Rev\s+([A-Za-z0-9][A-Za-z0-9.\-]*)\s+(ECO-\d+)\s+Revision Date:\s*([\d/]+)'
 )
 FIGURE_PREFIX_RE = re.compile(r'^Figure\s+[\d.]+\s*[:\-]\s*', re.IGNORECASE)
 HEADER_LABEL_VALUE_RE = re.compile(r'^([A-Za-z][A-Za-z \-]{0,20}):\s*(.*)$', re.DOTALL)

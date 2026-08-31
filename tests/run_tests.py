@@ -606,13 +606,62 @@ def test_compile_header_signature_revision_widths():
 
     revision_table = next(t for t in doc.tables if header_row(t)[0] == "REVISION HISTORY")
     rev_widths = grid_dxa(revision_table)
-    check(rev_widths[0] == 805 and rev_widths[2] == 1620 and rev_widths[3] == 1535,
+    check(rev_widths[0] == 1150 and rev_widths[2] == 1620 and rev_widths[3] == 1535,
           f"revision table REV#/ECO#/DATE columns match the reference document's widths (got {rev_widths})")
     check(sum(rev_widths) == available_width_twips,
           f"revision table fills the full page content width (got {sum(rev_widths)}, expected {available_width_twips})")
     check(cell_dxa(revision_table, 2) == rev_widths,
           f"revision table's actual per-cell widths match the tblGrid definition, not just the grid (got {cell_dxa(revision_table, 2)})")
     check(is_fixed_layout(revision_table), "revision table uses a fixed layout, so Word can't AutoFit its columns away")
+
+
+def test_compile_extended_prototype_revision_number():
+    """Regression test: prototype revision numbers like "02-A" (major
+    number + alphabetic prototype suffix) must round-trip intact through
+    the revision table, running header, and running footer - none of them
+    truncate or reformat the value."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_prototype_revision.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_prototype_revision.docx"
+    prototype_markdown = SAMPLE_MARKDOWN.replace(
+        'current_revision: "00"', 'current_revision: "02-A"'
+    ).replace(
+        '  - number: "00"', '  - number: "02-A"'
+    )
+    input_md.write_text(prototype_markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for an extended prototype revision number")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+
+    def header_row(table):
+        return [c.text for c in table.rows[0].cells]
+
+    revision_table = next(t for t in doc.tables if header_row(t)[0] == "REVISION HISTORY")
+    rev_number_cell = revision_table.rows[2].cells[0].text
+    check(rev_number_cell == "02-A", f"revision table REV # cell holds the full prototype revision (got {rev_number_cell!r})")
+
+    header_rev_text = doc.sections[0].header.tables[0].rows[0].cells[2].text
+    check("Rev 02-A" in header_rev_text, f"running header shows the full prototype revision (got {header_rev_text!r})")
+
+    footer_id_text = doc.sections[0].footer.tables[0].rows[0].cells[0].text
+    check("Rev 02-A" in footer_id_text, f"running footer shows the full prototype revision (got {footer_id_text!r})")
 
 
 def test_compile_footer_table_layout():
@@ -2593,6 +2642,7 @@ def main():
     test_compile_has_no_leading_blank_paragraph()
     test_compile_has_no_title_page()
     test_compile_header_signature_revision_widths()
+    test_compile_extended_prototype_revision_number()
     test_compile_footer_table_layout()
     test_compile_bom_front_matter()
     test_compile_table_marker_no_blank_line()
