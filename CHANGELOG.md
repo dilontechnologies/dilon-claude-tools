@@ -5,6 +5,14 @@ All notable changes to the Dilon Claude Tools MCP Server will be documented in t
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2026-09-01
+
+### Added
+- `dilon-document-compiler` / `dilon-document-form-compiler`: `<output.docx>` is now optional - when omitted, the compiled file is named `<doc_number> Rev <current_revision>.docx` next to the input, derived from front matter
+
+### Fixed
+- `dilon-document-extractor` / `dilon-document-compiler`: revision numbers combining a major number with an alphabetic prototype suffix (e.g. `02-A`) now round-trip correctly through compile and re-extraction; the revision table's REV # column was widened to fit them
+
 ## [2.0.2] - 2026-08-26
 
 ### Added
