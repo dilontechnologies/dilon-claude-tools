@@ -5,7 +5,7 @@ page, no signature page, no table of contents) from Dilon markdown with
 YAML front matter.
 
 Usage:
-    python generate_dilon_form.py <input.md> <output.docx> [base_template.docx]
+    python generate_dilon_form.py <input.md> [output.docx] [base_template.docx]
 """
 
 import sys
@@ -21,6 +21,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT / "lib"))
 from dilon_docx_common import (  # noqa: E402
     extract_yaml_and_markdown,
+    default_output_filename,
     render_jinja,
     markdown_to_docx,
     apply_styles,
@@ -46,13 +47,16 @@ except ImportError:
     protect_field_grid_line_breaks = None
 
 
-def generate_form_document(markdown_path, output_path, form_template_path=None):
+def generate_form_document(markdown_path, output_path=None, form_template_path=None):
     """
     Generate a form Word document.
 
     Args:
         markdown_path: Path to Markdown file with YAML front matter
-        output_path: Path to save the final Word document
+        output_path: Path to save the final Word document - defaults to
+            "<doc_number> Rev <current_revision>.docx" next to the input
+            (see default_output_filename() in lib/dilon_docx_common.py)
+            if not given.
         form_template_path: Path to the header/footer + styles template
             (no signature-approval table) - defaults to the same
             templates/TEMPLATE_Word_Base.docx that dilon-document-compiler
@@ -74,6 +78,16 @@ def generate_form_document(markdown_path, output_path, form_template_path=None):
 
     print(f"Reading Markdown file: {markdown_path}")
     metadata, markdown_body = extract_yaml_and_markdown(markdown_path)
+
+    if output_path is None:
+        try:
+            output_path = Path(markdown_path).resolve().parent / default_output_filename(metadata)
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+    else:
+        output_path = Path(output_path)
+
     markdown_body = render_jinja(markdown_body, metadata)
     if protect_field_grid_line_breaks is not None:
         markdown_body = protect_field_grid_line_breaks(markdown_body)
@@ -138,12 +152,12 @@ def generate_form_document(markdown_path, output_path, form_template_path=None):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: python generate_dilon_form.py <input.md> <output.docx> [base_template.docx]")
+    if len(sys.argv) < 2:
+        print("Usage: python generate_dilon_form.py <input.md> [output.docx] [base_template.docx]")
         sys.exit(1)
 
     markdown_path = Path(sys.argv[1])
-    output_path = Path(sys.argv[2])
+    output_path = Path(sys.argv[2]) if len(sys.argv) > 2 else None
     form_template_path = Path(sys.argv[3]) if len(sys.argv) > 3 else None
 
     try:

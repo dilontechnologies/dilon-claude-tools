@@ -28,7 +28,7 @@ python scripts/generate_dilon_doc.py <input.md> <output.docx> <base_template>
 ```
 
 - `<input.md>`: the markdown file to compile (must have YAML front matter — if it doesn't, point the user at the `dilon-document-writer` skill first).
-- `<output.docx>`: defaults to the same name as the input with a `.docx` extension if the user doesn't specify one.
+- `<output.docx>`: optional. If omitted, the script computes `<doc_number> Rev <current_revision>.docx` next to the input from the front matter (e.g. `DD_001_00001 Rev 01.docx`) — pass an explicit path only when the user wants a different name/location. Compilation halts with a clear error if `doc_number`/`current_revision` are missing and no output path was given.
 - `<base_template>`: defaults to `templates/TEMPLATE_Word_Base.docx` at the repo root, unless the user supplies a custom one. Header/footer/styles only — the title page, signature-approval table, and revision table are all built programmatically by the script and inserted around the base template's header/footer.
 
 After the script exits, verify the output file now exists. Report the script's stdout/stderr to the user on failure; report the output path on success.

@@ -12,9 +12,10 @@ This script:
 4. Composes all parts into the final Word document
 
 Usage:
-    python generate_dilon_doc.py <input.md> <output.docx>
+    python generate_dilon_doc.py <input.md> [output.docx] [base_template.docx]
 
 Example:
+    python generate_dilon_doc.py MAP-00001_Requirements.md
     python generate_dilon_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx
 
 The Pandoc-conversion, Word-styling, and header/footer-building helpers
@@ -47,6 +48,7 @@ from dilon_docx_common import (  # noqa: E402
     insert_page_break_after_toc,
     convert_horizontal_rules_to_page_breaks,
     extract_yaml_and_markdown,
+    default_output_filename,
     set_update_fields_on_open,
     compose_documents,
     ensure_blank_line_after_table_markers,
@@ -331,13 +333,16 @@ def _insert_table_before_section_properties(document, table):
         body.append(separator)
 
 
-def generate_requirements_document(markdown_path, output_path, signature_template_path=None):
+def generate_requirements_document(markdown_path, output_path=None, signature_template_path=None):
     """
     Generate final requirements Word document.
 
     Args:
         markdown_path: Path to Markdown file with YAML front matter
-        output_path: Path to save final Word document
+        output_path: Path to save final Word document - defaults to
+            "<doc_number> Rev <current_revision>.docx" next to the input
+            (see default_output_filename() in lib/dilon_docx_common.py)
+            if not given.
         signature_template_path: Path to the base template (Part A) -
             header/footer/styles only; no Jinja fields, no docxtpl
             involved anymore. See populate_header()/populate_footer() in
@@ -360,6 +365,16 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
 
     # Extract YAML metadata and Markdown body
     metadata, markdown_body = extract_yaml_and_markdown(markdown_path)
+
+    if output_path is None:
+        try:
+            output_path = Path(markdown_path).resolve().parent / default_output_filename(metadata)
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+    else:
+        output_path = Path(output_path)
+
     markdown_body = render_jinja(markdown_body, metadata)
     markdown_body = preprocess_reference_markers(markdown_body)
     markdown_body = ensure_blank_line_around_steps_markers(markdown_body)
@@ -486,15 +501,16 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: python generate_requirements_doc.py <input.md> <output.docx> [base_template.docx]")
+    if len(sys.argv) < 2:
+        print("Usage: python generate_requirements_doc.py <input.md> [output.docx] [base_template.docx]")
         print("\nExample:")
+        print("  python generate_requirements_doc.py MAP-00001_Requirements.md")
         print("  python generate_requirements_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx")
         print("  python generate_requirements_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx custom_base.docx")
         sys.exit(1)
 
     markdown_path = Path(sys.argv[1])
-    output_path = Path(sys.argv[2])
+    output_path = Path(sys.argv[2]) if len(sys.argv) > 2 else None
     signature_template_path = Path(sys.argv[3]) if len(sys.argv) > 3 else None
 
     try:

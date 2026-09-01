@@ -543,6 +543,70 @@ def test_generate_form_document():
     )
 
 
+def test_compile_default_output_filename_end_to_end():
+    """Invoking with only <input.md> (no output, no template arg) should
+    name the compiled file '<doc_number> Rev <current_revision>.docx' next
+    to the input, using SAMPLE_FORM_MARKDOWN's doc_number/current_revision."""
+    input_md = TEST_OUTPUT_DIR / "form_test_default_name.md"
+    input_md.write_text(SAMPLE_FORM_MARKDOWN, encoding="utf-8")
+    expected_output = TEST_OUTPUT_DIR / "FO-99999 Rev 00.docx"
+    if expected_output.exists():
+        expected_output.unlink()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(FORM_COMPILER_SCRIPT),
+            str(input_md),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "form compiler exits 0 with only the input arg (default output filename)")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(expected_output.exists(), f"'{expected_output.name}' created via default output filename")
+
+
+MISSING_DOC_NUMBER_FORM_MARKDOWN = (
+    '---\n'
+    'title: "Missing Doc Number Form Test"\n'
+    'author: "Test Suite"\n'
+    'department: "Engineering"\n'
+    'department_head: "Test Head"\n'
+    'signature_fields: []\n'
+    'revisions: []\n'
+    '---\n'
+    '\n'
+    'This form has no doc_number/current_revision.\n'
+)
+
+
+def test_compile_default_output_filename_missing_doc_number_fails_clearly():
+    """With no output arg and no doc_number/current_revision in front
+    matter, the form compiler can't compute a default filename - it
+    should halt with a clear error rather than minting ' Rev .docx'."""
+    input_md = TEST_OUTPUT_DIR / "form_test_missing_doc_number.md"
+    input_md.write_text(MISSING_DOC_NUMBER_FORM_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(FORM_COMPILER_SCRIPT),
+            str(input_md),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode != 0, "form compiler reports a non-zero exit code when doc_number/current_revision are missing and no output path is given")
+    check("doc_number" in result.stderr + result.stdout, "error message mentions the missing doc_number/current_revision")
+
+
 def test_underscore_until_end_of_line_body_paragraph():
     import form_fields as ff
     doc = Document()
@@ -1322,6 +1386,8 @@ def main():
     TEST_OUTPUT_DIR.mkdir(parents=True)
 
     test_generate_form_document()
+    test_compile_default_output_filename_end_to_end()
+    test_compile_default_output_filename_missing_doc_number_fails_clearly()
     test_underscore_until_end_of_line_body_paragraph()
     test_underscore_until_end_of_line_in_table_cell()
     test_apply_form_fields_marker()

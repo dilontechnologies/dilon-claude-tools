@@ -1448,6 +1448,30 @@ def extract_yaml_and_markdown(md_file):
         return {}, content
 
 
+def default_output_filename(metadata):
+    """
+    Build the default compiled-output filename from front-matter metadata:
+    "<doc_number> Rev <current_revision>.docx" - the same
+    "{doc_number} Rev {current_revision}" convention populate_footer()
+    already renders into the running footer, so the filename and the
+    footer text stay in sync.
+
+    Raises:
+        ValueError: if doc_number or current_revision is missing/empty -
+            callers should surface this as a clear compilation error
+            rather than minting a filename like " Rev .docx".
+    """
+    doc_number = metadata.get('doc_number')
+    current_revision = metadata.get('current_revision')
+    if not doc_number or not current_revision:
+        raise ValueError(
+            "Cannot compute a default output filename: front matter is "
+            f"missing doc_number and/or current_revision (doc_number={doc_number!r}, "
+            f"current_revision={current_revision!r}). Pass an explicit output path instead."
+        )
+    return f"{doc_number} Rev {current_revision}.docx"
+
+
 _TABLE_MARKER_RUN = re.compile(
     r'^(?:[ \t]*@@@TABLE_(?:STYLE:\w+|COLUMNS:[\w.,\s]+)@@@[ \t]*\n)+',
     re.MULTILINE,
