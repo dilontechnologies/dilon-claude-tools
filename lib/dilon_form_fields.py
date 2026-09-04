@@ -54,12 +54,22 @@ def _form_section_ranges(doc):
     section, a second @@@FORM_SECTION@@@ before a preceding one was
     closed (nesting), or an @@@FORM_SECTION@@@ left open at
     end-of-document.
+
+    lxml only guarantees a stable id() for an element's Python proxy while
+    a live reference to it exists elsewhere - otherwise a later access to
+    the same underlying XML node can produce a new proxy object with a
+    different id(), silently breaking any `id(x) in in_section_elements`
+    check done after this function returns. To keep the ids in
+    in_section_elements valid for callers that compare against them later
+    (apply_form_fields), the in-section element objects are pinned alive
+    for doc's lifetime via doc._form_section_keepalive.
     """
     body = doc.element.body
     in_section_elements = set()
     open_start = None
     pending = []
     to_remove = []
+    keepalive = []
 
     for child in list(body):
         if child.tag != qn('w:p'):
@@ -84,6 +94,7 @@ def _form_section_ranges(doc):
                     "@@@END_FORM_SECTION@@@ found with no matching open @@@FORM_SECTION@@@"
                 )
             in_section_elements.update(id(el) for el in pending)
+            keepalive.extend(pending)
             to_remove.append(child)
             open_start = None
             pending = []
@@ -97,6 +108,8 @@ def _form_section_ranges(doc):
 
     for el in to_remove:
         el.getparent().remove(el)
+
+    doc._form_section_keepalive = keepalive
 
     return in_section_elements, bool(to_remove)
 
@@ -609,23 +622,44 @@ def underscore_until_end_of_line(paragraph, width_override=None, num_lines=1):
         new_paragraph.add_run("\t")
 
 
+def _top_level_body_ancestor(paragraph, body):
+    """Walk up from paragraph's XML element to the topmost ancestor that
+    is a direct child of body - the paragraph itself if it's body-level,
+    or the enclosing <w:tbl> if it lives inside a table cell."""
+    el = paragraph._p
+    while el.getparent() is not None and el.getparent() != body:
+        el = el.getparent()
+    return el
+
+
 def apply_form_fields(docx_file):
     """
     Scan docx_file for @@@FORM_FIELD:Name@@@...@@@END_FORM_FIELD@@@
-    markers and apply the matching form-specific function. Currently
-    supports 'FillLine' (underscore_until_end_of_line). Unrecognized
-    function names are left as plain text with a printed warning, matching
-    the shared module's warn-and-degrade convention - never a hard
-    failure.
+    markers and apply the matching form-specific function. Every marker
+    must fall inside a @@@FORM_SECTION@@@...@@@END_FORM_SECTION@@@ range
+    (_form_section_ranges()) - a marker found outside one raises
+    FormSectionError rather than being silently processed. Currently
+    supports 'FillLine', 'FieldGrid', and 'Form_Section_Header'.
+    Unrecognized function names are left as plain text with a printed
+    warning, matching the shared module's warn-and-degrade convention for
+    everything except the section requirement itself.
     """
     doc = Document(docx_file)
-    changed = False
     section_number = 0
+
+    in_section_elements, changed = _form_section_ranges(doc)
 
     for para in list(_iter_all_paragraphs(doc)):
         match = FORM_FIELD_RE.search(para.text)
         if not match:
             continue
+
+        ancestor = _top_level_body_ancestor(para, doc.element.body)
+        if id(ancestor) not in in_section_elements:
+            raise FormSectionError(
+                f"@@@FORM_FIELD:...@@@ marker found outside any "
+                f"@@@FORM_SECTION@@@...@@@END_FORM_SECTION@@@ range: {para.text!r}"
+            )
 
         function_name, block_width, label = match.group(1), match.group(2), match.group(3)
         if function_name == "FillLine":

@@ -15,6 +15,8 @@ revisions:
     eco_date: "YYYY-MM-DD"
 ---
 
+@@@FORM_SECTION@@@
+
 @@@FORM_FIELD:Form_Section_Header@@@[Section Title]@@@END_FORM_FIELD@@@
 
 @@@FORM_FIELD:FieldGrid@@@
@@ -22,5 +24,7 @@ revisions:
 @@@END_FORM_FIELD@@@
 
 @@@FORM_FIELD:FillLine@@@[Label]:@@@END_FORM_FIELD@@@
+
+@@@END_FORM_SECTION@@@
 
 [Add additional sections/fields as needed]
