@@ -16,15 +16,16 @@ from docx import Document
 from docx.shared import Inches
 
 REPO_ROOT = Path(__file__).parent.parent
-FORM_COMPILER_DIR = REPO_ROOT / "skills" / "dilon-document-form-compiler"
-SCRIPTS_DIR = FORM_COMPILER_DIR / "scripts"
+# dilon-document-form-compiler was retired - dilon-document-compiler's
+# generate_dilon_doc.py now compiles forms too, via include_front_matter:
+# false in the front matter.
+COMPILER_DIR = REPO_ROOT / "skills" / "dilon-document-compiler"
+SCRIPTS_DIR = COMPILER_DIR / "scripts"
 FORM_WRITER_DIR = REPO_ROOT / "skills" / "dilon-document-form-writer"
 FORM_TEMPLATE_PATH = FORM_WRITER_DIR / "TEMPLATE_Form.md"
-# Shared with dilon-document-compiler - both skills use the same
-# header/footer/styles-only base template, no form-specific copy.
 BASE_TEMPLATE = REPO_ROOT / "templates" / "TEMPLATE_Word_Base.docx"
 CHECK_DEPS_SCRIPT = SCRIPTS_DIR / "check_deps.py"
-FORM_COMPILER_SCRIPT = SCRIPTS_DIR / "generate_dilon_form.py"
+FORM_COMPILER_SCRIPT = SCRIPTS_DIR / "generate_dilon_doc.py"
 TEST_OUTPUT_DIR = Path(__file__).parent / "form-test-output"
 
 SHEBANG_GUARDED_SCRIPTS = [
@@ -57,6 +58,7 @@ SAMPLE_FORM_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "FO-99999"\n'
     'current_revision: "00"\n'
+    'include_front_matter: false\n'
     'department_head: "Test Head"\n'
     'signature_fields:\n'
     '  - department: "Regulatory"\n'
@@ -84,6 +86,7 @@ FIELD_GRID_PERMUTATIONS_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "FO-88888"\n'
     'current_revision: "00"\n'
+    'include_front_matter: false\n'
     'department_head: "Test Head"\n'
     'signature_fields:\n'
     '  - department: "Regulatory"\n'
@@ -310,6 +313,7 @@ FIELD_GRID_TITLE_ROW_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "FO-77778"\n'
     'current_revision: "00"\n'
+    'include_front_matter: false\n'
     'department_head: "Test Head"\n'
     'signature_fields:\n'
     '  - department: "Regulatory"\n'
@@ -391,6 +395,7 @@ FO_00127_REPLICA_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "FO-00127"\n'
     'current_revision: "01"\n'
+    'include_front_matter: false\n'
     'department_head: "Test Head"\n'
     'signature_fields:\n'
     '  - department: "Regulatory"\n'
@@ -1348,6 +1353,7 @@ def test_form_section_header_compiles_through_full_pipeline():
         'title: "Section Header Test"\n'
         'doc_number: "FO-77777"\n'
         'current_revision: "00"\n'
+        'include_front_matter: false\n'
         '---\n'
         '\n'
         '@@@FORM_SECTION@@@\n'
@@ -1398,6 +1404,7 @@ def test_form_compile_has_no_leading_blank_paragraph():
         'title: "No Leading Blank Test"\n'
         'doc_number: "FO-55555"\n'
         'current_revision: "00"\n'
+        'include_front_matter: false\n'
         '---\n'
         '\n'
         '@@@FORM_SECTION@@@\n'
