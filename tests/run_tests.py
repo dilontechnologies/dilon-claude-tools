@@ -2675,6 +2675,135 @@ def test_compile_four_level_nested_list_fails_clearly():
           "the failure message mentions nesting, not a raw traceback only")
 
 
+MIXED_DOC_FORM_SECTION_MARKDOWN = SAMPLE_MARKDOWN + (
+    '\n## Test Report\n'
+    '\n'
+    '@@@FORM_SECTION@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FieldGrid@@@\n'
+    'Tested By: | Date:\n'
+    '@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Notes:@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@END_FORM_SECTION@@@\n'
+)
+
+
+def test_compile_mixed_document_with_form_section():
+    """A narrative document (include_front_matter defaults to true) can
+    embed a form section - its heading behaves like any other section (a
+    normal, numbered Heading 2), and its @@@FORM_SECTION@@@-wrapped
+    content renders as real FieldGrid/FillLine fields."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_mixed_form_section.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_mixed_form_section.docx"
+    input_md.write_text(MIXED_DOC_FORM_SECTION_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a mixed document with a form section")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+
+    heading_paragraphs = [
+        p for p in doc.paragraphs
+        if p.style and p.style.name == "Heading 2" and p.text.strip() == "Test Report"
+    ]
+    check(len(heading_paragraphs) == 1, f"'Test Report' renders as a normal Heading 2 paragraph, found {len(heading_paragraphs)}")
+
+    grid_tables = [t for t in doc.tables if t.style is not None and t.style.name == "Table Grid"]
+    field_grid_table = next((t for t in grid_tables if t.rows[0].cells[0].paragraphs[0].text == "Tested By:"), None)
+    check(field_grid_table is not None, "the form section's FieldGrid rendered as a real bordered table")
+
+    fillline_paragraphs = [p for p in doc.paragraphs if p.text.startswith("Notes:")]
+    check(len(fillline_paragraphs) == 1, "the form section's FillLine rendered as a label+blank paragraph")
+    if fillline_paragraphs:
+        check(len(fillline_paragraphs[0].paragraph_format.tab_stops) == 1, "FillLine paragraph carries its right-aligned tab stop")
+
+    all_text = "\n".join(p.text for p in doc.paragraphs)
+    check("@@@" not in all_text, "no leftover FORM_SECTION/FORM_FIELD marker text in the compiled document")
+
+
+UNWRAPPED_FORM_FIELD_IN_DOC_MARKDOWN = SAMPLE_MARKDOWN + (
+    '\n## Test Report\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Notes:@@@END_FORM_FIELD@@@\n'
+)
+
+
+def test_compile_form_field_outside_form_section_fails_clearly():
+    """A @@@FORM_FIELD:...@@@ marker with no enclosing @@@FORM_SECTION@@@
+    must halt compilation with a clear error, not silently pass the
+    marker text through as literal body content."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_unwrapped_form_field.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_unwrapped_form_field.docx"
+    input_md.write_text(UNWRAPPED_FORM_FIELD_IN_DOC_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode != 0, "compiler reports a non-zero exit code for a @@@FORM_FIELD@@@ marker with no enclosing @@@FORM_SECTION@@@")
+    check("FORM_SECTION" in result.stderr + result.stdout, "error message mentions the missing @@@FORM_SECTION@@@")
+
+
+MALFORMED_FORM_SECTION_MARKDOWN = SAMPLE_MARKDOWN + (
+    '\n## Test Report\n'
+    '\n'
+    '@@@FORM_SECTION@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Notes:@@@END_FORM_FIELD@@@\n'
+)
+
+
+def test_compile_unclosed_form_section_fails_clearly():
+    """An @@@FORM_SECTION@@@ left open at end-of-document must halt
+    compilation with a clear error."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_unclosed_form_section.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_unclosed_form_section.docx"
+    input_md.write_text(MALFORMED_FORM_SECTION_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode != 0, "compiler reports a non-zero exit code for an unclosed @@@FORM_SECTION@@@")
+    check("FORM_SECTION" in result.stderr + result.stdout, "error message mentions the unclosed @@@FORM_SECTION@@@")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -2802,6 +2931,9 @@ def main():
     test_resolve_list_continuations_duplicate_anchor_raises()
     test_compile_ordered_list_and_continuation_end_to_end()
     test_compile_four_level_nested_list_fails_clearly()
+    test_compile_mixed_document_with_form_section()
+    test_compile_form_field_outside_form_section_fails_clearly()
+    test_compile_unclosed_form_section_fails_clearly()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")
