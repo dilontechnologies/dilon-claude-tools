@@ -17,6 +17,35 @@ This is a **self-hosted Claude Code plugin** for Windows environments, providing
 - Local testing before relying on the marketplace: `/plugin marketplace add ./dilon-claude-tools` (run from the parent directory of a clone)
 - See `README.md` for the full install/update/troubleshooting instructions, and `RELEASING.md` for the governed branch model (`DEV`/`BUG`/`REL` branches, CI gates, tagging, GitHub Releases) that gates what lands on `master`.
 
+**Local-clone development (bypassing `master`/releases entirely):** the
+`dilon-claude-tools` marketplace can be repointed at this clone directly as a
+`Directory` source instead of the GitHub repo, so edits here don't need a
+version bump + merge-to-master + release cycle to test:
+
+```
+claude plugin marketplace remove dilon-claude-tools
+claude plugin marketplace add "<path to this clone>" --scope user
+claude plugin install dilon-tools@dilon-claude-tools --scope user
+```
+
+**Critical gotcha:** after that one-time setup, neither `claude plugin
+update` nor a repeat `claude plugin install` re-syncs the installed cache
+(`~/.claude/plugins/cache/dilon-claude-tools/dilon-tools/<version>/`) from
+this clone if `VERSION.txt`/`plugin.json`'s version string hasn't changed -
+both commands are version-gated, not content-hash-gated, and silently report
+"already at the latest version" even when the clone's files differ from the
+cache. To force a real resync after editing anything here (without bumping
+the version), cycle uninstall then install:
+
+```
+claude plugin uninstall dilon-tools@dilon-claude-tools
+claude plugin install dilon-tools@dilon-claude-tools --scope user
+```
+
+Then restart the Claude Code session - installed plugin content is only
+(re)loaded at session start. Confirmed 2026-09-01 by diffing the cache
+against the clone after each command.
+
 ## Skills
 
 ### Skill 1: `dilon-document-writer`
