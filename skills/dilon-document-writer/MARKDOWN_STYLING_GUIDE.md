@@ -988,6 +988,7 @@ Tested By: | Date:
 - A pure form document (`include_front_matter: false`) wraps its entire body in one `@@@FORM_SECTION@@@` pair.
 - Sections don't nest, and can't overlap. Multiple, non-overlapping sections in one document are fine.
 - A `@@@FORM_FIELD:...@@@` marker found outside any declared section, or a malformed section (unclosed, an `@@@END_FORM_SECTION@@@` with no matching open section, or a nested `@@@FORM_SECTION@@@`), halts compilation with a clear error - this is a hard failure, not a warn-and-degrade marker like the others in this section.
+- `@@@FORM_SECTION@@@`/`@@@END_FORM_SECTION@@@` are body-level only - unlike a `@@@FORM_FIELD:...@@@` marker found outside a section, placing one inside a markdown table cell is not detected and does not error: it's simply never recognized as a sentinel, so it's left as inert literal text in the compiled table cell. Keep `@@@FORM_SECTION@@@` markers at the top level of the document body.
 - `FillLine`/`FieldGrid`/`Form_Section_Header` syntax itself is documented in the `dilon-document-form-writer` skill, not here.
 
 ---

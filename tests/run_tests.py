@@ -2804,6 +2804,43 @@ def test_compile_unclosed_form_section_fails_clearly():
     check("FORM_SECTION" in result.stderr + result.stdout, "error message mentions the unclosed @@@FORM_SECTION@@@")
 
 
+NESTED_FORM_SECTION_MARKDOWN = SAMPLE_MARKDOWN + (
+    '\n## Test Report\n'
+    '\n'
+    '@@@FORM_SECTION@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Notes:@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@FORM_SECTION@@@\n'
+)
+
+
+def test_compile_nested_form_section_fails_clearly():
+    """A second @@@FORM_SECTION@@@ opened before a preceding one was
+    closed with @@@END_FORM_SECTION@@@ must halt compilation with a clear
+    error, end-to-end through the full compiler pipeline (not just at the
+    _form_section_ranges() unit level)."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_nested_form_section.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_nested_form_section.docx"
+    input_md.write_text(NESTED_FORM_SECTION_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode != 0, "compiler reports a non-zero exit code for a nested @@@FORM_SECTION@@@")
+    check("FORM_SECTION" in result.stderr + result.stdout, "error message mentions the nested @@@FORM_SECTION@@@")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -2934,6 +2971,7 @@ def main():
     test_compile_mixed_document_with_form_section()
     test_compile_form_field_outside_form_section_fails_clearly()
     test_compile_unclosed_form_section_fails_clearly()
+    test_compile_nested_form_section_fails_clearly()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")
