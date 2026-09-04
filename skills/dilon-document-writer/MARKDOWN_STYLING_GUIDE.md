@@ -46,6 +46,9 @@ revisions:
 - `signature_fields`: Array of additional approvers, each a `department`/`name` pair (may be empty) - lets each document declare its own set of signators (e.g. Regulatory, Quality) instead of a fixed pair of roles
 - `revisions`: Array of revision history entries
 
+**Optional Fields:**
+- `include_front_matter`: Boolean, defaults to `true`. Set to `false` to compile a header/footer-only form/traveler instead - no signature page, no revision table, no table of contents. See section 13.7 for the `@@@FORM_SECTION@@@` marker this requires around any form-field content.
+
 **Referencing Front Matter in the Document Body:**
 
 The document body may reference any front-matter field with `{{field_name}}` (e.g. `{{doc_number}}`, `{{title}}`, `{{current_revision}}`), so a value doesn't have to be hand-duplicated between the YAML front matter and the prose. This is resolved by Jinja2 against the same metadata dict that drives the header, footer, signature table, and title page, before Pandoc ever sees the text. To write a literal `{{` or `}}` (e.g. to document this syntax itself), wrap it in `{% raw %}...{% endraw %}`.
@@ -811,7 +814,7 @@ This sentence needs a footnote.[^1]
 
 For content that requires specific formatting beyond Pandoc's automatic styling, you can apply custom paragraph styles using `@@@STYLE@@@` markers.
 
-**Form-only marker:** Documents compiled with the `dilon-document-form-compiler` skill (forms/travelers meant to be printed and filled out by hand) support one additional marker on top of everything in this guide: `@@@FORM_FIELD:FillLine@@@Label@@@END_FORM_FIELD@@@`, which becomes a label followed by a right-aligned, underscore-leadered fill-in blank. See that skill's `SKILL.md` for details - it does not apply to documents compiled with `dilon-document-compiler`.
+**Form markers:** Any document compiled with `dilon-document-compiler` can also use the form-only markers (`FillLine`, `FieldGrid`, `Form_Section_Header`) documented in the `dilon-document-form-writer` skill, as long as every one is wrapped in a `@@@FORM_SECTION@@@`/`@@@END_FORM_SECTION@@@` range - see section 13.7 below. A document compiled with `include_front_matter: false` wraps its entire body in one such range; a narrative document (`include_front_matter: true`, the default) can embed one or more form sections alongside ordinary content.
 
 ### 13.1 Syntax
 
@@ -964,6 +967,28 @@ Use `@@@STYLE:StyleName@@@` to start styling and `@@@END_STYLE@@@` to end it.
 ```
 
 The markers will be preserved in backticks and displayed to the user as documentation examples.
+
+### 13.7 Form Sections (`@@@FORM_SECTION@@@`)
+
+Every `@@@FORM_FIELD:...@@@` marker (`FillLine`, `FieldGrid`, `Form_Section_Header`) must be enclosed in a `@@@FORM_SECTION@@@`/`@@@END_FORM_SECTION@@@` pair, on their own lines, each separated from adjacent content by a blank line (like any other block-level marker in this guide):
+
+```markdown
+## Test Report
+
+@@@FORM_SECTION@@@
+
+@@@FORM_FIELD:FieldGrid@@@
+Tested By: | Date:
+@@@END_FORM_FIELD@@@
+
+@@@END_FORM_SECTION@@@
+```
+
+- The section heading (if any) stays outside/above the `@@@FORM_SECTION@@@` tag as ordinary content - it's numbered and gets a table-of-contents entry exactly like any other heading.
+- A pure form document (`include_front_matter: false`) wraps its entire body in one `@@@FORM_SECTION@@@` pair.
+- Sections don't nest, and can't overlap. Multiple, non-overlapping sections in one document are fine.
+- A `@@@FORM_FIELD:...@@@` marker found outside any declared section, or a malformed section (unclosed, an `@@@END_FORM_SECTION@@@` with no matching open section, or a nested `@@@FORM_SECTION@@@`), halts compilation with a clear error - this is a hard failure, not a warn-and-degrade marker like the others in this section.
+- `FillLine`/`FieldGrid`/`Form_Section_Header` syntax itself is documented in the `dilon-document-form-writer` skill, not here.
 
 ---
 

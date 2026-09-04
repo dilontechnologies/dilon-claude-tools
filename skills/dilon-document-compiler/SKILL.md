@@ -1,11 +1,11 @@
 ---
 name: dilon-document-compiler
-description: Compile a Dilon-formatted markdown file (with YAML front matter) into a regulatory-compliant Word document, with signature page, revision history table, and table of contents. Use when asked to compile, convert, or export a Dilon markdown document to Word/.docx.
+description: Compile a Dilon-formatted markdown file (with YAML front matter) into a Word document - a regulatory-compliant document with signature page, revision history table, and table of contents by default, or a header/footer-only form/traveler when the front matter sets include_front_matter: false. Use when asked to compile, convert, or export a Dilon markdown document or form/traveler to Word/.docx.
 ---
 
 # Dilon Document Compiler
 
-Wraps the Dilon Document Compiler Python script to convert a markdown file with Dilon YAML front matter into a formatted .docx (signature page + revision table + title page + content with TOC).
+Wraps the Dilon Document Compiler Python script to convert a markdown file with Dilon YAML front matter into a formatted .docx. By default (`include_front_matter: true`, or the field omitted) this is a full narrative document: signature page + revision table + content with TOC. With `include_front_matter: false` in the front matter, it compiles a form/traveler instead - running header/footer only, no signature page, no TOC - the same output `dilon-document-form-compiler` used to produce before that skill was retired in favor of this one flag.
 
 ## Before compiling
 
@@ -95,3 +95,23 @@ revisions:
 ```
 
 Major section headings in the body must be H2 (`##`) for correct table-of-contents generation.
+
+## Compiling a form/traveler (no signature page, no TOC)
+
+Set `include_front_matter: false` in the front matter to compile a header/footer-only form/traveler instead of a full narrative document - no signature-approval page, no revision table, no table of contents. This is what `dilon-document-form-compiler` used to do as a separate skill; that skill has been retired in favor of this one flag on this compiler.
+
+Every `@@@FORM_FIELD:...@@@` marker (`FillLine`, `FieldGrid`, `Form_Section_Header` - syntax documented in `dilon-document-form-writer`) must be wrapped in `@@@FORM_SECTION@@@`/`@@@END_FORM_SECTION@@@`, regardless of `include_front_matter`. A pure form document wraps its entire body in one `@@@FORM_SECTION@@@` pair; a narrative document (`include_front_matter: true`) can embed one or more form sections inside otherwise-normal content - the section's own heading (e.g. `## Test Report`) stays ordinary markdown, outside/above the `@@@FORM_SECTION@@@` tag, so it's numbered and gets a TOC entry like any other section:
+
+```markdown
+## Test Report
+
+@@@FORM_SECTION@@@
+
+@@@FORM_FIELD:FieldGrid@@@
+Tested By: | Date:
+@@@END_FORM_FIELD@@@
+
+@@@END_FORM_SECTION@@@
+```
+
+A `@@@FORM_FIELD:...@@@` marker found outside any `@@@FORM_SECTION@@@` range, or a malformed range (unclosed, unmatched `@@@END_FORM_SECTION@@@`, or nested `@@@FORM_SECTION@@@`), halts compilation with a clear error rather than silently passing the marker through as literal text.

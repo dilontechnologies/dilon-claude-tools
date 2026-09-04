@@ -30,33 +30,21 @@ This is a **self-hosted Claude Code plugin** for Windows environments, providing
 - Explicitly does not invoke Pandoc or the Python compiler - that's the `dilon-document-compiler` skill's job.
 
 ### Skill 2: `dilon-document-compiler`
-**Location:** `skills/dilon-document-compiler/` (`SKILL.md`, `scripts/generate_dilon_doc.py`, `scripts/read_docx_sizes.py`, `scripts/check_deps.py`); the reference template (`templates/TEMPLATE_Word_Base.docx`) lives at the repo root, shared with `dilon-document-form-compiler` and `dilon-document-extractor`.
+**Location:** `skills/dilon-document-compiler/` (`SKILL.md`, `scripts/generate_dilon_doc.py`, `scripts/read_docx_sizes.py`, `scripts/check_deps.py`); the reference template (`templates/TEMPLATE_Word_Base.docx`) lives at the repo root, shared with `dilon-document-extractor`.
 
 **Dependencies:** Python (>= 3.8) with `python-docx`, `docxcompose`, `pyyaml>=6.0`, `jinja2`; Pandoc on PATH. Installed via `install.ps1`.
 
 **Capabilities (per `SKILL.md`):**
 - Runs `scripts/check_deps.py` first; if it reports any `[FAIL]`, stops and tells the user which dependency is missing (pointing at `install.ps1`) rather than attempting a partial compile.
 - Invokes `scripts/generate_dilon_doc.py <input.md> <output.docx> <base_template>` with the base template argument always explicit (never relies on the script's own default template lookup).
-- Produces a regulatory-compliant Word document: signature page + revision history table + title page/content + table of contents, from a markdown file with Dilon YAML front matter. The signature-approval table, revision table, and title page are all built programmatically (not template-baked); only the header/footer/styles come from the base template.
-- Every compiled inline picture gets its aspect ratio locked for interactive resize (`lib/dilon_docx_common.py`'s `lock_image_aspect_ratios()`, called from both `generate_dilon_doc.py` and `generate_dilon_form.py`) - see "Image Aspect Ratio Lock" below.
+- Front matter's `include_front_matter` boolean (default `true`) selects the compile mode: `true` produces a regulatory-compliant Word document (signature page + revision history table + content + table of contents, all built programmatically, not template-baked - only header/footer/styles come from the base template); `false` produces a header/footer-only form/traveler - no signature page, no revision table, no TOC. This flag replaced the separate `dilon-document-form-compiler` skill, retired 2026-09.
+- Every `@@@FORM_FIELD:FillLine/FieldGrid/Form_Section_Header@@@` marker, in either mode, must be wrapped in `@@@FORM_SECTION@@@`/`@@@END_FORM_SECTION@@@` (`lib/dilon_form_fields.py`'s `apply_form_fields()`/`FormSectionError`) - a form-flavored section's own heading stays ordinary content outside the tag, so it's numbered and gets a TOC entry like any other section.
+- Every compiled inline picture gets its aspect ratio locked for interactive resize (`lib/dilon_docx_common.py`'s `lock_image_aspect_ratios()`) - see "Image Aspect Ratio Lock" below.
 - Verifies the output file exists after the script runs; reports stdout/stderr to the user on failure, or the output path on success.
 - Points users lacking YAML front matter back to the `dilon-document-writer` skill.
 - After a successful compile, suggests a resize-and-reapply pass when the input markdown has images/tables with no explicit size hint; `scripts/read_docx_sizes.py <resized.docx>` then reads back each image's width/height and each table's column widths (in document order, excluding the signature-approval/revision-history tables) so Claude can write `width=`/`height=` image attributes and `@@@TABLE_COLUMNS@@@` markers back into the source markdown. Matching is positional (Nth image/table in the docx = Nth in the markdown) - see "Resize-and-Reapply Workflow" below.
 
-### Skill 3: `dilon-document-form-compiler`
-**Location:** `skills/dilon-document-form-compiler/` (`SKILL.md`, `scripts/generate_dilon_form.py`, `scripts/form_fields.py`, `scripts/check_deps.py`); shares the same repo-root `templates/TEMPLATE_Word_Base.docx` that `dilon-document-compiler` uses - there is no form-specific template file.
-
-**Dependencies:** same as `dilon-document-compiler` - Python (>= 3.8) with `python-docx`, `docxcompose`, `pyyaml>=6.0`, `jinja2`; Pandoc on PATH. Installed via `install.ps1`.
-
-**Capabilities (per `SKILL.md`):**
-- Runs `scripts/check_deps.py` first; same fail-fast behavior as `dilon-document-compiler`.
-- Invokes `scripts/generate_dilon_form.py <input.md> <output.docx> <base_template>`.
-- Produces a running-header/footer-only Word document (no title page, no signature-approval page, no table of contents) - for forms/travelers meant to be printed and filled out by hand, as opposed to `dilon-document-compiler`'s narrative documents.
-- Every compiled inline picture gets its aspect ratio locked for interactive resize, same as `dilon-document-compiler` (shared `lock_image_aspect_ratios()`) - but this skill has no resize-and-reapply workflow (no `read_docx_sizes.py` equivalent).
-- Expects the same rich Dilon YAML front matter as `dilon-document-compiler` (front-matter fields beyond title/doc_number/current_revision aren't rendered into the form's header, but are kept for consistency with the rest of the front-matter-driven tooling).
-- Compiles three form-only markdown markers implemented in `scripts/form_fields.py` - `FillLine` (`underscore_until_end_of_line()`), `FieldGrid`, and `Form_Section_Header` - but doesn't itself document their syntax; that's `dilon-document-form-writer`'s job (mirroring how `dilon-document-compiler` defers markdown-authoring guidance to `dilon-document-writer`).
-
-### Skill 4: `dilon-document-extractor`
+### Skill 3: `dilon-document-extractor`
 **Location:** `skills/dilon-document-extractor/` (`SKILL.md`, `scripts/extract_docx.py`, `scripts/extract_pdf.py`, `scripts/check_deps.py`)
 
 **Dependencies:** Python (>= 3.8) with `python-docx`, `pyyaml`, `pymupdf`. Installed via `install.ps1`.
@@ -68,16 +56,16 @@ This is a **self-hosted Claude Code plugin** for Windows environments, providing
 - Never hard-fails on ambiguous input: every uncertain classification degrades to an inline `<!-- EXTRACTOR: ... -->` comment instead of raising.
 - Output always requires a cleanup pass: resolve every `EXTRACTOR` comment, sanity-check headings/tables against the source, then hand off to `dilon-document-writer` for remaining prose/structure cleanup.
 
-### Skill 5: `dilon-document-form-writer`
+### Skill 4: `dilon-document-form-writer`
 **Location:** `skills/dilon-document-form-writer/` (`SKILL.md`, `TEMPLATE_Form.md`)
 
 **Dependencies:** none - works without running `install.ps1`.
 
 **Capabilities (per `SKILL.md`):**
-- Creating a new form document: reads `TEMPLATE_Form.md`, gathers the same YAML front-matter fields as `dilon-document-writer` (title/author/department/doc_number/current_revision/department_head/signature_fields/initial revision - `doc_number` defaults to the `FO-` form-number convention rather than `dilon-document-writer`'s narrative-doc `DD_XXX_XXXXX`), refuses to overwrite an existing destination file, and writes the new file with the template's worked example (`Form_Section_Header` + `FieldGrid` + `FillLine`) intact.
-- Editing an existing Dilon form: reads `dilon-document-writer`'s `MARKDOWN_STYLING_GUIDE.md` (general conventions still apply to forms), then applies the three form-only markers this skill documents as the single source of truth - `FillLine`, `FieldGrid` (including its `dir=`/`rows=`/`pair=`/`label=`/`title=` annotations), and `Form_Section_Header`.
-- Mirrors the `dilon-document-writer` / `dilon-document-compiler` split: this skill owns markdown authoring and marker syntax for forms; `dilon-document-form-compiler` owns compiling that markdown to Word and doesn't duplicate the syntax reference.
-- Explicitly does not invoke Pandoc or the Python compiler - that's `dilon-document-form-compiler`'s job.
+- Creating a new form document: reads `TEMPLATE_Form.md` (front matter includes `include_front_matter: false`), gathers the same YAML front-matter fields as `dilon-document-writer` (title/author/department/doc_number/current_revision/department_head/signature_fields/initial revision - `doc_number` defaults to the `FO-` form-number convention rather than `dilon-document-writer`'s narrative-doc `DD_XXX_XXXXX`), refuses to overwrite an existing destination file, and writes the new file with the template's worked example (`Form_Section_Header` + `FieldGrid` + `FillLine`, wrapped in `@@@FORM_SECTION@@@`) intact.
+- Editing an existing Dilon form: reads `dilon-document-writer`'s `MARKDOWN_STYLING_GUIDE.md` (general conventions still apply to forms), then applies the three form-only markers this skill documents as the single source of truth - `FillLine`, `FieldGrid` (including its `dir=`/`rows=`/`pair=`/`label=`/`title=` annotations), and `Form_Section_Header` - each wrapped in `@@@FORM_SECTION@@@`.
+- Mirrors the `dilon-document-writer` / `dilon-document-compiler` split: this skill owns markdown authoring and marker syntax for forms; `dilon-document-compiler` owns compiling that markdown to Word (via `include_front_matter: false`) and doesn't duplicate the syntax reference.
+- Explicitly does not invoke Pandoc or the Python compiler - that's `dilon-document-compiler`'s job.
 
 ## Repository Structure
 
@@ -113,7 +101,8 @@ dilon-claude-tools/
 │       └── dilon_logo.png             # header logo, re-embedded by populate_header()
 │
 ├── lib/
-│   └── dilon_docx_common.py           # Pandoc-conversion/styling helpers shared by both compiler skills
+│   ├── dilon_docx_common.py           # Pandoc-conversion/styling helpers shared by the compiler and extractor
+│   └── dilon_form_fields.py           # @@@FORM_FIELD@@@/@@@FORM_SECTION@@@ markers, used in both compile modes
 │
 ├── skills/
 │   ├── dilon-document-writer/
@@ -123,14 +112,8 @@ dilon-claude-tools/
 │   ├── dilon-document-compiler/
 │   │   ├── SKILL.md
 │   │   └── scripts/
-│   │       ├── generate_dilon_doc.py  # Markdown -> Word compiler (signature/title/TOC)
+│   │       ├── generate_dilon_doc.py  # Markdown -> Word compiler (include_front_matter selects doc vs. form mode)
 │   │       ├── read_docx_sizes.py     # Reads resized image/table dimensions back for the resize-and-reapply workflow
-│   │       └── check_deps.py          # Preflight dependency checker
-│   ├── dilon-document-form-compiler/
-│   │   ├── SKILL.md
-│   │   └── scripts/
-│   │       ├── generate_dilon_form.py # Markdown -> Word compiler (header/footer only)
-│   │       ├── form_fields.py         # @@@FORM_FIELD:FillLine@@@ marker
 │   │       └── check_deps.py          # Preflight dependency checker
 │   ├── dilon-document-extractor/
 │   │   ├── SKILL.md
@@ -164,7 +147,7 @@ The base template (repo-root `templates/TEMPLATE_Word_Base.docx`) carries only s
 - **Image aspect ratio lock**: `lock_image_aspect_ratios()` (`lib/dilon_docx_common.py`, shared by both compiler skills) post-processes every inline picture Pandoc embeds. Pandoc's docx writer sets `picLocks`/`noChangeAspect` on the picture itself (`pic:cNvPicPr`) but never emits the enclosing `wp:cNvGraphicFramePr`/`a:graphicFrameLocks` element at all (it's schema-optional) - and that frame-level lock, not the picture-level one, is what Word actually consults for interactive corner/side-handle drag-resize. Confirmed by diffing a Pandoc-generated image against a native Word drag-and-drop insert in the same document: only the frame-level lock differed, and only the drag-dropped image resized locked. The function backfills the missing `wp:cNvGraphicFramePr`/`a:graphicFrameLocks` for every inline picture.
 - **Resize-and-reapply workflow**: `dilon-document-compiler`'s `scripts/read_docx_sizes.py <resized.docx>` reads back each inline picture's width/height and each table's column widths from a document the user resized in Word, in document order, excluding the signature-approval/revision-history tables (via a local `classify_table()`, mirroring `dilon-document-extractor`'s). Claude maps the results positionally (Nth image/table in the docx = Nth in the source markdown - there's no other stable id) back onto `width=`/`height=` image attributes and `@@@TABLE_COLUMNS@@@` markers. See `dilon-document-compiler/SKILL.md`'s "Suggesting a resize pass" / "Reading resized dimensions back into the markdown" sections.
 
-`dilon-document-form-compiler` reuses `populate_header()`/`populate_footer()` and `lock_image_aspect_ratios()` against the same base template but skips the signature table, revision table, title page, TOC, and resize-and-reapply workflow entirely - see Skill 3 above.
+`generate_dilon_doc.py`'s `include_front_matter: false` mode reuses `populate_header()`/`populate_footer()` and `lock_image_aspect_ratios()` against the same base template but skips the signature table, revision table, TOC, and resize-and-reapply workflow entirely - what `dilon-document-form-compiler` did as a separate skill before being retired. In both modes, `lib/dilon_form_fields.py`'s `apply_form_fields()` postprocesses every `@@@FORM_FIELD:FillLine/FieldGrid/Form_Section_Header@@@` marker found inside a `@@@FORM_SECTION@@@`...`@@@END_FORM_SECTION@@@` range - `FormSectionError` halts compilation for a marker outside one, or a malformed range.
 
 `TEMPLATE_Document.md` (in `dilon-document-writer`) provides the starter markdown with the full YAML front-matter shape and section templates for new documents.
 
@@ -176,7 +159,7 @@ Covers YAML front matter requirements, heading conventions/numbering, table form
 
 ## Key Architectural Patterns
 
-1. **Skill Modularity:** Each skill is self-contained (`SKILL.md` + any scripts/docs it needs) and independently installable in concept - `dilon-document-writer` and `dilon-document-form-writer` have zero runtime dependencies, `dilon-document-compiler`, `dilon-document-form-compiler`, and `dilon-document-extractor` depend on Python (and Pandoc, for the compilers). Both document families follow the same authoring/compiling split: `dilon-document-writer`/`dilon-document-form-writer` own markdown authoring and marker syntax, `dilon-document-compiler`/`dilon-document-form-compiler` own compiling to Word without duplicating that syntax reference. The Word reference templates are shared at the repo root since both `dilon-document-compiler` and `dilon-document-extractor` reference their canonical shape.
+1. **Skill Modularity:** Each skill is self-contained (`SKILL.md` + any scripts/docs it needs) and independently installable in concept - `dilon-document-writer` and `dilon-document-form-writer` have zero runtime dependencies, `dilon-document-compiler` and `dilon-document-extractor` depend on Python (and Pandoc, for the compiler). Both document families follow the same authoring/compiling split: `dilon-document-writer`/`dilon-document-form-writer` own markdown authoring and marker syntax, `dilon-document-compiler` owns compiling both to Word (narrative and form/traveler alike, selected by `include_front_matter`) without duplicating that syntax reference - `dilon-document-form-compiler` was retired in favor of this one flag. The Word reference templates are shared at the repo root since both `dilon-document-compiler` and `dilon-document-extractor` reference their canonical shape.
 2. **Preflight Validation:** The compiler skill checks dependencies (`check_deps.py`) before attempting work, rather than failing partway through.
 3. **Explicit Arguments:** The compiler script is always invoked with all three arguments spelled out (input, output, base template) rather than relying on internal defaults.
 4. **Template Inheritance:** Word styles cascade from the base template through to the assembled document; header, footer, signature table, revision table, and title page are all generated programmatically in Python against that template's style definitions rather than being template-baked.

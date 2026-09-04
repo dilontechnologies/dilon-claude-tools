@@ -26,7 +26,7 @@ Helps create and maintain Dilon Technologies form/traveler markdown documents - 
 ## Editing an existing Dilon form
 
 1. Read `dilon-document-writer`'s `MARKDOWN_STYLING_GUIDE.md` before making edits, if it isn't already in context for this conversation — every general convention documented there (headings, tables, YAML front-matter shape, `@@@STYLE@@@`/`@@@TABLE_STYLE@@@`/`@@@TABLE_COLUMNS@@@` markers, body-level `{{field}}` substitution) still applies to forms. Keep it in context for the remainder of the editing session.
-2. Apply the three form-only markers documented below as needed.
+2. Apply the three form-only markers documented below as needed, each wrapped in `@@@FORM_SECTION@@@`/`@@@END_FORM_SECTION@@@` — `dilon-document-compiler` refuses to compile a `FillLine`/`FieldGrid`/`Form_Section_Header` marker that isn't inside a declared form section (see `MARKDOWN_STYLING_GUIDE.md` and `dilon-document-compiler`'s `SKILL.md`).
 
 ### Fill-in-the-blank line (`FillLine`)
 
@@ -107,4 +107,4 @@ Renders as `Section 1 - Assembly Prep`. The number increments once per `Form_Sec
 
 ## Next step
 
-Once content is ready, compiling it to a Word document is handled by the separate `dilon-document-form-compiler` skill — don't attempt to invoke Pandoc or the Python compiler from this skill.
+Once content is ready, compiling it to a Word document is handled by the `dilon-document-compiler` skill — set `include_front_matter: false` in the front matter for a header/footer-only form (no signature page, no TOC), and wrap every `FillLine`/`FieldGrid`/`Form_Section_Header` marker in `@@@FORM_SECTION@@@`/`@@@END_FORM_SECTION@@@` (see that skill's `SKILL.md`). Don't attempt to invoke Pandoc or the Python compiler from this skill.
