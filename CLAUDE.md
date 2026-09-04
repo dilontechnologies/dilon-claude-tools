@@ -2,7 +2,7 @@
 
 ## Plugin Overview
 
-This is a **self-hosted Claude Code plugin** for Windows environments, providing regulatory-compliant technical documentation workflows at Dilon Technologies. It bundles five Skills rather than exposing MCP tools/resources.
+This is a **self-hosted Claude Code plugin** for Windows environments, providing regulatory-compliant technical documentation workflows at Dilon Technologies. It bundles four Skills rather than exposing MCP tools/resources.
 
 **Plugin Details:**
 - Plugin name: `dilon-tools` (version tracked in both `VERSION.txt` and `.claude-plugin/plugin.json` - keep them in sync, see `RELEASING.md`)
