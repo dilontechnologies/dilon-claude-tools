@@ -24,6 +24,83 @@ FORM_FIELD_RE = re.compile(
     re.DOTALL,
 )
 
+FORM_SECTION_BEGIN = "@@@FORM_SECTION@@@"
+FORM_SECTION_END = "@@@END_FORM_SECTION@@@"
+
+
+class FormSectionError(ValueError):
+    """Raised for a structurally invalid @@@FORM_SECTION@@@ range: unclosed,
+    unmatched @@@END_FORM_SECTION@@@, nested @@@FORM_SECTION@@@, or (raised
+    by apply_form_fields(), not here) a @@@FORM_FIELD@@@ marker found
+    outside any declared range."""
+
+
+def _form_section_ranges(doc):
+    """
+    Scan doc's top-level body children (paragraphs and tables, in document
+    order) for @@@FORM_SECTION@@@/@@@END_FORM_SECTION@@@ sentinel
+    paragraphs, validate matching/nesting, and return
+    (in_section_elements, mutated):
+
+    - in_section_elements: a set of id(xml_element) for every top-level
+      body child that falls strictly between a BEGIN/END pair (inclusive
+      of everything in between, exclusive of the two sentinel paragraphs
+      themselves).
+    - mutated: True iff at least one BEGIN/END pair was found (its
+      sentinel paragraphs are removed from the tree as a side effect,
+      same as apply_styles() removes its own markers).
+
+    Raises FormSectionError for: an @@@END_FORM_SECTION@@@ with no open
+    section, a second @@@FORM_SECTION@@@ before a preceding one was
+    closed (nesting), or an @@@FORM_SECTION@@@ left open at
+    end-of-document.
+    """
+    body = doc.element.body
+    in_section_elements = set()
+    open_start = None
+    pending = []
+    to_remove = []
+
+    for child in list(body):
+        if child.tag != qn('w:p'):
+            if open_start is not None:
+                pending.append(child)
+            continue
+
+        text = ''.join(node.text or '' for node in child.iter(qn('w:t'))).strip()
+
+        if text == FORM_SECTION_BEGIN:
+            if open_start is not None:
+                raise FormSectionError(
+                    "@@@FORM_SECTION@@@ found before a preceding @@@FORM_SECTION@@@ "
+                    "was closed with @@@END_FORM_SECTION@@@ - nesting is not supported"
+                )
+            open_start = child
+            pending = []
+            to_remove.append(child)
+        elif text == FORM_SECTION_END:
+            if open_start is None:
+                raise FormSectionError(
+                    "@@@END_FORM_SECTION@@@ found with no matching open @@@FORM_SECTION@@@"
+                )
+            in_section_elements.update(id(el) for el in pending)
+            to_remove.append(child)
+            open_start = None
+            pending = []
+        elif open_start is not None:
+            pending.append(child)
+
+    if open_start is not None:
+        raise FormSectionError(
+            "@@@FORM_SECTION@@@ was never closed with a matching @@@END_FORM_SECTION@@@"
+        )
+
+    for el in to_remove:
+        el.getparent().remove(el)
+
+    return in_section_elements, bool(to_remove)
+
+
 FORM_SECTION_HEADER_STYLE_NAME = "Form Section Header"
 FIELD_GRID_TEXT_STYLE_NAME = "Compact"
 

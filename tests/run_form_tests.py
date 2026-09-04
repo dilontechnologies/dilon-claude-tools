@@ -1090,6 +1090,124 @@ def test_protect_field_grid_line_breaks():
     check(ff.protect_field_grid_line_breaks(unrelated) == unrelated, "text with no FieldGrid block is unchanged")
 
 
+def test_form_section_ranges_single_pair():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("Before - not in a section")
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    inside = doc.add_paragraph("Inside the section")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
+    doc.add_paragraph("After - not in a section")
+
+    in_section, mutated = ff._form_section_ranges(doc)
+
+    check(mutated is True, "a declared section mutates the document (sentinels removed)")
+    check(id(inside._p) in in_section, "the paragraph between BEGIN/END is recorded as in-section")
+    check(
+        not any(p.text.startswith("@@@FORM_SECTION") or p.text.startswith("@@@END_FORM_SECTION") for p in doc.paragraphs),
+        "sentinel paragraphs are removed from the document",
+    )
+    check(len(doc.paragraphs) == 3, f"3 paragraphs remain after the 2 sentinels are removed, found {len(doc.paragraphs)}")
+
+
+def test_form_section_ranges_content_outside_not_recorded():
+    import dilon_form_fields as ff
+    doc = Document()
+    before = doc.add_paragraph("Before")
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    doc.add_paragraph("Inside")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
+    after = doc.add_paragraph("After")
+
+    in_section, _ = ff._form_section_ranges(doc)
+
+    check(id(before._p) not in in_section, "content before the section is not recorded as in-section")
+    check(id(after._p) not in in_section, "content after the section is not recorded as in-section")
+
+
+def test_form_section_ranges_no_sections_present():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("Just a plain paragraph")
+
+    in_section, mutated = ff._form_section_ranges(doc)
+
+    check(in_section == set(), "no @@@FORM_SECTION@@@ markers -> empty in-section set")
+    check(mutated is False, "no @@@FORM_SECTION@@@ markers -> document not mutated")
+
+
+def test_form_section_ranges_unmatched_end_raises():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
+
+    raised = False
+    try:
+        ff._form_section_ranges(doc)
+    except ff.FormSectionError:
+        raised = True
+    check(raised, "@@@END_FORM_SECTION@@@ with no open section raises FormSectionError")
+
+
+def test_form_section_ranges_unclosed_begin_raises():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    doc.add_paragraph("Inside, never closed")
+
+    raised = False
+    try:
+        ff._form_section_ranges(doc)
+    except ff.FormSectionError:
+        raised = True
+    check(raised, "an unclosed @@@FORM_SECTION@@@ at end-of-document raises FormSectionError")
+
+
+def test_form_section_ranges_nested_begin_raises():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    doc.add_paragraph("Outer content")
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+
+    raised = False
+    try:
+        ff._form_section_ranges(doc)
+    except ff.FormSectionError:
+        raised = True
+    check(raised, "a nested @@@FORM_SECTION@@@ before the outer one closes raises FormSectionError")
+
+
+def test_form_section_ranges_multiple_nonoverlapping_pairs():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    first_inside = doc.add_paragraph("First section content")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
+    doc.add_paragraph("Between sections")
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    second_inside = doc.add_paragraph("Second section content")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
+
+    in_section, mutated = ff._form_section_ranges(doc)
+
+    check(mutated is True, "two declared sections mutate the document")
+    check(id(first_inside._p) in in_section, "first section's content recorded as in-section")
+    check(id(second_inside._p) in in_section, "second section's content recorded as in-section")
+
+
+def test_form_section_ranges_includes_tables():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    table = doc.add_table(rows=1, cols=1)
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
+
+    in_section, _ = ff._form_section_ranges(doc)
+
+    check(id(table._element) in in_section, "a table between BEGIN/END is recorded as in-section")
+
+
 def test_apply_form_fields_form_section_header_numbers_sequentially():
     import dilon_form_fields as ff
     from docx.enum.style import WD_STYLE_TYPE
@@ -1424,6 +1542,14 @@ def main():
     test_insert_field_grid_max_width()
     test_field_grid_marker_inside_table_cell_warns_and_skips()
     test_protect_field_grid_line_breaks()
+    test_form_section_ranges_single_pair()
+    test_form_section_ranges_content_outside_not_recorded()
+    test_form_section_ranges_no_sections_present()
+    test_form_section_ranges_unmatched_end_raises()
+    test_form_section_ranges_unclosed_begin_raises()
+    test_form_section_ranges_nested_begin_raises()
+    test_form_section_ranges_multiple_nonoverlapping_pairs()
+    test_form_section_ranges_includes_tables()
     test_field_grid_permutations_compile()
     test_field_grid_title_row_mixed_with_normal_rows_compiles()
     test_apply_form_fields_form_section_header_numbers_sequentially()
