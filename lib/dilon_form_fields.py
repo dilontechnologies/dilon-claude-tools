@@ -1,10 +1,13 @@
 """
-Form-specific markdown-authoring functions for dilon-document-form-compiler.
+Form-marker postprocessing shared by dilon-document-compiler, for both
+narrative documents that embed a form section and pure form/traveler
+documents (include_front_matter: false).
 
-These live outside lib/dilon_docx_common.py deliberately: ordinary content
-documents (dilon-document-compiler) never need them. Uses its own
-@@@FORM_FIELD:Name@@@...@@@END_FORM_FIELD@@@ marker family so it never
-collides with the shared module's @@@STYLE@@@/@@@TABLE_STYLE@@@ markers.
+Uses its own @@@FORM_FIELD:Name@@@...@@@END_FORM_FIELD@@@ marker family
+so it never collides with dilon_docx_common's @@@STYLE@@@/@@@TABLE_STYLE@@@
+markers. Every @@@FORM_FIELD@@@ marker must be enclosed in a
+@@@FORM_SECTION@@@...@@@END_FORM_SECTION@@@ range - see
+docs/superpowers/specs/2026-09-04-unified-document-form-compiler-design.md.
 """
 
 import re

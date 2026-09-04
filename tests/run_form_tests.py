@@ -30,11 +30,11 @@ TEST_OUTPUT_DIR = Path(__file__).parent / "form-test-output"
 SHEBANG_GUARDED_SCRIPTS = [
     CHECK_DEPS_SCRIPT,
     FORM_COMPILER_SCRIPT,
-    SCRIPTS_DIR / "form_fields.py",
     Path(__file__),
 ]
 
 sys.path.insert(0, str(SCRIPTS_DIR))
+sys.path.insert(0, str(REPO_ROOT / "lib"))
 
 passed = 0
 failed = 0
@@ -608,7 +608,7 @@ def test_compile_default_output_filename_missing_doc_number_fails_clearly():
 
 
 def test_underscore_until_end_of_line_body_paragraph():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     p = doc.add_paragraph("Work Order:")
     ff.underscore_until_end_of_line(p)
@@ -628,7 +628,7 @@ def test_underscore_until_end_of_line_body_paragraph():
 
 
 def test_underscore_until_end_of_line_in_table_cell():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     table = doc.add_table(rows=1, cols=1)
     table.columns[0].width = Inches(2.0)
@@ -648,7 +648,7 @@ def test_underscore_until_end_of_line_in_table_cell():
 
 
 def test_apply_form_fields_marker():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     doc.add_paragraph("@@@FORM_FIELD:FillLine@@@Work Order:@@@END_FORM_FIELD@@@")
     temp_path = TEST_OUTPUT_DIR / "form_fields_marker.docx"
@@ -663,7 +663,7 @@ def test_apply_form_fields_marker():
 
 
 def test_apply_form_fields_marker_in_table_cell():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     table = doc.add_table(rows=1, cols=1)
     table.columns[0].width = Inches(2.0)
@@ -682,7 +682,7 @@ def test_apply_form_fields_marker_in_table_cell():
 
 
 def test_parse_bracket_annotations():
-    import form_fields as ff
+    import dilon_form_fields as ff
     check(ff.parse_bracket_annotations("Work Order:") == ("Work Order:", {}), "no bracket -> unchanged text, empty annotations")
     check(ff.parse_bracket_annotations("Cure Temp:[pair=60]") == ("Cure Temp:", {"pair": "60"}), "single annotation parsed")
     check(
@@ -693,7 +693,7 @@ def test_parse_bracket_annotations():
 
 
 def test_underscore_until_end_of_line_width_override():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     p = doc.add_paragraph("Work Order:")
     ff.underscore_until_end_of_line(p, width_override=3.0)
@@ -705,7 +705,7 @@ def test_underscore_until_end_of_line_width_override():
 
 
 def test_underscore_until_end_of_line_width_override_clamped():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     p = doc.add_paragraph("Work Order:")
     section = doc.sections[0]
@@ -721,7 +721,7 @@ def test_underscore_until_end_of_line_width_override_clamped():
 
 
 def test_underscore_until_end_of_line_multiple_lines():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     p = doc.add_paragraph("Notes:")
     ff.underscore_until_end_of_line(p, num_lines=3)
@@ -738,7 +738,7 @@ def test_underscore_until_end_of_line_multiple_lines():
 
 
 def test_underscore_until_end_of_line_multiple_lines_ignores_width():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     p = doc.add_paragraph("Notes:")
     section = doc.sections[0]
@@ -755,7 +755,7 @@ def test_underscore_until_end_of_line_multiple_lines_ignores_width():
 
 
 def test_apply_form_fields_fillline_width_annotation():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     doc.add_paragraph("@@@FORM_FIELD:FillLine@@@Work Order:[width=3in]@@@END_FORM_FIELD@@@")
     temp_path = TEST_OUTPUT_DIR / "form_fields_fillline_width.docx"
@@ -773,7 +773,7 @@ def test_apply_form_fields_fillline_width_annotation():
 
 
 def test_apply_form_fields_fillline_lines_annotation():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     doc.add_paragraph("@@@FORM_FIELD:FillLine@@@Notes:[lines=3]@@@END_FORM_FIELD@@@")
     temp_path = TEST_OUTPUT_DIR / "form_fields_fillline_lines.docx"
@@ -787,7 +787,7 @@ def test_apply_form_fields_fillline_lines_annotation():
 
 
 def test_form_field_re_optional_width_group():
-    import form_fields as ff
+    import dilon_form_fields as ff
     match = ff.FORM_FIELD_RE.search("@@@FORM_FIELD:FieldGrid:6.5in@@@Work Order:@@@END_FORM_FIELD@@@")
     check(match is not None, "marker with a block-level width suffix matches")
     if match:
@@ -803,13 +803,13 @@ def test_form_field_re_optional_width_group():
 
 
 def test_parse_row_annotation():
-    import form_fields as ff
+    import dilon_form_fields as ff
     check(ff.parse_row_annotation("Work Order: | Date:") == ("Work Order: | Date:", {}), "no row annotation -> unchanged, empty dict")
     check(ff.parse_row_annotation("Notes: {dir=v,rows=3}") == ("Notes:", {"dir": "v", "rows": "3"}), "row annotation parsed and stripped")
 
 
 def test_parse_field_grid_block_simple():
-    import form_fields as ff
+    import dilon_form_fields as ff
     block = "Work Order: | Date:\nCarrier Board Assy Lot:\n"
     rows = ff.parse_field_grid_block(block)
     check(len(rows) == 2, f"two declared rows produce two parsed rows, found {len(rows)}")
@@ -820,7 +820,7 @@ def test_parse_field_grid_block_simple():
 
 
 def test_parse_field_grid_block_annotations():
-    import form_fields as ff
+    import dilon_form_fields as ff
     block = "Cure Temp:[pair=60] | Start Time:[pair=40]\nNotes: {dir=v,rows=3}\n"
     rows = ff.parse_field_grid_block(block)
     check(len(rows) == 2, f"expected 2 rows, found {len(rows)}")
@@ -834,7 +834,7 @@ def test_parse_field_grid_block_annotations():
 
 
 def test_parse_field_grid_block_skips_blank_and_unparseable_lines():
-    import form_fields as ff
+    import dilon_form_fields as ff
     block = "Work Order:\n\n   \n|\nDate:\n"
     rows = ff.parse_field_grid_block(block)
     check(len(rows) == 2, f"blank lines and an unparseable row are skipped, found {len(rows)} rows")
@@ -844,7 +844,7 @@ def test_parse_field_grid_block_skips_blank_and_unparseable_lines():
 
 
 def test_resolve_row_settings_defaults_and_overrides():
-    import form_fields as ff
+    import dilon_form_fields as ff
     check(ff.resolve_row_settings({}) == ('h', 1), "defaults to horizontal, rows=1")
     check(ff.resolve_row_settings({'dir': 'v', 'rows': '3'}) == ('v', 3), "explicit dir/rows honored")
     check(ff.resolve_row_settings({'dir': 'sideways'}) == ('h', 1), "invalid dir falls back to 'h'")
@@ -853,14 +853,14 @@ def test_resolve_row_settings_defaults_and_overrides():
 
 
 def test_resolve_pair_rows():
-    import form_fields as ff
+    import dilon_form_fields as ff
     check(ff.resolve_pair_rows({}, 2) == 2, "falls back to the row default when absent")
     check(ff.resolve_pair_rows({'rows': '5'}, 2) == 5, "per-pair override takes precedence")
     check(ff.resolve_pair_rows({'rows': '0'}, 2) == 2, "invalid override falls back to the row default")
 
 
 def test_resolve_pair_widths_even_split():
-    import form_fields as ff
+    import dilon_form_fields as ff
     pairs = [("A:", {}), ("B:", {})]
     widths = ff.resolve_pair_widths(pairs, 6.0)
     check(widths == [3.0, 3.0], f"default even split across 2 pairs, got {widths}")
@@ -871,28 +871,28 @@ def test_resolve_pair_widths_even_split():
 
 
 def test_resolve_pair_widths_explicit_and_remainder():
-    import form_fields as ff
+    import dilon_form_fields as ff
     pairs = [("A:", {'pair': '60'}), ("B:", {})]
     widths = ff.resolve_pair_widths(pairs, 10.0)
     check(widths == [6.0, 4.0], f"explicit pair=60 with remainder auto-filled, got {widths}")
 
 
 def test_resolve_pair_widths_overshoot_falls_back():
-    import form_fields as ff
+    import dilon_form_fields as ff
     pairs = [("A:", {'pair': '60'}), ("B:", {'pair': '50'})]
     widths = ff.resolve_pair_widths(pairs, 10.0)
     check(widths == [5.0, 5.0], f"declared total > 100 falls back to an even split, got {widths}")
 
 
 def test_resolve_pair_widths_nonpositive_remainder_falls_back():
-    import form_fields as ff
+    import dilon_form_fields as ff
     pairs = [("A:", {'pair': '100'}), ("B:", {})]
     widths = ff.resolve_pair_widths(pairs, 10.0)
     check(widths == [5.0, 5.0], f"a fully-declared pair leaving no room for an undeclared one falls back to an even split, got {widths}")
 
 
 def test_resolve_label_width():
-    import form_fields as ff
+    import dilon_form_fields as ff
     check(ff.resolve_label_width({}, 10.0, 'h') == (5.0, 5.0), "default 50/50 split")
     check(ff.resolve_label_width({'label': '70'}, 10.0, 'h') == (7.0, 3.0), "explicit label= split")
     check(ff.resolve_label_width({'label': '70'}, 10.0, 'v') == (None, None), "dir=v ignores label=, returns (None, None)")
@@ -900,7 +900,7 @@ def test_resolve_label_width():
 
 
 def test_resolve_title_flag():
-    import form_fields as ff
+    import dilon_form_fields as ff
     check(ff.resolve_title_flag({}) is False, "absent title= is not a title row")
     check(ff.resolve_title_flag({'title': 'true'}) is True, "title=true is a title row")
     check(ff.resolve_title_flag({'title': 'True'}) is True, "title= truthy match is case-insensitive")
@@ -914,7 +914,7 @@ def test_resolve_title_flag():
 
 
 def test_build_field_grid_row_table_horizontal():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row = {'pairs': [("Work Order:", {}), ("Date:", {})], 'annotations': {}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
@@ -930,7 +930,7 @@ def test_build_field_grid_row_table_horizontal():
 
 
 def test_build_field_grid_row_table_vertical_with_rows():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row = {'pairs': [("Notes:", {})], 'annotations': {'dir': 'v', 'rows': '3'}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
@@ -944,7 +944,7 @@ def test_build_field_grid_row_table_vertical_with_rows():
 
 
 def test_build_field_grid_row_table_is_centered():
-    import form_fields as ff
+    import dilon_form_fields as ff
     from docx.enum.table import WD_TABLE_ALIGNMENT
     doc = Document()
     row = {'pairs': [("A:", {})], 'annotations': {}}
@@ -953,7 +953,7 @@ def test_build_field_grid_row_table_is_centered():
 
 
 def test_build_field_grid_row_table_title_row():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row = {'pairs': [("Assembly Prep", {})], 'annotations': {'title': 'true'}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
@@ -970,7 +970,7 @@ def test_build_field_grid_row_table_title_row():
 
 
 def test_build_field_grid_row_table_title_row_ignores_pair_and_label_annotations():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row = {'pairs': [("Assembly Prep", {'pair': '60', 'label': '70'})], 'annotations': {'title': 'true'}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
@@ -982,7 +982,7 @@ def test_build_field_grid_row_table_title_row_ignores_pair_and_label_annotations
 
 
 def test_build_field_grid_row_table_title_row_rows_override():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row = {'pairs': [("Assembly Prep", {})], 'annotations': {'title': 'true', 'rows': '3'}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
@@ -995,7 +995,7 @@ def test_build_field_grid_row_table_title_row_rows_override():
 
 
 def test_build_field_grid_row_table_title_row_multiple_tokens_uses_first():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row = {'pairs': [("Assembly Prep", {}), ("Dropped:", {})], 'annotations': {'title': 'true'}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
@@ -1006,7 +1006,7 @@ def test_build_field_grid_row_table_title_row_multiple_tokens_uses_first():
 
 
 def test_build_field_grid_row_table_title_row_dir_has_no_visible_effect():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row_h = {'pairs': [("Assembly Prep", {})], 'annotations': {'title': 'true', 'dir': 'h'}}
     table_h = ff.build_field_grid_row_table(doc, row_h, 6.0)
@@ -1018,7 +1018,7 @@ def test_build_field_grid_row_table_title_row_dir_has_no_visible_effect():
 
 
 def test_insert_field_grid_replaces_marker_with_row_tables():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     doc.add_paragraph("@@@FORM_FIELD:FieldGrid@@@\nWork Order: | Date:\nCarrier Board Assy Lot:\n@@@END_FORM_FIELD@@@")
     temp_path = TEST_OUTPUT_DIR / "field_grid_marker.docx"
@@ -1035,7 +1035,7 @@ def test_insert_field_grid_replaces_marker_with_row_tables():
 
 
 def test_insert_field_grid_max_width():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     doc.add_paragraph("@@@FORM_FIELD:FieldGrid:3in@@@\nA: | B:\n@@@END_FORM_FIELD@@@")
     temp_path = TEST_OUTPUT_DIR / "field_grid_max_width.docx"
@@ -1050,7 +1050,7 @@ def test_insert_field_grid_max_width():
 
 
 def test_field_grid_marker_inside_table_cell_warns_and_skips():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     table = doc.add_table(rows=1, cols=1)
     table.columns[0].width = Inches(2.0)
@@ -1068,7 +1068,7 @@ def test_field_grid_marker_inside_table_cell_warns_and_skips():
 
 
 def test_protect_field_grid_line_breaks():
-    import form_fields as ff
+    import dilon_form_fields as ff
     source = (
         "@@@FORM_FIELD:FieldGrid@@@\n"
         "Work Order: | Date:\n"
@@ -1091,7 +1091,7 @@ def test_protect_field_grid_line_breaks():
 
 
 def test_apply_form_fields_form_section_header_numbers_sequentially():
-    import form_fields as ff
+    import dilon_form_fields as ff
     from docx.enum.style import WD_STYLE_TYPE
     doc = Document()
     doc.styles.add_style('Form Section Header', WD_STYLE_TYPE.PARAGRAPH)
@@ -1111,7 +1111,7 @@ def test_apply_form_fields_form_section_header_numbers_sequentially():
 
 
 def test_apply_form_fields_form_section_header_missing_style_degrades():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     doc.add_paragraph("@@@FORM_FIELD:Form_Section_Header@@@Assembly Prep@@@END_FORM_FIELD@@@")
     temp_path = TEST_OUTPUT_DIR / "form_section_header_missing_style.docx"
@@ -1125,7 +1125,7 @@ def test_apply_form_fields_form_section_header_missing_style_degrades():
 
 
 def test_form_section_header_marker_inside_table_cell_warns_and_skips():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     table = doc.add_table(rows=1, cols=1)
     table.columns[0].width = Inches(2.0)

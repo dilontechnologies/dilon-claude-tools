@@ -41,7 +41,7 @@ from dilon_docx_common import (  # noqa: E402
 )
 
 try:
-    from form_fields import apply_form_fields, protect_field_grid_line_breaks
+    from dilon_form_fields import apply_form_fields, protect_field_grid_line_breaks
 except ImportError:
     apply_form_fields = None
     protect_field_grid_line_breaks = None
