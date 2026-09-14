@@ -1116,6 +1116,38 @@ def test_compile_default_output_filename_end_to_end():
     check(expected_output.exists(), f"'{expected_output.name}' created via default output filename")
 
 
+def test_compile_output_arg_as_directory_uses_default_filename():
+    """Passing an existing directory as the output arg (instead of a full
+    file path) should compile into '<doc_number> Rev <current_revision>.docx'
+    inside that directory - lets a task/script target a fixed output folder
+    without hardcoding a filename that changes on every revision bump."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_output_dir.md"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+    output_dir = TEST_OUTPUT_DIR / "compile_test_output_dir_target"
+    output_dir.mkdir(exist_ok=True)
+    expected_output = output_dir / "DD_TST_99999 Rev 00.docx"
+    if expected_output.exists():
+        expected_output.unlink()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_dir),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 when given a directory as the output arg")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(expected_output.exists(), f"'{expected_output.name}' created inside the given output directory")
+
+
 MISSING_DOC_NUMBER_MARKDOWN = (
     '---\n'
     'title: "Missing Doc Number Test"\n'
@@ -2905,6 +2937,7 @@ def main():
     test_default_output_filename_uses_doc_number_and_revision()
     test_default_output_filename_requires_doc_number_and_revision()
     test_compile_default_output_filename_end_to_end()
+    test_compile_output_arg_as_directory_uses_default_filename()
     test_compile_default_output_filename_missing_doc_number_fails_clearly()
     test_compile_resolves_relative_image_paths()
     test_lock_image_aspect_ratios_adds_frame_lock_when_missing()

@@ -360,10 +360,13 @@ def generate_requirements_document(markdown_path, output_path=None, signature_te
 
     Args:
         markdown_path: Path to Markdown file with YAML front matter
-        output_path: Path to save final Word document - defaults to
-            "<doc_number> Rev <current_revision>.docx" next to the input
-            (see default_output_filename() in lib/dilon_docx_common.py)
-            if not given.
+        output_path: Path to save final Word document. If omitted, or if
+            given as an existing directory, the filename is computed as
+            "<doc_number> Rev <current_revision>.docx" (see
+            default_output_filename() in lib/dilon_docx_common.py) - next
+            to the input markdown file when omitted, or inside the given
+            directory when one is passed. Pass a full file path instead
+            to name/place the output explicitly.
         signature_template_path: Path to the base template (Part A) -
             header/footer/styles only; no Jinja fields, no docxtpl
             involved anymore. See populate_header()/populate_footer() in
@@ -395,6 +398,12 @@ def generate_requirements_document(markdown_path, output_path=None, signature_te
             sys.exit(1)
     else:
         output_path = Path(output_path)
+        if output_path.is_dir():
+            try:
+                output_path = output_path / default_output_filename(metadata)
+            except ValueError as exc:
+                print(f"Error: {exc}")
+                sys.exit(1)
 
     include_front_matter = metadata.get('include_front_matter', True)
 
@@ -563,10 +572,11 @@ def generate_requirements_document(markdown_path, output_path=None, signature_te
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python generate_requirements_doc.py <input.md> [output.docx] [base_template.docx]")
+        print("Usage: python generate_requirements_doc.py <input.md> [output.docx|output_dir] [base_template.docx]")
         print("\nExample:")
         print("  python generate_requirements_doc.py MAP-00001_Requirements.md")
         print("  python generate_requirements_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx")
+        print("  python generate_requirements_doc.py MAP-00001_Requirements.md output_folder/")
         print("  python generate_requirements_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx custom_base.docx")
         sys.exit(1)
 

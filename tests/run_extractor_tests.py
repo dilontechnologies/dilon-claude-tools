@@ -13,6 +13,7 @@ from pathlib import Path
 import yaml
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.text import WD_BREAK
 from docx.oxml.ns import qn
 from docx.shared import Inches
 
@@ -374,6 +375,26 @@ def test_extract_header_footer_metadata_prototype_revision():
     check(fields.get("footer_eco_date") == "03/4/2025", f"footer_eco_date still parsed alongside a prototype revision, got {fields.get('footer_eco_date')!r}")
 
 
+def test_extract_header_footer_metadata_iso_footer_date():
+    """An ISO-format footer date (YYYY-MM-DD, as real newer Dilon documents
+    use) must be captured in full - a date pattern that only accepts digits
+    and '/' would truncate '2026-08-31' to '2026' at the first hyphen."""
+    import extract_docx as ex
+    doc = Document()
+    section = doc.sections[0]
+    header_table = section.header.add_table(rows=2, cols=4, width=Inches(6))
+    header_table.rows[0].cells[1].text = "WI:\nNav 3, Detector Head Assembly"
+    header_table.rows[0].cells[2].text = "Rev 01-A"
+    header_table.rows[1].cells[1].text = "Number:\nWI-00077"
+    section.footer.paragraphs[0].text = "WI-00077 Rev 01-A\tECO-000262\tRevision Date: 2026-08-31"
+
+    fields = ex.extract_header_footer_metadata(doc)
+    check(
+        fields.get("footer_eco_date") == "2026-08-31",
+        f"ISO-format footer_eco_date parsed in full, got {fields.get('footer_eco_date')!r}",
+    )
+
+
 def test_strip_figure_prefix():
     import extract_docx as ex
     check(
@@ -484,6 +505,73 @@ def test_build_markdown_body_skips_toc_and_converts_direct_numpr_list():
     check("- Providing support as necessary." in body, "Normal-styled paragraph with direct numPr rendered as a markdown bullet")
 
 
+def _add_page_break(paragraph):
+    paragraph.add_run().add_break(WD_BREAK.PAGE)
+
+
+def test_paragraph_has_page_break():
+    import extract_docx as ex
+    doc = Document()
+    plain = doc.add_paragraph("Ordinary text.")
+    broken = doc.add_paragraph()
+    _add_page_break(broken)
+
+    check(not ex.paragraph_has_page_break(plain), "ordinary paragraph has no page break")
+    check(ex.paragraph_has_page_break(broken), "paragraph with a w:br type=page run is detected")
+
+
+def test_first_heading_block_index():
+    import extract_docx as ex
+    doc = Document()
+    doc.add_paragraph("Not a heading.")
+    doc.add_paragraph("Objective", style="Heading 2")
+    doc.add_paragraph("Body text.")
+
+    blocks = list(ex.iter_block_items(doc))
+    check(ex.first_heading_block_index(blocks) == 1, "first heading found at its block index")
+
+    doc_no_headings = Document()
+    doc_no_headings.add_paragraph("Just a paragraph.")
+    blocks_no_headings = list(ex.iter_block_items(doc_no_headings))
+    check(ex.first_heading_block_index(blocks_no_headings) is None, "None returned when no heading exists")
+
+
+def test_build_markdown_body_leading_page_break_before_first_heading_skipped():
+    import extract_docx as ex
+    doc = Document()
+    _add_page_break(doc.add_paragraph())
+    doc.add_paragraph("Objective", style="Heading 2")
+    doc.add_paragraph("The purpose of this document is...")
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check(
+        "---" not in body,
+        "a page break before the first heading (the title-page/TOC boundary) is not reproduced as '---'",
+    )
+
+
+def test_build_markdown_body_inbody_page_break_becomes_thematic_break():
+    import extract_docx as ex
+    doc = Document()
+    doc.add_paragraph("Reporting", style="Heading 2")
+    doc.add_paragraph("Execution of this Plan is recorded below.")
+    _add_page_break(doc.add_paragraph())
+    doc.add_paragraph("Data Recording", style="Heading 2")
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check("---" in body, "a page break inside the body is reproduced as a '---' thematic break")
+    check(
+        body.index("---") < body.index("## Data Recording") and body.index("## Reporting") < body.index("---"),
+        "the '---' lands between the two headings, where the source page break actually was",
+    )
+
+
 def test_extract_flags_footer_revision_eco_mismatch():
     import extract_docx as ex
     doc = Document()
@@ -543,6 +631,71 @@ def test_extract_no_warning_when_footer_matches_revision():
     )
 
 
+def test_extract_current_revision_corrected_from_stale_header_suffix():
+    """Regression test: a real Dilon prototype revision (e.g. '01-A') that the
+    running header spells without its letter suffix (a stale/hand-typed
+    header, as seen in real WI-00077/WI-00088 source documents) must not
+    silently win over the revision-history table - the table's most recent
+    row is the authoritative current revision."""
+    import extract_docx as ex
+    doc = Document()
+    section = doc.sections[0]
+    header_table = section.header.add_table(rows=2, cols=4, width=Inches(6))
+    header_table.rows[0].cells[1].text = "WI:\nStale Header Fixture"
+    header_table.rows[0].cells[2].text = "Rev 01"
+    header_table.rows[1].cells[1].text = "Number:\nWI-66666"
+
+    _add_table(doc, [
+        ["REVISION HISTORY", "", "", ""],
+        ["REV #", "DESCRIPTION OF CHANGE", "ECO #", "DATE"],
+        ["00", "Initial release", "ECO-000046", "4 Mar 2025"],
+        ["01-A", "Prototype release", "ECO-000262", "31 Aug 2026"],
+    ])
+
+    fixture_path = TEST_OUTPUT_DIR / "stale-header-revision-fixture.docx"
+    output_dir = TEST_OUTPUT_DIR / "stale-header-revision-extracted"
+    doc.save(str(fixture_path))
+
+    result = ex.extract(fixture_path, output_dir)
+    content = result["markdown_path"].read_text(encoding="utf-8")
+    front_matter = yaml.safe_load(content.split("---\n")[1])
+
+    check(
+        front_matter["current_revision"] == "01-A",
+        f"current_revision corrected to the revision table's latest row, got {front_matter['current_revision']!r}",
+    )
+    check(
+        any("disagrees with the revision-history table" in w for w in result["warnings"]),
+        "header/table current_revision disagreement is flagged for review",
+    )
+
+
+def test_extract_no_warning_when_header_matches_revision_table():
+    import extract_docx as ex
+    doc = Document()
+    section = doc.sections[0]
+    header_table = section.header.add_table(rows=2, cols=4, width=Inches(6))
+    header_table.rows[0].cells[1].text = "WI:\nMatching Header Fixture"
+    header_table.rows[0].cells[2].text = "Rev 01-A"
+    header_table.rows[1].cells[1].text = "Number:\nWI-55555"
+
+    _add_table(doc, [
+        ["REVISION HISTORY", "", "", ""],
+        ["REV #", "DESCRIPTION OF CHANGE", "ECO #", "DATE"],
+        ["01-A", "Prototype release", "ECO-000262", "31 Aug 2026"],
+    ])
+
+    fixture_path = TEST_OUTPUT_DIR / "matching-header-revision-fixture.docx"
+    output_dir = TEST_OUTPUT_DIR / "matching-header-revision-extracted"
+    doc.save(str(fixture_path))
+
+    result = ex.extract(fixture_path, output_dir)
+    check(
+        not any("disagrees with the revision-history table" in w for w in result["warnings"]),
+        "matching header/revision-table current_revision produces no disagreement warning",
+    )
+
+
 def test_build_markdown_body_suspicious_heading_becomes_step():
     import extract_docx as ex
     doc = Document()
@@ -599,6 +752,102 @@ def test_build_markdown_body_step_run_closes_around_image():
 
     check(body.count("@@@STEPS@@@") == 2, "an interruption closes and reopens a fresh @@@STEPS@@@ block")
     check(body.count("@@@END_STEPS@@@") == 2, "each opened @@@STEPS@@@ block is closed")
+
+
+def test_build_markdown_body_dilon_step_heading_becomes_step():
+    """Regression test for real WI-00077/WI-00088-style source documents:
+    they were compiled by an earlier run of this same pipeline, so their
+    procedure steps use this compiler's own 'Dilon Step Heading' paragraph
+    style with a live STYLEREF+SEQ step-number field pair - not a Heading N
+    style, not List Paragraph, no numPr list formatting. python-docx's
+    .text reads a field's stale last-cached display result, not a
+    recalculated value, so every step's text carries whatever number that
+    cache happened to freeze on (real WI-00077's 77 steps all cache
+    '1.1', regardless of actual position). Such a paragraph must be
+    recognized as a step, have its stale cached number stripped, and be
+    wrapped in @@@STEPS@@@ like any other procedure."""
+    import extract_docx as ex
+    doc = Document()
+    doc.styles.add_style("Dilon Step Heading", WD_STYLE_TYPE.PARAGRAPH)
+    doc.add_paragraph("Mixing Epoxy", style="Heading 3")
+    doc.add_paragraph("1.1\tBlend the two components of the epoxy.", style="Dilon Step Heading")
+    doc.add_paragraph("1.1\tTear the outer package at the tear points.", style="Dilon Step Heading")
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check("@@@STEPS@@@" in body and "@@@END_STEPS@@@" in body, "'Dilon Step Heading' run wrapped in a @@@STEPS@@@ block")
+    check(
+        "#. Blend the two components of the epoxy." in body,
+        "stale 'N.N\\t' prefix stripped, step rendered as a clean #. item",
+    )
+    check(
+        "#. Tear the outer package at the tear points." in body,
+        "second consecutive 'Dilon Step Heading' paragraph joins the same step run",
+    )
+    check("1.1" not in body, "no leftover stale step-number text remains anywhere in the body")
+
+
+def test_strip_stale_step_number_handles_blank_cached_styleref():
+    """Regression test for real WI-00088: its STYLEREF-3 field cached an
+    empty result (no Heading 3 ancestor in scope when last calculated),
+    so its stale prefix is bare '.\\t' rather than WI-00077's '1.1\\t' -
+    both must strip cleanly since neither carries a real body-text digit."""
+    import extract_docx as ex
+    check(
+        ex.strip_stale_step_number(".\tIf the epoxy or adhesive being used requires mixing.")
+        == "If the epoxy or adhesive being used requires mixing.",
+        "bare '.' + tab (blank cached STYLEREF) prefix stripped",
+    )
+    check(
+        ex.strip_stale_step_number("1.1\tBlend the two components.") == "Blend the two components.",
+        "full 'N.N' + tab prefix still stripped (no regression)",
+    )
+    check(
+        ex.strip_stale_step_number("Plain text with no stale prefix.") == "Plain text with no stale prefix.",
+        "text with no stale prefix is left untouched",
+    )
+
+
+def test_build_markdown_body_dilon_step_heading_run_closes_at_next_heading():
+    import extract_docx as ex
+    doc = Document()
+    doc.styles.add_style("Dilon Step Heading", WD_STYLE_TYPE.PARAGRAPH)
+    doc.add_paragraph("Mixing Epoxy", style="Heading 3")
+    doc.add_paragraph("1.1\tBlend the two components of the epoxy.", style="Dilon Step Heading")
+    doc.add_paragraph("Bonding Crystal", style="Heading 3")
+    doc.add_paragraph("1.1\tCenter the crystal over the photomultiplier.", style="Dilon Step Heading")
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check(body.count("@@@STEPS@@@") == 2, "a new Heading 3 closes the current step run and opens a fresh one")
+    check(body.count("@@@END_STEPS@@@") == 2, "each 'Dilon Step Heading' run is properly closed")
+
+
+def test_build_markdown_body_dilon_step_heading_warns_once_with_count():
+    """A 'Dilon Step Heading' match is unambiguous (unlike the heuristic
+    'suspicious heading' guess), and a real document can carry dozens of
+    them (WI-00077 has 77) - one summary warning with the count, not one
+    repeated near-identical warning per paragraph, keeps the cleanup-pass
+    warning list actually readable."""
+    import extract_docx as ex
+    doc = Document()
+    doc.styles.add_style("Dilon Step Heading", WD_STYLE_TYPE.PARAGRAPH)
+    doc.add_paragraph("Mixing Epoxy", style="Heading 3")
+    doc.add_paragraph("1.1\tBlend the two components of the epoxy.", style="Dilon Step Heading")
+    doc.add_paragraph("1.1\tTear the outer package at the tear points.", style="Dilon Step Heading")
+    doc.add_paragraph("1.1\tRoll one end of the Bi-Pack.", style="Dilon Step Heading")
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    step_warnings = [w for w in warnings if "Dilon Step Heading" in w]
+    check(len(step_warnings) == 1, f"exactly one summary warning emitted, got {len(step_warnings)}")
+    check("3" in step_warnings[0] if step_warnings else False, f"summary warning states the count, got {step_warnings}")
 
 
 def test_slugify_dedup():
@@ -663,6 +912,186 @@ def _build_fixture_docx(path):
     doc.save(str(path))
 
 
+_ONE_PIXEL_PNG_HEX = (
+    "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753"
+    "de0000000c49444154789c63f8ffff3f0005fe02fe0def46b8000000004945"
+    "4e44ae426082"
+)
+
+
+def _write_one_pixel_png(path):
+    path.write_bytes(bytes.fromhex(_ONE_PIXEL_PNG_HEX))
+
+
+def test_paragraph_image_display_size_returns_source_extent():
+    """The size an image was actually displayed at in the source Word
+    document (its wp:extent) is frequently very different from its native
+    pixel dimensions - real WI-00077 images are shown at ~3.5in wide in
+    the document despite native sizes implying 6-9in - so this must read
+    the *display* extent, not infer anything from the image file itself."""
+    import extract_docx as ex
+    from docx.shared import Inches
+
+    doc = Document()
+    image_path = TEST_OUTPUT_DIR / "_size_fixture_image.png"
+    _write_one_pixel_png(image_path)
+    p = doc.add_paragraph()
+    run = p.add_run()
+    run.add_picture(str(image_path), width=Inches(3.5), height=Inches(2.0))
+
+    rid = ex.paragraph_image_rids(p)[0]
+    width_in, height_in = ex.paragraph_image_display_size(p, rid)
+    check(width_in == 3.5, f"display width read from wp:extent, got {width_in!r}")
+    check(height_in == 2.0, f"display height read from wp:extent, got {height_in!r}")
+
+
+def test_paragraph_image_display_size_missing_rid_returns_none():
+    import extract_docx as ex
+    doc = Document()
+    p = doc.add_paragraph("No images here.")
+    width_in, height_in = ex.paragraph_image_display_size(p, "rId99")
+    check((width_in, height_in) == (None, None), "no matching image returns (None, None) rather than guessing")
+
+
+def test_build_markdown_body_image_carries_source_display_size():
+    import extract_docx as ex
+    from docx.shared import Inches
+
+    doc = Document()
+    doc.add_paragraph("Crystal Prep", style="Heading 2")
+    image_path = TEST_OUTPUT_DIR / "_body_size_fixture_image.png"
+    _write_one_pixel_png(image_path)
+    p = doc.add_paragraph()
+    run = p.add_run()
+    run.add_picture(str(image_path), width=Inches(3.5), height=Inches(2.25))
+    doc.add_paragraph("Crystal Ends", style="Caption")
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check(
+        "![Crystal Ends](images/image01.png){#fig:crystal-ends width=3.5in height=2.25in}" in body,
+        f"captioned image carries its source display size, got body containing: "
+        f"{[l for l in body.splitlines() if 'image01' in l]!r}",
+    )
+
+
+def test_build_markdown_body_uncaptioned_image_carries_source_display_size():
+    import extract_docx as ex
+    from docx.shared import Inches
+
+    doc = Document()
+    doc.add_paragraph("Crystal Prep", style="Heading 2")
+    image_path = TEST_OUTPUT_DIR / "_body_size_fixture_image_2.png"
+    _write_one_pixel_png(image_path)
+    p = doc.add_paragraph()
+    run = p.add_run()
+    run.add_picture(str(image_path), width=Inches(4.0), height=Inches(1.5))
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check(
+        "![](images/image01.png){width=4.0in height=1.5in}" in body,
+        f"uncaptioned image still carries its source display size, got body containing: "
+        f"{[l for l in body.splitlines() if 'image01' in l]!r}",
+    )
+
+
+def test_paragraph_inline_markdown_wraps_bold_and_italic_runs():
+    """Regression test: real WI-00077/WI-00088 both end on a bold closing
+    line ('Finished with construction of 820-00006' / 'Dispensing Station
+    is ready for use...') that was previously silently flattened to plain
+    text, since block.text concatenates every run's text with no regard
+    for its bold/italic character formatting."""
+    import extract_docx as ex
+    doc = Document()
+    p = doc.add_paragraph()
+    p.add_run("Finished with construction of 820-00006").bold = True
+
+    check(
+        ex.paragraph_inline_markdown(p) == "**Finished with construction of 820-00006**",
+        f"a fully-bold paragraph is wrapped in **, got {ex.paragraph_inline_markdown(p)!r}",
+    )
+
+    doc2 = Document()
+    p2 = doc2.add_paragraph()
+    p2.add_run("Normal text, then ")
+    r = p2.add_run("italic warning")
+    r.italic = True
+    p2.add_run(", then normal again.")
+    check(
+        ex.paragraph_inline_markdown(p2) == "Normal text, then *italic warning*, then normal again.",
+        f"mixed plain/italic runs render correctly, got {ex.paragraph_inline_markdown(p2)!r}",
+    )
+
+    doc3 = Document()
+    p3 = doc3.add_paragraph()
+    r3 = p3.add_run("critical step")
+    r3.bold = True
+    r3.italic = True
+    check(
+        ex.paragraph_inline_markdown(p3) == "***critical step***",
+        f"a bold+italic run is wrapped in ***, got {ex.paragraph_inline_markdown(p3)!r}",
+    )
+
+
+def test_paragraph_inline_markdown_merges_adjacent_same_style_runs():
+    """A single bold phrase is frequently split across multiple runs by
+    Word's spell-check/autocorrect boundaries - adjacent runs sharing the
+    same bold/italic state must merge into one span, not produce
+    '**a****b**'-style redundant marker pairs."""
+    import extract_docx as ex
+    doc = Document()
+    p = doc.add_paragraph()
+    p.add_run("Finished with ").bold = True
+    p.add_run("construction").bold = True
+    p.add_run(" of 820-00006").bold = True
+
+    check(
+        ex.paragraph_inline_markdown(p) == "**Finished with construction of 820-00006**",
+        f"adjacent same-style runs merge into one span, got {ex.paragraph_inline_markdown(p)!r}",
+    )
+
+
+def test_build_markdown_body_plain_paragraph_preserves_bold():
+    import extract_docx as ex
+    doc = Document()
+    doc.add_paragraph("Bake", style="Heading 2")
+    doc.add_paragraph().add_run("Finished with construction of 820-00006").bold = True
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check(
+        "**Finished with construction of 820-00006**" in body,
+        f"bold plain-paragraph text survives extraction, got body containing: "
+        f"{[l for l in body.splitlines() if 'Finished' in l]!r}",
+    )
+
+
+def test_build_markdown_body_list_item_preserves_bold():
+    import extract_docx as ex
+    doc = Document()
+    doc.add_paragraph("Notes", style="Heading 2")
+    p = doc.add_paragraph(style="List Paragraph")
+    p.add_run("Warning: ").bold = True
+    p.add_run("do not exceed 150°C.")
+
+    blocks = list(ex.iter_block_items(doc))
+    front_matter = {"revisions": []}
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, front_matter)
+
+    check(
+        "- **Warning:** do not exceed 150°C." in body,
+        f"bold run inside a list item survives extraction, got body containing: "
+        f"{[l for l in body.splitlines() if 'Warning' in l]!r}",
+    )
+
+
 def test_extract_full_fixture():
     import extract_docx as ex
     fixture_path = TEST_OUTPUT_DIR / "fixture.docx"
@@ -695,7 +1124,8 @@ def test_extract_full_fixture():
     check("## Bonding" in content, "second Heading 1 also shifted to markdown H2")
     check("- Wear clean gloves." in content, "List Paragraph converted to a markdown bullet")
     check("![Crystal Ends (Polished on Left)]" in content, "figure prefix stripped, remaining caption used as alt text")
-    check("{#fig:crystal-ends-polished-on-left}" in content, "figure gets a slugified id")
+    check("#fig:crystal-ends-polished-on-left" in content, "figure gets a slugified id")
+    check("width=" in content and "height=" in content, "figure carries its source display size")
     check("<!-- EXTRACTOR:" in content, "at least one review comment present (mismatched signature-role labels)")
 
     images = list(result["images_dir"].glob("*"))
@@ -794,13 +1224,32 @@ def main():
     test_build_markdown_body_nested_list_indentation()
     test_is_toc_paragraph()
     test_build_markdown_body_skips_toc_and_converts_direct_numpr_list()
+    test_paragraph_has_page_break()
+    test_first_heading_block_index()
+    test_build_markdown_body_leading_page_break_before_first_heading_skipped()
+    test_build_markdown_body_inbody_page_break_becomes_thematic_break()
     test_build_markdown_body_suspicious_heading_becomes_step()
     test_build_markdown_body_step_run_nests_by_heading_level()
     test_build_markdown_body_step_run_closes_around_image()
+    test_build_markdown_body_dilon_step_heading_becomes_step()
+    test_strip_stale_step_number_handles_blank_cached_styleref()
+    test_build_markdown_body_dilon_step_heading_run_closes_at_next_heading()
+    test_build_markdown_body_dilon_step_heading_warns_once_with_count()
     test_extract_flags_footer_revision_eco_mismatch()
     test_extract_no_warning_when_footer_matches_revision()
+    test_extract_current_revision_corrected_from_stale_header_suffix()
+    test_extract_no_warning_when_header_matches_revision_table()
     test_extract_header_footer_metadata_prototype_revision()
+    test_extract_header_footer_metadata_iso_footer_date()
     test_slugify_dedup()
+    test_paragraph_image_display_size_returns_source_extent()
+    test_paragraph_image_display_size_missing_rid_returns_none()
+    test_build_markdown_body_image_carries_source_display_size()
+    test_build_markdown_body_uncaptioned_image_carries_source_display_size()
+    test_paragraph_inline_markdown_wraps_bold_and_italic_runs()
+    test_paragraph_inline_markdown_merges_adjacent_same_style_runs()
+    test_build_markdown_body_plain_paragraph_preserves_bold()
+    test_build_markdown_body_list_item_preserves_bold()
     test_extract_full_fixture()
     test_table_to_markdown_pipe()
     test_extract_pdf_banner_and_text()
