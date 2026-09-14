@@ -124,6 +124,67 @@ def is_toc_paragraph(style_name, text):
     return text.strip().lower() == 'table of contents'
 
 
+REF_FIG_FIELD_RE = re.compile(r'^\s*REF\s+(fig:\S+)')
+
+
+def paragraph_field_spans(paragraph):
+    """Walk paragraph.runs in document order, returning a list of
+    ('text', text, bold, italic) tuples for ordinary text and
+    ('xref', label, None, None) tuples for the cached result of a Word
+    complex field recognized as a cross-reference (currently: 'REF
+    fig:<label> \\h', Word's field for a live 'Insert Cross-reference' to a
+    figure caption - see MARKDOWN_STYLING_GUIDE.md SS9.3). A Word complex
+    field is a run sequence - <w:fldChar begin> -> <w:instrText
+    field-code> -> <w:fldChar separate> -> cached-result run(s) -> <w:fldChar
+    end> - and python-docx's Run.text only ever surfaces the cached-result
+    runs (fldChar/instrText contribute no <w:t>), so without this,
+    'REF fig:some-figure \\h' reads back as nothing but its last-cached
+    display digit (e.g. '1', since Figure numbering restarts every
+    Heading 2 section - real FTP-00001 confirms this: 13 distinct REF
+    fig: fields across the document, all cached as bare '1'). Any other
+    field type (PAGE, TOC, a REF to a non-fig: bookmark) has no matching
+    anchor syntax this extractor emits elsewhere, so rewriting it would
+    produce a dangling cross-reference that fails compilation - those fall
+    back to their plain cached text unchanged, exactly like today."""
+    from docx.oxml.ns import qn
+    spans = []
+    field_state = None  # None | 'instr' | 'result'
+    field_instr = ''
+    field_label = None
+    xref_emitted = False
+    for run in paragraph.runs:
+        r = run._r
+        fld_chars = r.findall(qn('w:fldChar'))
+        if fld_chars:
+            fld_type = fld_chars[0].get(qn('w:fldCharType'))
+            if fld_type == 'begin':
+                field_state = 'instr'
+                field_instr = ''
+                field_label = None
+                xref_emitted = False
+            elif fld_type == 'separate':
+                m = REF_FIG_FIELD_RE.match(field_instr)
+                field_label = m.group(1) if m else None
+                field_state = 'result'
+            elif fld_type == 'end':
+                field_state = None
+            continue
+        instr_texts = r.findall(qn('w:instrText'))
+        if instr_texts:
+            if field_state == 'instr':
+                field_instr += ''.join(t.text or '' for t in instr_texts)
+            continue
+        if not run.text:
+            continue
+        if field_state == 'result' and field_label:
+            if not xref_emitted:
+                spans.append(('xref', field_label, None, None))
+                xref_emitted = True
+            continue
+        spans.append(('text', run.text, bool(run.bold), bool(run.italic)))
+    return spans
+
+
 def paragraph_inline_markdown(paragraph):
     """Reconstruct a paragraph's text as Markdown, wrapping bold/italic
     run-level formatting in **/*/*** markers so emphasis from the source
@@ -131,23 +192,26 @@ def paragraph_inline_markdown(paragraph):
     text with no regard for its character formatting, so real documents
     that end a procedure on a bold confirmation line (e.g. WI-00077's
     'Finished with construction of 820-00006') were silently flattened to
-    plain text. Adjacent runs sharing the same bold/italic state are
+    plain text. Adjacent text runs sharing the same bold/italic state are
     merged into one span first, since Word's spell-check/autocorrect
     commonly splits a single bold phrase across multiple runs - without
     merging, that would produce redundant marker pairs like '**a****b**'
-    instead of one clean '**ab**'."""
+    instead of one clean '**ab**'. A recognized cross-reference field (see
+    paragraph_field_spans) renders as a live [](#fig:label) link instead
+    of its stale cached text."""
     spans = []
-    for run in paragraph.runs:
-        if not run.text:
-            continue
-        bold, italic = bool(run.bold), bool(run.italic)
-        if spans and spans[-1][1:] == (bold, italic):
-            spans[-1] = (spans[-1][0] + run.text, bold, italic)
+    for kind, payload, bold, italic in paragraph_field_spans(paragraph):
+        if kind == 'text' and spans and spans[-1][0] == 'text' and spans[-1][2:] == (bold, italic):
+            spans[-1] = ('text', spans[-1][1] + payload, bold, italic)
         else:
-            spans.append((run.text, bold, italic))
+            spans.append((kind, payload, bold, italic))
 
     pieces = []
-    for text, bold, italic in spans:
+    for kind, payload, bold, italic in spans:
+        if kind == 'xref':
+            pieces.append(f"[](#{payload})")
+            continue
+        text = payload
         stripped = text.strip()
         if not stripped:
             pieces.append(text)
@@ -309,17 +373,26 @@ def extract_revisions(table):
     return revisions
 
 
-DOC_NUMBER_RE = re.compile(r'Number:\s*([A-Za-z]{2,}-\d+)')
+
+# Some doc numbers carry a trailing part-number suffix beyond the first
+# digit run (e.g. 'PL-00004-01' is its own distinct Arena item number,
+# not 'PL-00004' at some revision '01') - the '(?:-[A-Za-z0-9]+)*' tail
+# lets the capture group continue past additional '-segment' groups
+# instead of stopping at the first one, the same class of fix REV_RE
+# below already needed for prototype revision suffixes like '02-A'.
+DOC_NUMBER_RE = re.compile(r'Number:\s*([A-Za-z]{2,}-\d+(?:-[A-Za-z0-9]+)*)')
 # Revision values aren't digit-only: prototype revisions extend the
 # format to e.g. "02-A" (major number + alphabetic prototype suffix), so
 # the capture group accepts alphanumerics plus internal '.'/'-'.
 REV_RE = re.compile(r'Rev\s+([A-Za-z0-9][A-Za-z0-9.\-]*)')
 FOOTER_LINE_RE = re.compile(
+    # Doc-number group accepts the same trailing '-segment' suffix as
+    # DOC_NUMBER_RE above, for the identical reason (e.g. 'PL-00004-01').
     # Date accepts digits, '/' (legacy MM/DD/YYYY) and '-' (ISO YYYY-MM-DD) -
     # without the hyphen, an ISO date gets truncated at its first '-'
     # (e.g. '2026-08-31' -> '2026'), producing a false disagreement warning
     # against a revision table's correctly-parsed full date.
-    r'([A-Za-z]{2,}-\d+)\s+Rev\s+([A-Za-z0-9][A-Za-z0-9.\-]*)\s+(ECO-\d+)\s+Revision Date:\s*([\d/\-]+)'
+    r'([A-Za-z]{2,}-\d+(?:-[A-Za-z0-9]+)*)\s+Rev\s+([A-Za-z0-9][A-Za-z0-9.\-]*)\s+(ECO-\d+)\s+Revision Date:\s*([\d/\-]+)'
 )
 FIGURE_PREFIX_RE = re.compile(r'^Figure\s+[\d.]+\s*[:\-]\s*', re.IGNORECASE)
 HEADER_LABEL_VALUE_RE = re.compile(r'^([A-Za-z][A-Za-z \-]{0,20}):\s*(.*)$', re.DOTALL)
@@ -387,6 +460,30 @@ def strip_figure_prefix(text):
     return FIGURE_PREFIX_RE.sub('', text).strip()
 
 
+FIG_BOOKMARK_NAME_RE = re.compile(r'^fig:(.+)$')
+
+
+def caption_bookmark_slug(paragraph):
+    """Return the slug portion (prefix stripped) of a 'fig:'-named
+    <w:bookmarkStart> found anywhere in a Caption paragraph, or None if
+    absent. A real Dilon source document that was already compiled once by
+    this same pipeline anchors a fig: bookmark at the start of each
+    image's Caption paragraph, wrapping its auto-generated 'Figure N.M'
+    prefix (this is what Word's 'Insert Cross-reference' feature targets -
+    see paragraph_field_spans). Reusing that exact label - instead of
+    re-slugifying fresh from the caption's visible text - is what keeps a
+    REF fig: field elsewhere in the document resolving to the correct
+    figure after re-extraction; a freshly generated slug has no guarantee
+    of matching the bookmark name a field still points to."""
+    from docx.oxml.ns import qn
+    for bookmark in paragraph._p.findall(qn('w:bookmarkStart')):
+        name = bookmark.get(qn('w:name')) or ''
+        m = FIG_BOOKMARK_NAME_RE.match(name)
+        if m:
+            return m.group(1)
+    return None
+
+
 def slugify(text, existing=None):
     """Lowercase, hyphenate text into a Pandoc-safe identifier fragment,
     deduplicated against `existing` (a set this function mutates) with a
@@ -450,12 +547,20 @@ def paragraph_image_display_size(paragraph, rid):
 
 
 def image_size_attr(width_in, height_in):
-    """Return a ' width=X.XXin height=Y.YYin' Pandoc image attribute
-    fragment (leading space included, ready to insert before the closing
-    '}'), or '' if either dimension is missing."""
+    """Return a ' width=X.XXin' Pandoc image attribute fragment (leading
+    space included, ready to insert before the closing '}'), or '' if
+    either dimension is missing (height_in is still required as a
+    validity signal - paragraph_image_display_size only ever returns both
+    dimensions together or neither, from the same wp:extent element).
+    Only width is emitted, never height alongside it: a width-only
+    attribute makes Pandoc scale height proportionally from the image's
+    real aspect ratio (MARKDOWN_STYLING_GUIDE.md SS4.2), which reproduces
+    the source aspect ratio exactly - emitting both independently-rounded
+    dimensions (2 decimal places each) risked a slightly distorted ratio
+    the rounding introduced on its own."""
     if width_in is None or height_in is None:
         return ""
-    return f" width={round(width_in, 2)}in height={round(height_in, 2)}in"
+    return f" width={round(width_in, 2)}in"
 
 
 def save_image(doc, rid, images_dir, index):
@@ -581,6 +686,45 @@ def table_to_markdown(table):
     return "\n".join(lines)
 
 
+def table_column_widths_in(table):
+    """Return each of table's columns' width in inches (read from the
+    source document's own tblGrid, its actual on-screen column layout),
+    or None if any column's width is unset - an autofit/no-explicit-width
+    table has nothing reliable to preserve."""
+    widths = []
+    for column in table.columns:
+        width = column.width
+        if width is None:
+            return None
+        widths.append(width / EMU_PER_INCH)
+    return widths
+
+
+COLUMN_WIDTH_EQUAL_TOLERANCE_IN = 0.05
+
+
+def table_column_widths_marker(table):
+    """Return a '@@@TABLE_COLUMNS:w1,w2,...@@@' marker line
+    (MARKDOWN_STYLING_GUIDE.md SS3.1) if the source table's columns are
+    NOT evenly divided, or None if they are (or their widths can't be
+    read) - a pipe/grid table converted through Pandoc loses the source
+    document's column proportions and silently defaults to an even split,
+    so a table whose columns were deliberately sized unevenly (e.g. a
+    wide 'Description' column next to a narrow 'ID' column) needs the
+    marker to reproduce that on compile. Widths within
+    COLUMN_WIDTH_EQUAL_TOLERANCE_IN inches of each other are treated as
+    an intentional even split - re-asserting the compiler's own default
+    would be redundant - to absorb the sub-hundredth-inch jitter real
+    Word documents carry even for genuinely even columns."""
+    widths = table_column_widths_in(table)
+    if widths is None or len(widths) < 2:
+        return None
+    if max(widths) - min(widths) <= COLUMN_WIDTH_EQUAL_TOLERANCE_IN:
+        return None
+    spec = ",".join(str(round(w, 2)) for w in widths)
+    return f"@@@TABLE_COLUMNS:{spec}@@@"
+
+
 def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
     """Walks `blocks` (from iter_block_items) in order, appending markdown
     lines and mutating `front_matter` in place with any signature/revision
@@ -648,6 +792,9 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
                         )
                     front_matter["current_revision"] = latest_number
             else:
+                columns_marker = table_column_widths_marker(block)
+                if columns_marker:
+                    lines.append(columns_marker)
                 lines.append(table_to_markdown(block))
                 lines.append("")
             continue
@@ -678,17 +825,21 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
         if rids:
             flush_all()
             caption_text = None
+            caption_slug = None
             if i + 1 < len(blocks) and isinstance(blocks[i + 1], Paragraph):
                 next_style = blocks[i + 1].style.name if blocks[i + 1].style else None
                 if next_style == "Caption":
-                    caption_text = strip_figure_prefix(blocks[i + 1].text.strip())
+                    caption_para = blocks[i + 1]
+                    caption_text = strip_figure_prefix(caption_para.text.strip())
+                    caption_slug = caption_bookmark_slug(caption_para)
             for rid in rids:
                 filename = save_image(doc, rid, images_dir, image_index)
                 image_index += 1
                 width_in, height_in = paragraph_image_display_size(block, rid)
                 size_attr = image_size_attr(width_in, height_in)
                 if caption_text:
-                    slug = slugify(caption_text, existing_slugs)
+                    slug = caption_slug or slugify(caption_text, existing_slugs)
+                    existing_slugs.add(slug)
                     lines.append(f"![{caption_text}](images/{filename}){{#fig:{slug}{size_attr}}}")
                 elif size_attr:
                     lines.append(f"![](images/{filename}){{{size_attr.strip()}}}")
