@@ -355,6 +355,43 @@ def test_extract_header_footer_metadata_split_cells():
     check(fields.get("doc_number") == "WI-00077", f"doc_number still parsed when split across cells, got {fields.get('doc_number')!r}")
 
 
+def test_extract_header_footer_metadata_title_excludes_embedded_number_label():
+    """Regression test for real PL-00004-01: its header combines 'Title:'
+    and 'Number:' in a single table cell, separated only by a newline
+    ('Title: Process Qualification ...\nNumber: PL-00004-01'), unlike
+    WI-00077's separate-row layout. HEADER_LABEL_VALUE_RE's DOTALL value
+    capture previously swallowed the embedded 'Number: PL-00004-01' line
+    whole, producing a title literally ending in 'Number: PL-00004-01'."""
+    import extract_docx as ex
+    doc = Document()
+    section = doc.sections[0]
+    header_table = section.header.add_table(rows=1, cols=3, width=Inches(6))
+    header_table.rows[0].cells[0].text = (
+        "Title: Process Qualification of Nav3 Detector Head Assy and Alignment Fixture\n"
+        "Number: PL-00004-01"
+    )
+    header_table.rows[0].cells[1].text = "Rev 00"
+
+    fields = ex.extract_header_footer_metadata(doc)
+    check(
+        fields.get("title") == "Process Qualification of Nav3 Detector Head Assy and Alignment Fixture",
+        f"title excludes the embedded 'Number: ...' line, got {fields.get('title')!r}",
+    )
+    check(
+        fields.get("doc_number") == "PL-00004-01",
+        f"doc_number still parsed correctly from the same combined cell, got {fields.get('doc_number')!r}",
+    )
+
+
+def test_truncate_at_embedded_header_label_leaves_genuine_multiline_value_untouched():
+    import extract_docx as ex
+    value = "Nav 3, Detector Head Assembly\n PN 820-00006"
+    check(
+        ex.truncate_at_embedded_header_label(value) == value,
+        "a second line with no 'Label:' pattern (just more title text) is left untouched",
+    )
+
+
 def test_extract_header_footer_metadata_prototype_revision():
     """Prototype revision numbers like "02-A" (major number + alphabetic
     prototype suffix) aren't digit-only, so the header/footer Rev
@@ -1555,6 +1592,8 @@ def main():
     test_extract_header_footer_metadata()
     test_extract_header_footer_metadata_table_footer()
     test_extract_header_footer_metadata_split_cells()
+    test_extract_header_footer_metadata_title_excludes_embedded_number_label()
+    test_truncate_at_embedded_header_label_leaves_genuine_multiline_value_untouched()
     test_strip_figure_prefix()
     test_paragraph_inline_markdown_converts_ref_fig_field_to_xref_link()
     test_paragraph_inline_markdown_leaves_unrecognized_field_as_cached_text()

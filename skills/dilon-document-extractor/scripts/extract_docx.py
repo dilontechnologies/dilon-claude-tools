@@ -400,6 +400,27 @@ HEADER_TITLE_SKIP_LABELS = {'number', 'page'}
 HEADER_TITLE_TRAILING_REV_RE = re.compile(r'\s*Rev\s+\d+.*$', re.DOTALL)
 
 
+def truncate_at_embedded_header_label(value):
+    """If `value` (a header cell's Title:/WI:/etc. value, greedily
+    captured across every line in the cell via HEADER_LABEL_VALUE_RE's
+    DOTALL match) has a later line that is itself a 'Number:'/'Page:'-
+    style label, truncate the value right before that line - it's a
+    separate labeled field the source document packed into the same
+    table cell (real PL-00004-01's header combines 'Title: ...' and
+    'Number: PL-00004-01' in one cell, separated only by a newline,
+    unlike WI-00077's separate-row layout), not part of this value. A
+    genuinely multi-line value with no embedded label (e.g. a title
+    continued onto a second line) is returned unchanged."""
+    lines = value.splitlines()
+    for i, line in enumerate(lines):
+        if i == 0:
+            continue
+        label_match = HEADER_LABEL_VALUE_RE.match(line.strip())
+        if label_match and label_match.group(1).strip().lower() in HEADER_TITLE_SKIP_LABELS:
+            return "\n".join(lines[:i])
+    return value
+
+
 def extract_header_footer_metadata(doc):
     """Returns a dict that may include 'title', 'doc_number',
     'current_revision', 'footer_eco_number', 'footer_eco_date', parsed from
@@ -426,6 +447,7 @@ def extract_header_footer_metadata(doc):
                     value = label_match.group(2).strip()
                     if not value and len(cell_texts) > 1:
                         value = cell_texts[1]
+                    value = truncate_at_embedded_header_label(value)
                     value = HEADER_TITLE_TRAILING_REV_RE.sub('', value).strip()
                     value = re.sub(r'\s+', ' ', value)
                     if value:
