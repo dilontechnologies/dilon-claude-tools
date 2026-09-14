@@ -11,6 +11,7 @@ docs/superpowers/specs/2026-08-17-document-extraction-and-form-tooling-design.md
 import math
 import re
 import subprocess
+from copy import deepcopy
 from pathlib import Path
 
 from docx import Document
@@ -917,31 +918,71 @@ def resolve_reference_markers(docx_file, type_resolvers):
         if not matches:
             continue
 
-        original_text = body_text
-        for run in list(para.runs):
-            if id(run._element) in header_ids:
-                continue
-            run._element.getparent().remove(run._element)
-
+        # Rebuild only the run(s) that actually overlap a sentinel match,
+        # leaving every other run in the paragraph (e.g. a **bold** run
+        # earlier in the same sentence) completely untouched. The old
+        # implementation deleted every non-header run and rebuilt the
+        # paragraph's text via plain para.add_run() calls, which silently
+        # dropped bold/italic/etc. from every run in the paragraph, not
+        # just the one touching the sentinel - the root cause of the
+        # ECO-000262/FTP-00001 "Acceptance Criteria" bold-loss bug.
+        body_runs = []
         cursor = 0
-        for match in matches:
-            before_text = original_text[cursor:match.start()]
-            if before_text:
-                para.add_run(before_text)
+        for el in para._p:
+            if el.tag != qn('w:r') or id(el) in header_ids:
+                continue
+            run_text = Run(el, para).text
+            body_runs.append({'el': el, 'text': run_text, 'start': cursor, 'end': cursor + len(run_text)})
+            cursor += len(run_text)
 
-            ref_type, label = match.group(1), match.group(2)
-            bookmark_name = f'{ref_type}:{label}'
-            if bookmark_name in bookmark_names and ref_type in type_resolvers:
-                type_resolvers[ref_type](para, bookmark_name)
-                resolved += 1
-            else:
-                missing.append(bookmark_name)
+        for run_info in body_runs:
+            el = run_info['el']
+            r_start, r_end = run_info['start'], run_info['end']
+            overlaps = [m for m in matches if m.start() < r_end and m.end() > r_start]
+            if not overlaps:
+                continue  # untouched run - keeps its original formatting as-is
 
-            cursor = match.end()
+            r_pr = el.find(qn('w:rPr'))
+            rpr_copy = deepcopy(r_pr) if r_pr is not None else None
 
-        trailing_text = original_text[cursor:]
-        if trailing_text:
-            para.add_run(trailing_text)
+            def _emit_literal_run(text, _rpr_copy=rpr_copy, _anchor=el):
+                if not text:
+                    return
+                new_run = para.add_run(text)
+                new_el = new_run._element
+                existing_rpr = new_el.find(qn('w:rPr'))
+                if existing_rpr is not None:
+                    new_el.remove(existing_rpr)
+                if _rpr_copy is not None:
+                    new_el.insert(0, deepcopy(_rpr_copy))
+                _anchor.addprevious(new_el)
+
+            local_cursor = r_start
+            for match in overlaps:
+                clipped_start = max(match.start(), r_start)
+                clipped_end = min(match.end(), r_end)
+                _emit_literal_run(run_info['text'][local_cursor - r_start:clipped_start - r_start])
+
+                # Only resolve the reference once - in whichever run the
+                # match actually ends in, so a sentinel spanning more than
+                # one run (unlikely, but not impossible) doesn't get
+                # resolved twice.
+                if match.end() <= r_end:
+                    ref_type, label = match.group(1), match.group(2)
+                    bookmark_name = f'{ref_type}:{label}'
+                    if bookmark_name in bookmark_names and ref_type in type_resolvers:
+                        before_count = len(para._p)
+                        type_resolvers[ref_type](para, bookmark_name)
+                        for new_el in list(para._p)[before_count:]:
+                            el.addprevious(new_el)
+                        resolved += 1
+                    else:
+                        missing.append(bookmark_name)
+
+                local_cursor = clipped_end
+
+            _emit_literal_run(run_info['text'][local_cursor - r_start:])
+            el.getparent().remove(el)
 
     if missing:
         raise ReferenceResolutionError(

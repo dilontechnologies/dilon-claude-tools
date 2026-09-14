@@ -1729,6 +1729,35 @@ def test_resolve_reference_markers_duplicate_anchor_raises():
         check("dup" in str(exc), f"the error names the duplicated label (got: {exc})")
 
 
+def test_resolve_reference_markers_preserves_other_formatting_in_same_paragraph():
+    """Reproduces a real ECO-000262/FTP-00001 bug: a paragraph like
+    "**Acceptance Criteria**: ... XREF:fig:x ..." lost its bold entirely
+    once the XREF resolved, because the old implementation deleted every
+    run in the paragraph and rebuilt it via plain para.add_run() calls -
+    discarding formatting on every run, not just the one touching the
+    sentinel."""
+    md = (
+        "## Section One {#sec:intro}\n\n"
+        "**Acceptance Criteria**: this text refers to XREF:sec:intro inline.\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "xref_preserves_bold_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    dilon_docx_common.narrow_section_bookmarks(docx_path)
+
+    dilon_docx_common.resolve_reference_markers(docx_path, {
+        'sec': dilon_docx_common.resolve_sec_reference,
+    })
+
+    doc = Document(docx_path)
+    target = next(p for p in doc.paragraphs if p.text.startswith("Acceptance Criteria"))
+    bold_run = next((r for r in target.runs if r.text == "Acceptance Criteria"), None)
+    check(
+        bold_run is not None and bold_run.bold is True,
+        "bold text earlier in a paragraph survives resolving an XREF later in the same paragraph "
+        f"(runs: {[(r.text, r.bold) for r in target.runs]})"
+    )
+
+
 def test_heading_auto_numbering():
     """Render test: headings written WITHOUT manual numbers (per the
     updated MARKDOWN_STYLING_GUIDE.md convention) must come out of Pandoc
@@ -2960,6 +2989,7 @@ def main():
     test_resolve_reference_markers_dispatches_by_type()
     test_resolve_reference_markers_missing_anchor_raises()
     test_resolve_reference_markers_duplicate_anchor_raises()
+    test_resolve_reference_markers_preserves_other_formatting_in_same_paragraph()
     test_heading2_has_no_automatic_page_break()
     test_compile_toc_forces_page_break_after_toc()
     test_get_step_clarification_abstract_num_id_found()
