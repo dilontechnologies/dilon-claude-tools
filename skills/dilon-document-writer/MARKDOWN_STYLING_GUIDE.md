@@ -439,6 +439,9 @@ this instead of a plain `#.` list.
 **Rules:**
 - `@@@STEPS@@@` takes no attributes - just the bare marker, opening and closing (`@@@END_STEPS@@@`) around `#.` list content, same tab-nesting convention as any ordered list (Section 5.2).
 - A step's number is scoped to the nearest preceding `###` (Heading 3) - a new `###` always starts a fresh count at 1. Every `@@@STEPS@@@` block within the *same* Heading 3 subsection shares one continuous count automatically - no marker needed to "continue" a procedure interrupted by prose, a photo, or a `NOTE:`.
+- Every `@@@STEPS@@@` block must sit under a `###` (Heading 3). A block directly under a `##` fails compilation with an error.
+- A `###` subsection that contains `@@@STEPS@@@` cannot also contain a `####` (Heading 4), before or after the steps - steps use Heading 4's numbering level, so the two would share one counter. Compilation fails with an error naming the subsection; move the `####` content under its own `###`, or make it plain text.
+- In the compiled Word document, steps are real Word numbered-list items: pressing Enter after a step adds the next numbered step, and inserting or deleting steps renumbers the rest automatically. Pressing Tab on a step demotes it to a four-level number (e.g. `2.3.1.1`).
 - **In the procedure itself**, a step shows its live `<H2 number>.<H3 number>.<step number>` (e.g. `2.3.1`) - no "Step " word in place.
 - A nested `#.` item under a step is a **clarification**: it's relettered `a.`, `b.`, `c.` and restarts at "a." for every step (it does not continue the previous step's lettering). A nested `-` (bulleted) item is left as a plain bullet.
 - **When referenced elsewhere** (see below), a step resolves to `Step <n>.<m>.<p>` (e.g. `Step 2.3.1`) - the "Step " word only ever appears in a cross-reference, never in the procedure's own in-place numbering.
@@ -452,7 +455,7 @@ Give the step an anchor with a bracketed-span id - `[]{#step:label}`, not a bare
 #. Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
 ```
 
-The anchor must sit on a **top-level step**, not on a nested clarification - only a top-level step's number is field-based and cross-reference-ready; a clarification keeps its own native list lettering and isn't currently a valid reference target.
+The anchor must sit on a **top-level step**, not on a nested clarification - a clarification keeps its own lettering (`a.`, `b.`) and isn't currently a valid reference target.
 
 Every `{#step:label}` anchor must be unique across the whole document - a duplicate fails compilation with an error.
 

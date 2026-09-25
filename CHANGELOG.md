@@ -5,6 +5,15 @@ All notable changes to the Dilon Claude Tools MCP Server will be documented in t
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- `dilon-document-compiler`: `@@@STEPS@@@` steps are now native Word numbered-list items on the heading list instead of `STYLEREF`/`SEQ` fields - pressing Enter after a step in Word adds the next numbered step, and numbers never go stale. Step cross-references now use `REF \w`.
+- **BREAKING:** a `@@@STEPS@@@` block must sit under a `###` (Heading 3), and a Heading 3 containing steps cannot also contain a `####` (Heading 4); both now fail compilation with an error. Documents authored with steps directly under a `##` need a `###` added.
+
+### Fixed
+- `dilon-document-extractor`: covered natively numbered steps (including ones added in Word) with round-trip tests
+
 ## [2.0.3] - 2026-09-01
 
 ### Added
