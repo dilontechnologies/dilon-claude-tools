@@ -1950,7 +1950,7 @@ def test_ensure_blank_line_around_steps_markers_idempotent():
     check(result == md, "already-blank-line case is left unchanged")
 
 
-def test_apply_field_based_step_numbering_single_step():
+def test_apply_step_list_numbering_single_step():
     md = (
         "## Major Section\n\n### Subsection Title\n\n"
         "@@@STEPS@@@\n\n"
@@ -1963,7 +1963,7 @@ def test_apply_field_based_step_numbering_single_step():
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    count = step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    count = step_numbering.apply_step_list_numbering(docx_path, clarification_id)
     check(count == 3, f"both steps and the one clarification get numbered (got {count})")
 
     doc = Document(docx_path)
@@ -1976,30 +1976,36 @@ def test_apply_field_based_step_numbering_single_step():
     clarification_paras = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Clarification List']
     check(len(clarification_paras) == 1, f"the nested item carries 'Dilon Step Clarification List' (got {len(clarification_paras)})")
 
+    for p in step_paras:
+        num_id, _ = dilon_docx_common._paragraph_num_id_and_ilvl(p._p)
+        check(num_id is None,
+              "a step carries no paragraph-level numPr before the merge "
+              "(link_steps_to_heading_numbering() adds it post-merge)")
+
     with zipfile.ZipFile(docx_path) as z:
         xml = z.read('word/document.xml').decode('utf-8')
-    instrs = re.findall(r'w:instr="([^"]*)"', xml)
-    styleref_count = sum(1 for i in instrs if i.strip() == 'STYLEREF 3 \\s')
-    seq_count = sum(1 for i in instrs if i.strip() == 'SEQ DilonStep \\* ARABIC \\s 3')
-    check(styleref_count == 2, f"both steps get a 'STYLEREF 3 \\\\s' field (got {styleref_count})")
-    check(seq_count == 2, f"both steps get a 'SEQ DilonStep \\\\* ARABIC \\\\s 3' field (got {seq_count})")
+    check('STYLEREF 3' not in xml and 'SEQ DilonStep' not in xml,
+          "no STYLEREF/SEQ step-number fields are generated anymore")
 
 
-def test_apply_field_based_step_numbering_number_precedes_step_text():
+def test_apply_step_list_numbering_step_text_is_untouched():
+    """With native list numbering the number is Word's list label, not
+    text in the paragraph - so the paragraph's text is exactly the
+    author's step text, with no number or tab run prepended."""
     md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. Wear clean gloves.\n\n@@@END_STEPS@@@\n"
-    docx_path = TEST_OUTPUT_DIR / "step_numbering_field_order_test.docx"
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_step_text_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
     step_para = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading'][0]
-    check(step_para.text.strip().endswith('Wear clean gloves.'),
-          f"the field's cached placeholder text comes before the author's step text (got {step_para.text!r})")
+    check(step_para.text == 'Wear clean gloves.',
+          f"step paragraph text is exactly the authored text (got {step_para.text!r})")
 
 
-def test_apply_field_based_step_numbering_clarifications_restart_per_step():
+def test_apply_step_list_numbering_clarifications_restart_per_step():
     md = (
         "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n"
         "#. First.\n"
@@ -2013,7 +2019,7 @@ def test_apply_field_based_step_numbering_clarifications_restart_per_step():
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
     clarification_paras = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Clarification List']
@@ -2024,7 +2030,7 @@ def test_apply_field_based_step_numbering_clarifications_restart_per_step():
           "every clarification sits at ilvl 0 of its own fresh list, not nested under the step")
 
 
-def test_apply_field_based_step_numbering_bullets_left_alone():
+def test_apply_step_list_numbering_bullets_left_alone():
     md = (
         "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n"
         "#. First.\n"
@@ -2035,7 +2041,7 @@ def test_apply_field_based_step_numbering_bullets_left_alone():
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
     bullet_para = [p for p in doc.paragraphs if 'unordered clarification' in p.text][0]
@@ -2043,7 +2049,7 @@ def test_apply_field_based_step_numbering_bullets_left_alone():
           "the bullet item is left with its own style, not reassigned to the clarification list style")
 
 
-def test_apply_field_based_step_numbering_bullets_ilvl_decremented():
+def test_apply_step_list_numbering_bullets_ilvl_decremented():
     """A bullet's ilvl inside @@@STEPS@@@ is Pandoc's original markdown-
     nesting depth, which still counts the step itself as a real list
     level even though the step is stripped of its own numPr. Left
@@ -2064,7 +2070,7 @@ def test_apply_field_based_step_numbering_bullets_ilvl_decremented():
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
     direct_bullet = [p for p in doc.paragraphs if 'Directly under the step' in p.text][0]
@@ -2076,20 +2082,20 @@ def test_apply_field_based_step_numbering_bullets_ilvl_decremented():
     check(nested_ilvl == '1', f"a bullet under an ordered clarification is decremented to ilvl 1 (got {nested_ilvl!r})")
 
 
-def test_apply_field_based_step_numbering_unclosed_block_raises():
-    md = "@@@STEPS@@@\n\n#. First\n"
+def test_apply_step_list_numbering_unclosed_block_raises():
+    md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. First\n"
     docx_path = TEST_OUTPUT_DIR / "step_numbering_unclosed_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
     try:
-        step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+        step_numbering.apply_step_list_numbering(docx_path, clarification_id)
         check(False, "an @@@STEPS@@@ with no matching @@@END_STEPS@@@ raises StepBlockError")
     except step_numbering.StepBlockError as exc:
         check("END_STEPS" in str(exc), f"the error mentions the missing closing marker (got: {exc})")
 
 
-def test_apply_field_based_step_numbering_open_block_across_heading3_boundary_raises():
+def test_apply_step_list_numbering_open_block_across_heading3_boundary_raises():
     md = (
         "### Subsection One\n\n@@@STEPS@@@\n\n#. First\n#. Second\n\n"
         "### Subsection Two\n\n#. Third\n\n@@@END_STEPS@@@\n"
@@ -2099,17 +2105,17 @@ def test_apply_field_based_step_numbering_open_block_across_heading3_boundary_ra
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
     try:
-        step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+        step_numbering.apply_step_list_numbering(docx_path, clarification_id)
         check(False, "an @@@STEPS@@@ left open across a ### (Heading 3) boundary raises StepBlockError")
     except step_numbering.StepBlockError as exc:
         check("section heading" in str(exc), f"the error mentions the section boundary (got: {exc})")
 
 
-def test_apply_field_based_step_numbering_skips_gracefully_without_clarification_style():
+def test_apply_step_list_numbering_skips_gracefully_without_clarification_style():
     md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. First\n    #. Clarification\n\n@@@END_STEPS@@@\n"
     docx_path = TEST_OUTPUT_DIR / "step_numbering_no_clarification_id_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, None)  # should not raise
+    step_numbering.apply_step_list_numbering(docx_path, None)  # should not raise
 
     doc = Document(docx_path)
     check(all('@@@STEPS' not in p.text and '@@@END_STEPS' not in p.text for p in doc.paragraphs),
@@ -2118,18 +2124,89 @@ def test_apply_field_based_step_numbering_skips_gracefully_without_clarification
           "the top-level step is still converted even when clarification numbering is skipped")
 
 
-def test_apply_field_based_step_numbering_preserves_inline_formatting():
+def test_apply_step_list_numbering_preserves_inline_formatting():
     md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. Use **IPA** and a lint-free cloth.\n\n@@@END_STEPS@@@\n"
     docx_path = TEST_OUTPUT_DIR / "step_numbering_formatting_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
     step_para = [p for p in doc.paragraphs if 'IPA' in p.text][0]
     bold_runs = [r for r in step_para.runs if r.bold]
     check(len(bold_runs) == 1 and bold_runs[0].text == 'IPA', "bold formatting on 'IPA' survives")
+
+
+def _expect_step_block_error(md, docx_name, expected_fragments, description):
+    """Compiles md to Part D, runs apply_step_list_numbering(), and checks
+    it raises StepBlockError whose message contains every fragment."""
+    docx_path = TEST_OUTPUT_DIR / docx_name
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    try:
+        step_numbering.apply_step_list_numbering(docx_path, clarification_id)
+        check(False, f"{description} raises StepBlockError")
+    except step_numbering.StepBlockError as exc:
+        message = str(exc)
+        check(all(f in message for f in expected_fragments),
+              f"{description}: error names {expected_fragments} (got: {message})")
+
+
+def test_apply_step_list_numbering_heading4_before_steps_raises():
+    _expect_step_block_error(
+        "## Major Section\n\n### Assembly\n\n#### Tools\n\nA torque driver.\n\n"
+        "@@@STEPS@@@\n\n#. First.\n\n@@@END_STEPS@@@\n",
+        "step_numbering_h4_before_test.docx",
+        ['Assembly', 'Heading 4'],
+        "a Heading 4 followed by @@@STEPS@@@ under one Heading 3",
+    )
+
+
+def test_apply_step_list_numbering_heading4_after_steps_raises():
+    _expect_step_block_error(
+        "## Major Section\n\n### Assembly\n\n@@@STEPS@@@\n\n#. First.\n\n@@@END_STEPS@@@\n\n"
+        "#### Notes\n\nSome notes.\n",
+        "step_numbering_h4_after_test.docx",
+        ['Assembly', 'Heading 4'],
+        "@@@STEPS@@@ followed by a Heading 4 under one Heading 3",
+    )
+
+
+def test_apply_step_list_numbering_heading4_inside_open_block_raises():
+    _expect_step_block_error(
+        "## Major Section\n\n### Assembly\n\n@@@STEPS@@@\n\n#. First.\n\n"
+        "#### Stray Sub-heading\n\n#. Second.\n\n@@@END_STEPS@@@\n",
+        "step_numbering_h4_inside_test.docx",
+        ['Assembly', 'Heading 4'],
+        "a Heading 4 inside an open @@@STEPS@@@ block",
+    )
+
+
+def test_apply_step_list_numbering_steps_without_heading3_raises():
+    _expect_step_block_error(
+        "## Major Section\n\n@@@STEPS@@@\n\n#. First.\n\n@@@END_STEPS@@@\n",
+        "step_numbering_no_h3_test.docx",
+        ['Heading 3', '@@@STEPS@@@'],
+        "a @@@STEPS@@@ block with no Heading 3 above it",
+    )
+
+
+def test_apply_step_list_numbering_heading4_in_different_heading3_allowed():
+    """The ban is per Heading 3: a Heading 4 under one Heading 3 and steps
+    under a different Heading 3 (even in the same Heading 2) are fine."""
+    md = (
+        "## Major Section\n\n### Background\n\n#### Tools\n\nA torque driver.\n\n"
+        "### Procedure\n\n@@@STEPS@@@\n\n#. First.\n\n@@@END_STEPS@@@\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_h4_other_h3_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    try:
+        count = step_numbering.apply_step_list_numbering(docx_path, clarification_id)
+        check(count == 1, f"the step under the other Heading 3 is converted (got {count})")
+    except step_numbering.StepBlockError as exc:
+        check(False, f"a Heading 4 in a different Heading 3 must not raise (got: {exc})")
 
 
 def test_resolve_step_reference_builds_composite_field():
@@ -2139,7 +2216,7 @@ def test_resolve_step_reference_builds_composite_field():
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
     dilon_docx_common.resolve_reference_markers(docx_path, {'step': step_numbering.resolve_step_reference})
 
     with zipfile.ZipFile(docx_path) as z:
@@ -2999,15 +3076,20 @@ def main():
     test_create_num_instance_writes_start_override()
     test_ensure_blank_line_around_steps_markers_inserts_both_sides()
     test_ensure_blank_line_around_steps_markers_idempotent()
-    test_apply_field_based_step_numbering_single_step()
-    test_apply_field_based_step_numbering_number_precedes_step_text()
-    test_apply_field_based_step_numbering_clarifications_restart_per_step()
-    test_apply_field_based_step_numbering_bullets_left_alone()
-    test_apply_field_based_step_numbering_bullets_ilvl_decremented()
-    test_apply_field_based_step_numbering_unclosed_block_raises()
-    test_apply_field_based_step_numbering_open_block_across_heading3_boundary_raises()
-    test_apply_field_based_step_numbering_skips_gracefully_without_clarification_style()
-    test_apply_field_based_step_numbering_preserves_inline_formatting()
+    test_apply_step_list_numbering_single_step()
+    test_apply_step_list_numbering_step_text_is_untouched()
+    test_apply_step_list_numbering_clarifications_restart_per_step()
+    test_apply_step_list_numbering_bullets_left_alone()
+    test_apply_step_list_numbering_bullets_ilvl_decremented()
+    test_apply_step_list_numbering_unclosed_block_raises()
+    test_apply_step_list_numbering_open_block_across_heading3_boundary_raises()
+    test_apply_step_list_numbering_skips_gracefully_without_clarification_style()
+    test_apply_step_list_numbering_preserves_inline_formatting()
+    test_apply_step_list_numbering_heading4_before_steps_raises()
+    test_apply_step_list_numbering_heading4_after_steps_raises()
+    test_apply_step_list_numbering_heading4_inside_open_block_raises()
+    test_apply_step_list_numbering_steps_without_heading3_raises()
+    test_apply_step_list_numbering_heading4_in_different_heading3_allowed()
     test_resolve_step_reference_builds_composite_field()
     test_compile_field_based_step_numbering_end_to_end()
     test_compile_steps_with_bullets_end_to_end()

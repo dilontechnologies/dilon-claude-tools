@@ -1,14 +1,24 @@
 # -*- coding: utf-8 -*-
 """
-Auto-numbered, cross-referenceable @@@STEPS@@@ list support for
-dilon-document-compiler. See
-docs/superpowers/specs/2026-08-20-work-instruction-step-numbering-design.md.
+@@@STEPS@@@ procedure-step support for dilon-document-compiler.
 
-Scoped to dilon-document-compiler only - not shared with
-dilon-document-form-compiler (forms have no procedural-steps concept).
+Steps compile to real Word list items on the headings' own multilevel
+list (one level below Heading 3), so Word itself numbers them
+"<H2>.<H3>.<step>", restarts them at every Heading 3, and adds the next
+step when a user presses Enter after one. Two passes:
+
+- apply_step_list_numbering() - before the docxcompose merge: removes the
+  @@@STEPS@@@ markers, restyles steps 'Dilon Step Heading' (with NO list
+  numbering yet), reletters ordered clarifications, and enforces the
+  block/heading rules.
+- link_steps_to_heading_numbering() - after the merge: attaches every step
+  to the heading list. This must run post-merge because docxcompose remaps
+  paragraph-level numIds into a copied, separate list.
+
+Design: docs/superpowers/specs/2026-09-25-steps-native-list-numbering-design.md
+(gitignored; see git history of this file for the rationale if absent).
 """
 
-import re
 import sys
 import zipfile
 from pathlib import Path
@@ -20,11 +30,9 @@ from docx.oxml import OxmlElement
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 from dilon_docx_common import (
     add_complex_field,
-    add_field_simple_run,
     _decimal_abstract_num_ids,
     _num_id_to_abstract_map,
     _paragraph_num_id_and_ilvl,
-    _narrow_bookmark,
 )
 
 W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
@@ -131,12 +139,11 @@ def create_num_instance(numbering_element, abstract_num_id):
 
 
 class StepBlockError(ValueError):
-    """Raised for a malformed @@@STEPS@@@/@@@END_STEPS@@@ pairing - an
-    @@@STEPS@@@ with no matching @@@END_STEPS@@@ before the next
-    @@@STEPS@@@ or the end of the document, or an @@@END_STEPS@@@ with
-    no @@@STEPS@@@ open. Unlike the old markdown-level version of this
-    error, this is now raised post-conversion (see
-    apply_section_scoped_step_numbering()) and halts compilation - a
+    """Raised for malformed @@@STEPS@@@ usage - an unmatched or reopened
+    marker, a block left open across a section heading, a block with no
+    Heading 3 above it, or a Heading 3 mixing a Heading 4 with a block.
+    Raised post-conversion by apply_step_list_numbering(); see its
+    docstring for the full list of conditions. Halts compilation - a
     malformed steps block is an authoring mistake worth surfacing
     clearly, not silently degrading."""
 
@@ -147,7 +154,7 @@ def ensure_blank_line_around_steps_markers(markdown_text):
     follows it, and separates @@@END_STEPS@@@ from the list item that
     precedes it. Both markers now pass through to Pandoc as literal
     paragraphs (no more markdown-level block extraction -
-    apply_section_scoped_step_numbering() finds them post-conversion),
+    apply_step_list_numbering() finds them post-conversion),
     so a marker directly adjacent to a list item with no blank line
     risks CommonMark treating it as a lazy-continuation of that list
     item's own paragraph text instead of a separate paragraph -
@@ -181,53 +188,14 @@ def ensure_blank_line_around_steps_markers(markdown_text):
 def _strip_num_pr(p_element):
     """Removes <w:numPr> from p_element's <w:pPr>, if present - used to
     turn a step's paragraph from a list item into plain text before
-    restyling it 'Dilon Step Heading'."""
+    restyling it 'Dilon Step Heading' (the list link is re-added post-merge
+    by link_steps_to_heading_numbering())."""
     p_pr = p_element.find(qn('w:pPr'))
     if p_pr is None:
         return
     num_pr = p_pr.find(qn('w:numPr'))
     if num_pr is not None:
         p_pr.remove(num_pr)
-
-
-def _prepend_step_number_fields(para):
-    """
-    Builds 'Step N.M' fields (STYLEREF 3 \\s + '.' + a SEQ counter that
-    resets at each Heading 3) and inserts them BEFORE para's existing
-    text runs, so the number reads first and the author's own step text
-    follows - unlike add_field_simple_run(), which always appends to
-    the paragraph's end. Mirrors apply_figure_captions()'s field-code
-    syntax, just reset at Heading 3 (the step's own numbering scope)
-    instead of Heading 2.
-
-    Returns (start_el, end_el): the field span's first and last child
-    elements, so the caller can narrow a {#step:label} bookmark around
-    exactly this span.
-    """
-    anchor = para._p.find(qn('w:r'))
-
-    def _place(new_el):
-        if anchor is not None:
-            anchor.addprevious(new_el)
-        else:
-            para._p.append(new_el)
-
-    add_field_simple_run(para, ' STYLEREF 3 \\s ', '1')
-    start_el = para._p[-1]
-    _place(start_el)
-
-    dot_run = para.add_run('.')
-    _place(dot_run._element)
-
-    add_field_simple_run(para, ' SEQ DilonStep \\* ARABIC \\s 3 ', '1')
-    end_el = para._p[-1]
-    _place(end_el)
-
-    tab_run = para.add_run()
-    tab_run.add_tab()
-    _place(tab_run._element)
-
-    return start_el, end_el
 
 
 def _decrement_bullet_ilvl(p_element, ilvl):
@@ -248,37 +216,49 @@ def _decrement_bullet_ilvl(p_element, ilvl):
         ilvl_el.set(qn('w:val'), str(int(ilvl) - 1))
 
 
-def _find_step_bookmark_start_in(para_element):
-    """Returns the first <w:bookmarkStart> inside para_element whose
-    name starts with 'step:' (the author's []{#step:label} anchor,
-    which Pandoc renders as a zero-width bookmark somewhere within the
-    paragraph - not necessarily at the start), or None."""
-    for el in para_element.iter(qn('w:bookmarkStart')):
-        name = el.get(qn('w:name'))
-        if name and name.startswith('step:'):
-            return el
-    return None
+def _heading4_conflict_message(heading3_text):
+    """Error text for the Heading 4 / @@@STEPS@@@ ban. Steps sit on the
+    heading list's level directly below Heading 3 - the same level
+    Heading 4 uses - so both under one Heading 3 would share, and
+    corrupt, one counter."""
+    return (
+        f'Heading 3 "{heading3_text}" contains both a #### (Heading 4) and a '
+        "@@@STEPS@@@ block - steps share Heading 4's numbering level, so the two "
+        'cannot be combined under one Heading 3. Move the Heading 4 content under '
+        'its own ### heading, or make it plain text.'
+    )
 
 
-def apply_field_based_step_numbering(docx_file, clarification_abstract_num_id):
+NO_HEADING3_MESSAGE = (
+    '@@@STEPS@@@ block has no ### (Heading 3) above it in its section - steps are '
+    'numbered <section>.<subsection>.<step>, so every @@@STEPS@@@ block must sit '
+    'under a Heading 3. Add a ### heading above it.'
+)
+
+
+def apply_step_list_numbering(docx_file, clarification_abstract_num_id):
     """
-    Walks docx_file's paragraphs in document order, tracking whether a
-    @@@STEPS@@@ block is open and which Heading 3 is currently in
-    scope. Every ilvl-0 #.-list paragraph inside an open block becomes
-    a field-numbered 'Dilon Step Heading' paragraph (see
-    _prepend_step_number_fields()); every ilvl>=1 #.-list paragraph
-    (an ordered "clarification") gets relettered onto a fresh numId of
-    the 'Dilon Step Clarification List' abstract list, one fresh
-    instance per top-level step. A bullet-list paragraph inside a block
-    keeps its own bullet styling, but has its ilvl decremented by one
-    (see _decrement_bullet_ilvl()) to compensate for the step above it
-    no longer occupying a real list level.
+    Walks docx_file's (Part D's) paragraphs in document order, tracking
+    whether a @@@STEPS@@@ block is open and which Heading 3 is in scope.
 
-    Raises StepBlockError for an @@@STEPS@@@ with no matching
-    @@@END_STEPS@@@, an @@@END_STEPS@@@ with no @@@STEPS@@@ open, or a
-    block left open across a Heading 3 boundary - all compilation-
-    halting, matching the retired apply_section_scoped_step_numbering()'s
-    conventions.
+    - Every ilvl-0 #.-list paragraph inside an open block becomes a
+      'Dilon Step Heading' paragraph with its Pandoc list numbering
+      stripped. It gets NO numbering here - link_steps_to_heading_numbering()
+      attaches it to the heading list after the docxcompose merge.
+    - Every ilvl>=1 #.-list paragraph (an ordered "clarification") is
+      relettered onto a fresh numId of the 'Dilon Step Clarification List'
+      abstract list, one fresh instance per top-level step.
+    - A bullet-list paragraph keeps its bullet styling but has its ilvl
+      decremented by one (see _decrement_bullet_ilvl()).
+
+    Raises StepBlockError (compilation-halting) for:
+    - an @@@STEPS@@@ with no matching @@@END_STEPS@@@, an @@@END_STEPS@@@
+      with no block open, or a block reopened before closing;
+    - a block left open across a Heading 2 or Heading 3;
+    - a block with no Heading 3 above it in its Heading 2;
+    - a Heading 3 containing both a Heading 4 and a block, in either order.
+
+    Returns the number of paragraphs converted (steps + clarifications).
     """
     from docx import Document
     doc = Document(docx_file)
@@ -297,18 +277,39 @@ def apply_field_based_step_numbering(docx_file, clarification_abstract_num_id):
     current_clarification_num_id = None
     numbered = 0
 
+    # Per-Heading-3 scope, for the Heading 4 / no-Heading-3 rules. None
+    # means "no Heading 3 seen yet in the current Heading 2".
+    current_heading3_text = None
+    heading3_has_steps = False
+    heading3_has_heading4 = False
+
     for para in doc.paragraphs:
         stripped = para.text.strip()
+        style_name = para.style.name if para.style is not None and para.style.name else ''
 
-        if para.style is not None and para.style.name and para.style.name.startswith('Heading 3'):
+        if style_name.startswith('Heading 2') or style_name.startswith('Heading 3'):
             if inside_steps:
                 raise StepBlockError("@@@STEPS@@@ has no matching @@@END_STEPS@@@ before the next section heading")
+            current_heading3_text = stripped if style_name.startswith('Heading 3') else None
+            heading3_has_steps = False
+            heading3_has_heading4 = False
+            continue
+
+        if style_name.startswith('Heading 4'):
+            if heading3_has_steps:
+                raise StepBlockError(_heading4_conflict_message(current_heading3_text))
+            heading3_has_heading4 = True
             continue
 
         if stripped == '@@@STEPS@@@':
             if inside_steps:
                 raise StepBlockError("@@@STEPS@@@ opened again before the previous block's @@@END_STEPS@@@")
+            if current_heading3_text is None:
+                raise StepBlockError(NO_HEADING3_MESSAGE)
+            if heading3_has_heading4:
+                raise StepBlockError(_heading4_conflict_message(current_heading3_text))
             inside_steps = True
+            heading3_has_steps = True
             marker_elements.append(para._p)
             continue
 
@@ -333,12 +334,8 @@ def apply_field_based_step_numbering(docx_file, clarification_abstract_num_id):
             current_clarification_num_id = None
             if not heading_style_available:
                 continue
-            bookmark_start_el = _find_step_bookmark_start_in(para._p)
             _strip_num_pr(para._p)
             para.style = doc.styles['Dilon Step Heading']
-            start_el, end_el = _prepend_step_number_fields(para)
-            if bookmark_start_el is not None:
-                _narrow_bookmark(doc.element.body, bookmark_start_el, start_el, end_el)
             numbered += 1
         else:
             if clarification_abstract_num_id is None:
@@ -364,7 +361,7 @@ def apply_field_based_step_numbering(docx_file, clarification_abstract_num_id):
     if marker_elements or numbered:
         doc.save(docx_file)
         if numbered:
-            print(f"  Applied field-based step numbering to {numbered} paragraph(s)")
+            print(f"  Converted {numbered} step/clarification paragraph(s)")
     return numbered
 
 
