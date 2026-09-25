@@ -19,6 +19,8 @@ python scripts/check_deps.py
 
 If it reports any `[FAIL]` line, stop and tell the user exactly which dependency is missing and that `install.ps1` (repo root) can install Python/Pandoc/pip packages automatically. Do not attempt compilation with missing dependencies — it will fail partway through and leave temp files behind.
 
+Dates in the front matter's `revisions` list use `MM-DD-YYYY`. Before compiling, check the revision entry matching `current_revision` and update its `eco_date` to today's date — the date a revision is compiled is the date that belongs on it, not whatever date was typed in when the revision was drafted.
+
 ## Compiling
 
 Invoke the script with an explicit base template path — never rely on the script's own default template lookup:
@@ -86,11 +88,11 @@ revisions:
   - number: "00"
     description: "Initial release"
     eco_number: "ECO-TBD"
-    eco_date: "2026-01-01"
+    eco_date: "01-01-2026"
   - number: "01"
     description: "Updated section 2"
     eco_number: "ECO-1234"
-    eco_date: "2026-03-01"
+    eco_date: "03-01-2026"
 ---
 ```
 

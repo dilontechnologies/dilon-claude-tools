@@ -12,7 +12,7 @@ revisions:
   - number: "00"
     description: "Initial release"
     eco_number: "ECO-TBD"
-    eco_date: "YYYY-MM-DD"
+    eco_date: "MM-DD-YYYY"
 ---
 
 ## Purpose and Scope

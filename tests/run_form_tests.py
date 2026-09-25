@@ -1469,7 +1469,7 @@ def generate_form_stub(output_path, **overrides):
         "department_head": overrides.get("department_head", "--"),
         "revision_description": overrides.get("revision_description", "Initial release"),
         "eco_number": overrides.get("eco_number", "ECO-TBD"),
-        "eco_date": overrides.get("eco_date", "YYYY-MM-DD"),
+        "eco_date": overrides.get("eco_date", "MM-DD-YYYY"),
     }
 
     content = template

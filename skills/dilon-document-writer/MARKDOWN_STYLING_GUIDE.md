@@ -71,7 +71,7 @@ If you see gray highlighted blocks in the generated Word document, it's a legacy
 - number: "1.1"
   description: "Updated Section 3.5 with new calibration data"
   eco_number: "ECO-2025-042"
-  eco_date: "2025-10-15"
+  eco_date: "10-15-2025"
 ```
 
 ---
