@@ -2236,37 +2236,70 @@ def test_resolve_step_reference_builds_composite_field():
           "nothing)")
 
 
+def _heading3_list_position(doc):
+    """(numId, ilvl) as strings that a step should carry: the Heading 3
+    style's own numId, one level below Heading 3's ilvl."""
+    h3_num_pr = doc.styles['Heading 3'].element.pPr.numPr
+    h3_ilvl = h3_num_pr.ilvl.val if h3_num_pr.ilvl is not None else 0
+    return str(h3_num_pr.numId.val), str(h3_ilvl + 1)
+
+
+def test_link_steps_to_heading_numbering_uses_heading3_list():
+    md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. First.\n#. Second.\n\n@@@END_STEPS@@@\n"
+    docx_path = TEST_OUTPUT_DIR / "step_link_unit_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
+
+    linked = step_numbering.link_steps_to_heading_numbering(docx_path)
+    check(linked == 2, f"both steps are linked (got {linked})")
+
+    doc = Document(docx_path)
+    expected = _heading3_list_position(doc)
+    steps = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading']
+    positions = {dilon_docx_common._paragraph_num_id_and_ilvl(p._p) for p in steps}
+    check(positions == {expected},
+          f"every step sits on Heading 3's list, one level below it (expected {expected}, got {positions})")
+
+
 STEP_REDESIGN_MARKDOWN = (
     '\n## Carrier Board Assembly\n\n'
     '### Cleaning Procedure\n\n'
     '@@@STEPS@@@\n\n'
     '#. Wear clean gloves.\n'
-    '#. Hold the board by the edges. []{#step:hold-board-by-edges}\n'
+    '#. Hold the board by the edges.\n'
     '    #. Simple dirt such as lint or light dust can be blown away before wiping.\n\n'
     '@@@END_STEPS@@@\n\n'
     'NOTE: Clean the entire crystal but give special attention to the polished end.\n\n'
     '@@@STEPS@@@\n\n'
-    '#. Visually inspect both the crystal and the photomultiplier for defects.\n'
+    '#. Visually inspect both the crystal and the photomultiplier for defects. []{#step:inspect-crystal}\n'
     '#. Set the cleaned crystals aside on a clean lint free cloth.\n\n'
     '@@@END_STEPS@@@\n\n'
-    'As described in [](#step:hold-board-by-edges), always support the board by its edges.\n'
+    '### Inspection Procedure\n\n'
+    '@@@STEPS@@@\n\n'
+    '#. Check the board under magnification.\n\n'
+    '@@@END_STEPS@@@\n\n'
+    'As described in [](#step:inspect-crystal), inspect before setting aside.\n'
 )
 
 
-def test_compile_field_based_step_numbering_end_to_end():
-    """Integration test: two @@@STEPS@@@ blocks in one Heading 3
-    subsection (interrupted by a NOTE), a nested ordered clarification,
-    and a cross-reference, compiled through the real pipeline."""
+def test_compile_step_list_numbering_end_to_end():
+    """Integration test through the real pipeline, including the
+    docxcompose merge: two @@@STEPS@@@ blocks in one Heading 3 (split by a
+    NOTE), a third block under a second Heading 3, a clarification, and a
+    cross-reference. Every step in the FINAL document must sit on the
+    Heading 3 style's own list (not a docxcompose-remapped copy), one level
+    below Heading 3."""
     markdown = SAMPLE_MARKDOWN + STEP_REDESIGN_MARKDOWN
-    input_md = TEST_OUTPUT_DIR / "compile_test_field_step_numbering.md"
-    output_docx = TEST_OUTPUT_DIR / "compile_test_field_step_numbering.docx"
+    input_md = TEST_OUTPUT_DIR / "compile_test_step_list_numbering.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_step_list_numbering.docx"
     input_md.write_text(markdown, encoding="utf-8")
 
     result = subprocess.run(
         [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
-    check(result.returncode == 0, "compiler exits 0 for a document with field-based @@@STEPS@@@ blocks")
+    check(result.returncode == 0, "compiler exits 0 for a document with @@@STEPS@@@ blocks")
     if result.returncode != 0:
         print(result.stdout)
         print(result.stderr)
@@ -2276,15 +2309,20 @@ def test_compile_field_based_step_numbering_end_to_end():
     check(all('@@@STEPS' not in p.text and '@@@END_STEPS' not in p.text for p in doc.paragraphs),
           "no wrapper marker text remains anywhere")
     step_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading']
-    check(len(step_paragraphs) == 4, f"all 4 top-level steps across both blocks get 'Dilon Step Heading' (got {len(step_paragraphs)})")
+    check(len(step_paragraphs) == 5, f"all 5 top-level steps across three blocks get 'Dilon Step Heading' (got {len(step_paragraphs)})")
     clarification_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Clarification List']
     check(len(clarification_paragraphs) == 1, f"the one nested clarification gets 'Dilon Step Clarification List' (got {len(clarification_paragraphs)})")
 
+    expected = _heading3_list_position(doc)
+    positions = {dilon_docx_common._paragraph_num_id_and_ilvl(p._p) for p in step_paragraphs}
+    check(positions == {expected},
+          f"every step in the merged document is on Heading 3's own list, one level down "
+          f"(expected {expected}, got {positions})")
+
     with zipfile.ZipFile(output_docx) as z:
         xml = z.read('word/document.xml').decode('utf-8')
-    check('w:name="step:hold-board-by-edges"' in xml, "the step's anchor survives as a real bookmark")
-    check('REF step:hold-board-by-edges \\h' in xml, "the cross-reference resolves to a live REF field")
-    check('STYLEREF 3 \\s' in xml, "steps carry a live Heading-3-scoped number field")
+    check('STYLEREF 3' not in xml and 'SEQ DilonStep' not in xml, "no field-based step numbers remain")
+    check('w:name="step:inspect-crystal"' in xml, "the step's anchor survives as a real bookmark")
 
 
 def test_compile_steps_with_bullets_end_to_end():
@@ -3090,8 +3128,9 @@ def main():
     test_apply_step_list_numbering_heading4_inside_open_block_raises()
     test_apply_step_list_numbering_steps_without_heading3_raises()
     test_apply_step_list_numbering_heading4_in_different_heading3_allowed()
+    test_link_steps_to_heading_numbering_uses_heading3_list()
     test_resolve_step_reference_builds_composite_field()
-    test_compile_field_based_step_numbering_end_to_end()
+    test_compile_step_list_numbering_end_to_end()
     test_compile_steps_with_bullets_end_to_end()
     test_compile_duplicate_step_anchor_fails_clearly()
     test_compile_full_cross_reference_set_end_to_end()

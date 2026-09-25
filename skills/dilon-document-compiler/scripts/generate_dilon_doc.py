@@ -94,6 +94,7 @@ from step_numbering import (  # noqa: E402
     ensure_blank_line_around_steps_markers,
     get_step_clarification_abstract_num_id,
     apply_step_list_numbering,
+    link_steps_to_heading_numbering,
     resolve_step_reference,
     StepBlockError,
 )
@@ -555,6 +556,14 @@ def generate_requirements_document(markdown_path, output_path=None, signature_te
         print("Merging all parts (A -> D)...")
         composer = compose_documents(temp_part_a, temp_part_d)
     composer.save(output_path)
+
+    # Steps are attached to the heading list only now, after the merge -
+    # docxcompose would otherwise remap their numId onto a separate copy
+    # of the list (see link_steps_to_heading_numbering()). Forms have no
+    # @@@STEPS@@@ processing, so this runs in document mode only.
+    if include_front_matter:
+        print("Linking steps to heading numbering...")
+        link_steps_to_heading_numbering(output_path)
 
     # Ensure figure numbers / TOC page numbers are correct the moment the
     # document is opened, rather than showing cached placeholder text

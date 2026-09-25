@@ -365,6 +365,57 @@ def apply_step_list_numbering(docx_file, clarification_abstract_num_id):
     return numbered
 
 
+def link_steps_to_heading_numbering(docx_file):
+    """
+    Post-merge pass: attaches every 'Dilon Step Heading' paragraph in the
+    FINAL assembled docx_file to the headings' own multilevel list, one
+    level below Heading 3. The numId and Heading 3's ilvl are read from
+    the document's 'Heading 3' style (never hard-coded), so the step's
+    Word list label renders "<H2>.<H3>.<step>", restarts at each Heading
+    3, and continues when a user presses Enter after a step in Word.
+
+    Must run AFTER the docxcompose merge: Composer.add_numberings() remaps
+    every paragraph-level numId in an appended part onto a fresh <w:num>
+    backed by a *copy* of the abstractNum, so a step linked before the
+    merge would land in a separate list whose Heading 2/3 counters never
+    advance. Headings avoid the remap because their numbering comes from
+    their style, which is why this reads the style.
+
+    Returns the number of steps linked; 0 (with a printed warning) if the
+    document's 'Heading 3' style carries no list numbering.
+    """
+    from docx import Document
+    doc = Document(docx_file)
+
+    try:
+        heading3_p_pr = doc.styles['Heading 3'].element.pPr
+    except KeyError:
+        heading3_p_pr = None
+    heading3_num_pr = heading3_p_pr.numPr if heading3_p_pr is not None else None
+    if heading3_num_pr is None or heading3_num_pr.numId is None:
+        print("  Warning: 'Heading 3' style has no list numbering; steps left unnumbered")
+        return 0
+
+    heading_num_id = heading3_num_pr.numId.val
+    heading3_ilvl = heading3_num_pr.ilvl.val if heading3_num_pr.ilvl is not None else 0
+    step_ilvl = heading3_ilvl + 1
+
+    linked = 0
+    for para in doc.paragraphs:
+        if para.style is None or para.style.name != 'Dilon Step Heading':
+            continue
+        # get_or_add_numPr() inserts <w:numPr> in schema order within <w:pPr>.
+        num_pr = para._p.get_or_add_pPr().get_or_add_numPr()
+        num_pr.get_or_add_ilvl().val = step_ilvl
+        num_pr.get_or_add_numId().val = heading_num_id
+        linked += 1
+
+    if linked:
+        doc.save(docx_file)
+        print(f"  Linked {linked} step(s) to the heading list numbering")
+    return linked
+
+
 def resolve_step_reference(para, bookmark_name):
     """
     type_resolvers['step'] callback for
