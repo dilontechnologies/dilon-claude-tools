@@ -1,10 +1,13 @@
 """
-Form-specific markdown-authoring functions for dilon-document-form-compiler.
+Form-marker postprocessing shared by dilon-document-compiler, for both
+narrative documents that embed a form section and pure form/traveler
+documents (include_front_matter: false).
 
-These live outside lib/dilon_docx_common.py deliberately: ordinary content
-documents (dilon-document-compiler) never need them. Uses its own
-@@@FORM_FIELD:Name@@@...@@@END_FORM_FIELD@@@ marker family so it never
-collides with the shared module's @@@STYLE@@@/@@@TABLE_STYLE@@@ markers.
+Uses its own @@@FORM_FIELD:Name@@@...@@@END_FORM_FIELD@@@ marker family
+so it never collides with dilon_docx_common's @@@STYLE@@@/@@@TABLE_STYLE@@@
+markers. Every @@@FORM_FIELD@@@ marker must be enclosed in a
+@@@FORM_SECTION@@@...@@@END_FORM_SECTION@@@ range - see
+docs/superpowers/specs/2026-09-04-unified-document-form-compiler-design.md.
 """
 
 import re
@@ -20,6 +23,96 @@ FORM_FIELD_RE = re.compile(
     r'@@@FORM_FIELD:(\w+)(?::([\d.]+in))?@@@(.*?)@@@END_FORM_FIELD@@@',
     re.DOTALL,
 )
+
+FORM_SECTION_BEGIN = "@@@FORM_SECTION@@@"
+FORM_SECTION_END = "@@@END_FORM_SECTION@@@"
+
+
+class FormSectionError(ValueError):
+    """Raised for a structurally invalid @@@FORM_SECTION@@@ range: unclosed,
+    unmatched @@@END_FORM_SECTION@@@, nested @@@FORM_SECTION@@@, or (raised
+    by apply_form_fields(), not here) a @@@FORM_FIELD@@@ marker found
+    outside any declared range."""
+
+
+def _form_section_ranges(doc):
+    """
+    Scan doc's top-level body children (paragraphs and tables, in document
+    order) for @@@FORM_SECTION@@@/@@@END_FORM_SECTION@@@ sentinel
+    paragraphs, validate matching/nesting, and return
+    (in_section_elements, mutated):
+
+    - in_section_elements: a set of id(xml_element) for every top-level
+      body child that falls strictly between a BEGIN/END pair (inclusive
+      of everything in between, exclusive of the two sentinel paragraphs
+      themselves).
+    - mutated: True iff at least one BEGIN/END pair was found (its
+      sentinel paragraphs are removed from the tree as a side effect,
+      same as apply_styles() removes its own markers).
+
+    Raises FormSectionError for: an @@@END_FORM_SECTION@@@ with no open
+    section, a second @@@FORM_SECTION@@@ before a preceding one was
+    closed (nesting), or an @@@FORM_SECTION@@@ left open at
+    end-of-document.
+
+    lxml only guarantees a stable id() for an element's Python proxy while
+    a live reference to it exists elsewhere - otherwise a later access to
+    the same underlying XML node can produce a new proxy object with a
+    different id(), silently breaking any `id(x) in in_section_elements`
+    check done after this function returns. To keep the ids in
+    in_section_elements valid for callers that compare against them later
+    (apply_form_fields), the in-section element objects are pinned alive
+    for doc's lifetime via doc._form_section_keepalive.
+    """
+    body = doc.element.body
+    in_section_elements = set()
+    open_start = None
+    pending = []
+    to_remove = []
+    keepalive = []
+
+    for child in list(body):
+        if child.tag != qn('w:p'):
+            if open_start is not None:
+                pending.append(child)
+            continue
+
+        text = ''.join(node.text or '' for node in child.iter(qn('w:t'))).strip()
+
+        if text == FORM_SECTION_BEGIN:
+            if open_start is not None:
+                raise FormSectionError(
+                    "@@@FORM_SECTION@@@ found before a preceding @@@FORM_SECTION@@@ "
+                    "was closed with @@@END_FORM_SECTION@@@ - nesting is not supported"
+                )
+            open_start = child
+            pending = []
+            to_remove.append(child)
+        elif text == FORM_SECTION_END:
+            if open_start is None:
+                raise FormSectionError(
+                    "@@@END_FORM_SECTION@@@ found with no matching open @@@FORM_SECTION@@@"
+                )
+            in_section_elements.update(id(el) for el in pending)
+            keepalive.extend(pending)
+            to_remove.append(child)
+            open_start = None
+            pending = []
+        elif open_start is not None:
+            pending.append(child)
+
+    if open_start is not None:
+        raise FormSectionError(
+            "@@@FORM_SECTION@@@ was never closed with a matching @@@END_FORM_SECTION@@@"
+        )
+
+    for el in to_remove:
+        el.getparent().remove(el)
+
+    doc._form_section_keepalive = keepalive
+
+    return in_section_elements, bool(to_remove)
+
 
 FORM_SECTION_HEADER_STYLE_NAME = "Form Section Header"
 FIELD_GRID_TEXT_STYLE_NAME = "Compact"
@@ -529,23 +622,44 @@ def underscore_until_end_of_line(paragraph, width_override=None, num_lines=1):
         new_paragraph.add_run("\t")
 
 
+def _top_level_body_ancestor(paragraph, body):
+    """Walk up from paragraph's XML element to the topmost ancestor that
+    is a direct child of body - the paragraph itself if it's body-level,
+    or the enclosing <w:tbl> if it lives inside a table cell."""
+    el = paragraph._p
+    while el.getparent() is not None and el.getparent() != body:
+        el = el.getparent()
+    return el
+
+
 def apply_form_fields(docx_file):
     """
     Scan docx_file for @@@FORM_FIELD:Name@@@...@@@END_FORM_FIELD@@@
-    markers and apply the matching form-specific function. Currently
-    supports 'FillLine' (underscore_until_end_of_line). Unrecognized
-    function names are left as plain text with a printed warning, matching
-    the shared module's warn-and-degrade convention - never a hard
-    failure.
+    markers and apply the matching form-specific function. Every marker
+    must fall inside a @@@FORM_SECTION@@@...@@@END_FORM_SECTION@@@ range
+    (_form_section_ranges()) - a marker found outside one raises
+    FormSectionError rather than being silently processed. Currently
+    supports 'FillLine', 'FieldGrid', and 'Form_Section_Header'.
+    Unrecognized function names are left as plain text with a printed
+    warning, matching the shared module's warn-and-degrade convention for
+    everything except the section requirement itself.
     """
     doc = Document(docx_file)
-    changed = False
     section_number = 0
+
+    in_section_elements, changed = _form_section_ranges(doc)
 
     for para in list(_iter_all_paragraphs(doc)):
         match = FORM_FIELD_RE.search(para.text)
         if not match:
             continue
+
+        ancestor = _top_level_body_ancestor(para, doc.element.body)
+        if id(ancestor) not in in_section_elements:
+            raise FormSectionError(
+                f"@@@FORM_FIELD:...@@@ marker found outside any "
+                f"@@@FORM_SECTION@@@...@@@END_FORM_SECTION@@@ range: {para.text!r}"
+            )
 
         function_name, block_width, label = match.group(1), match.group(2), match.group(3)
         if function_name == "FillLine":

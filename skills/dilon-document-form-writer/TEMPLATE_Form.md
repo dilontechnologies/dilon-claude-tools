@@ -4,6 +4,7 @@ author: "Author Name"
 department: "--"
 doc_number: "FO-XXXXX"
 current_revision: "00"
+include_front_matter: false
 department_head: "--"
 signature_fields:
   - department: "--"
@@ -12,8 +13,10 @@ revisions:
   - number: "00"
     description: "Initial release"
     eco_number: "ECO-TBD"
-    eco_date: "YYYY-MM-DD"
+    eco_date: "MM-DD-YYYY"
 ---
+
+@@@FORM_SECTION@@@
 
 @@@FORM_FIELD:Form_Section_Header@@@[Section Title]@@@END_FORM_FIELD@@@
 
@@ -22,5 +25,7 @@ revisions:
 @@@END_FORM_FIELD@@@
 
 @@@FORM_FIELD:FillLine@@@[Label]:@@@END_FORM_FIELD@@@
+
+@@@END_FORM_SECTION@@@
 
 [Add additional sections/fields as needed]

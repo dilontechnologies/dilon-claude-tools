@@ -11,6 +11,7 @@ docs/superpowers/specs/2026-08-17-document-extraction-and-form-tooling-design.md
 import math
 import re
 import subprocess
+from copy import deepcopy
 from pathlib import Path
 
 from docx import Document
@@ -686,10 +687,8 @@ def resolve_list_continuations(docx_file):
     counting from the {#list:name}-tagged paragraph's own list, by
     rewriting every paragraph currently sharing the *new* block's numId
     onto the *tagged* block's numId - native Word numbering then
-    continues correctly because both blocks share one numId (same
-    mechanism step_numbering.py's apply_step_numbering() already uses
-    for its own 'continue' support, keyed here by a bookmark instead of
-    a sentinel manifest).
+    continues correctly because both blocks share one numId, keyed by
+    a bookmark.
 
     {#list:name} is the same bracketed-span-with-id syntax already used
     for {#fig:x}/{#step:x} - Pandoc turns it into a real bookmark on
@@ -884,22 +883,16 @@ def resolve_reference_markers(docx_file, type_resolvers):
     resolved = 0
 
     for para in doc.paragraphs:
-        # A step heading's STYLEREF/SEQ number fields (<w:fldSimple>,
-        # from step_numbering.py's _prepend_step_number_fields()) sit
-        # ahead of the paragraph's authored text - along with the
-        # literal "." run interleaved between the two fields, and any
-        # bookmarkStart/End narrowed around them. para.text/para.runs
-        # (python-docx) only see plain <w:r> children and silently
-        # skip <w:fldSimple>, so treating "every run in para.runs" as
-        # the paragraph's whole content - as this loop used to -
-        # scooped that interleaved "." run into the remove-and-rebuild
-        # below while leaving the two fldSimple elements untouched and
-        # now adjacent, then re-appended the "." (merged into the
-        # rebuilt body text) after both fields instead of between them
-        # - corrupting numbers like "6.5.7" into "6.57.". Treating
-        # everything up to and including the last <w:fldSimple> (plus
-        # any trailing bookmark markers) as an untouchable header
-        # keeps that span exactly as step_numbering.py built it.
+        # A paragraph can open with <w:fldSimple> number fields - today a
+        # figure caption's "Figure " + STYLEREF + "." + SEQ span (from
+        # apply_figure_captions()); before 2026-09 also every @@@STEPS@@@
+        # step. python-docx's para.text/para.runs only see plain <w:r>
+        # children and silently skip <w:fldSimple>, so including the
+        # literal runs interleaved between those fields in the rebuild
+        # below once corrupted numbers like "6.5.7" into "6.57.".
+        # Treating everything up to and including the last <w:fldSimple>
+        # (plus any trailing bookmark markers) as an untouchable header
+        # keeps that span exactly as it was built.
         header_end = 0
         for i, child in enumerate(para._p):
             if child.tag == qn('w:fldSimple'):
@@ -917,31 +910,71 @@ def resolve_reference_markers(docx_file, type_resolvers):
         if not matches:
             continue
 
-        original_text = body_text
-        for run in list(para.runs):
-            if id(run._element) in header_ids:
-                continue
-            run._element.getparent().remove(run._element)
-
+        # Rebuild only the run(s) that actually overlap a sentinel match,
+        # leaving every other run in the paragraph (e.g. a **bold** run
+        # earlier in the same sentence) completely untouched. The old
+        # implementation deleted every non-header run and rebuilt the
+        # paragraph's text via plain para.add_run() calls, which silently
+        # dropped bold/italic/etc. from every run in the paragraph, not
+        # just the one touching the sentinel - the root cause of the
+        # ECO-000262/FTP-00001 "Acceptance Criteria" bold-loss bug.
+        body_runs = []
         cursor = 0
-        for match in matches:
-            before_text = original_text[cursor:match.start()]
-            if before_text:
-                para.add_run(before_text)
+        for el in para._p:
+            if el.tag != qn('w:r') or id(el) in header_ids:
+                continue
+            run_text = Run(el, para).text
+            body_runs.append({'el': el, 'text': run_text, 'start': cursor, 'end': cursor + len(run_text)})
+            cursor += len(run_text)
 
-            ref_type, label = match.group(1), match.group(2)
-            bookmark_name = f'{ref_type}:{label}'
-            if bookmark_name in bookmark_names and ref_type in type_resolvers:
-                type_resolvers[ref_type](para, bookmark_name)
-                resolved += 1
-            else:
-                missing.append(bookmark_name)
+        for run_info in body_runs:
+            el = run_info['el']
+            r_start, r_end = run_info['start'], run_info['end']
+            overlaps = [m for m in matches if m.start() < r_end and m.end() > r_start]
+            if not overlaps:
+                continue  # untouched run - keeps its original formatting as-is
 
-            cursor = match.end()
+            r_pr = el.find(qn('w:rPr'))
+            rpr_copy = deepcopy(r_pr) if r_pr is not None else None
 
-        trailing_text = original_text[cursor:]
-        if trailing_text:
-            para.add_run(trailing_text)
+            def _emit_literal_run(text, _rpr_copy=rpr_copy, _anchor=el):
+                if not text:
+                    return
+                new_run = para.add_run(text)
+                new_el = new_run._element
+                existing_rpr = new_el.find(qn('w:rPr'))
+                if existing_rpr is not None:
+                    new_el.remove(existing_rpr)
+                if _rpr_copy is not None:
+                    new_el.insert(0, deepcopy(_rpr_copy))
+                _anchor.addprevious(new_el)
+
+            local_cursor = r_start
+            for match in overlaps:
+                clipped_start = max(match.start(), r_start)
+                clipped_end = min(match.end(), r_end)
+                _emit_literal_run(run_info['text'][local_cursor - r_start:clipped_start - r_start])
+
+                # Only resolve the reference once - in whichever run the
+                # match actually ends in, so a sentinel spanning more than
+                # one run (unlikely, but not impossible) doesn't get
+                # resolved twice.
+                if match.end() <= r_end:
+                    ref_type, label = match.group(1), match.group(2)
+                    bookmark_name = f'{ref_type}:{label}'
+                    if bookmark_name in bookmark_names and ref_type in type_resolvers:
+                        before_count = len(para._p)
+                        type_resolvers[ref_type](para, bookmark_name)
+                        for new_el in list(para._p)[before_count:]:
+                            el.addprevious(new_el)
+                        resolved += 1
+                    else:
+                        missing.append(bookmark_name)
+
+                local_cursor = clipped_end
+
+            _emit_literal_run(run_info['text'][local_cursor - r_start:])
+            el.getparent().remove(el)
 
     if missing:
         raise ReferenceResolutionError(
@@ -1446,6 +1479,30 @@ def extract_yaml_and_markdown(md_file):
         return yaml_data, markdown_body
     else:
         return {}, content
+
+
+def default_output_filename(metadata):
+    """
+    Build the default compiled-output filename from front-matter metadata:
+    "<doc_number> Rev <current_revision>.docx" - the same
+    "{doc_number} Rev {current_revision}" convention populate_footer()
+    already renders into the running footer, so the filename and the
+    footer text stay in sync.
+
+    Raises:
+        ValueError: if doc_number or current_revision is missing/empty -
+            callers should surface this as a clear compilation error
+            rather than minting a filename like " Rev .docx".
+    """
+    doc_number = metadata.get('doc_number')
+    current_revision = metadata.get('current_revision')
+    if not doc_number or not current_revision:
+        raise ValueError(
+            "Cannot compute a default output filename: front matter is "
+            f"missing doc_number and/or current_revision (doc_number={doc_number!r}, "
+            f"current_revision={current_revision!r}). Pass an explicit output path instead."
+        )
+    return f"{doc_number} Rev {current_revision}.docx"
 
 
 _TABLE_MARKER_RUN = re.compile(

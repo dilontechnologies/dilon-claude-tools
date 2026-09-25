@@ -18,7 +18,7 @@ Helps create and maintain Dilon Technologies markdown documents in the company's
    - `current_revision` (default: "00")
    - `department_head` (default: "--")
    - `signature_fields` (default: one entry, `department: "--"`, `name: "--"`) — a list of additional approvers, each with a `department` and `name`; ask the user how many entries they need and what each one is
-   - Initial revision entry: `revision_description` (default: "Initial release"), `eco_number` (default: "ECO-TBD"), `eco_date` (default: "YYYY-MM-DD")
+   - Initial revision entry: `revision_description` (default: "Initial release"), `eco_number` (default: "ECO-TBD"), `eco_date` (default: "MM-DD-YYYY")
 3. Substitute these into the template's YAML front matter. The first entry in `revisions` always mirrors `current_revision` for its `number` field.
 4. Before writing, check whether the destination file already exists — refuse and tell the user if it does.
 5. Write the new file with the substituted front matter and the template's `## Purpose and Scope` / `### Purpose` / `### Scope` sections intact.

@@ -1,11 +1,11 @@
 ---
 name: dilon-document-compiler
-description: Compile a Dilon-formatted markdown file (with YAML front matter) into a regulatory-compliant Word document, with signature page, revision history table, and table of contents. Use when asked to compile, convert, or export a Dilon markdown document to Word/.docx.
+description: Compile a Dilon-formatted markdown file (with YAML front matter) into a Word document - a regulatory-compliant document with signature page, revision history table, and table of contents by default, or a header/footer-only form/traveler when the front matter sets include_front_matter: false. Use when asked to compile, convert, or export a Dilon markdown document or form/traveler to Word/.docx.
 ---
 
 # Dilon Document Compiler
 
-Wraps the Dilon Document Compiler Python script to convert a markdown file with Dilon YAML front matter into a formatted .docx (signature page + revision table + title page + content with TOC).
+Wraps the Dilon Document Compiler Python script to convert a markdown file with Dilon YAML front matter into a formatted .docx. By default (`include_front_matter: true`, or the field omitted) this is a full narrative document: signature page + revision table + content with TOC. With `include_front_matter: false` in the front matter, it compiles a form/traveler instead - running header/footer only, no signature page, no TOC - the same output `dilon-document-form-compiler` used to produce before that skill was retired in favor of this one flag.
 
 ## Before compiling
 
@@ -19,6 +19,8 @@ python scripts/check_deps.py
 
 If it reports any `[FAIL]` line, stop and tell the user exactly which dependency is missing and that `install.ps1` (repo root) can install Python/Pandoc/pip packages automatically. Do not attempt compilation with missing dependencies — it will fail partway through and leave temp files behind.
 
+Dates in the front matter's `revisions` list use `MM-DD-YYYY`. Before compiling, check the revision entry matching `current_revision` and update its `eco_date` to today's date — the date a revision is compiled is the date that belongs on it, not whatever date was typed in when the revision was drafted.
+
 ## Compiling
 
 Invoke the script with an explicit base template path — never rely on the script's own default template lookup:
@@ -28,7 +30,7 @@ python scripts/generate_dilon_doc.py <input.md> <output.docx> <base_template>
 ```
 
 - `<input.md>`: the markdown file to compile (must have YAML front matter — if it doesn't, point the user at the `dilon-document-writer` skill first).
-- `<output.docx>`: defaults to the same name as the input with a `.docx` extension if the user doesn't specify one.
+- `<output.docx>`: optional. If omitted, or if given as an existing directory, the filename is computed as `<doc_number> Rev <current_revision>.docx` from the front matter (e.g. `DD_001_00001 Rev 01.docx`) — next to the input markdown when omitted, or inside the given directory when one is passed (e.g. `output_folder/`, useful for a task/script that shouldn't have to hardcode a revision-bearing filename that changes every time the document revs). Pass a full file path instead only when the user wants a different name. Compilation halts with a clear error if `doc_number`/`current_revision` are missing and no explicit file path was given.
 - `<base_template>`: defaults to `templates/TEMPLATE_Word_Base.docx` at the repo root, unless the user supplies a custom one. Header/footer/styles only — the title page, signature-approval table, and revision table are all built programmatically by the script and inserted around the base template's header/footer.
 
 After the script exits, verify the output file now exists. Report the script's stdout/stderr to the user on failure; report the output path on success.
@@ -36,7 +38,7 @@ After the script exits, verify the output file now exists. Report the script's s
 Compilation halts (non-zero exit, clear error message) rather than producing a silently-broken document for:
 - An ordered (`#.`) list nested more than three levels deep
 - A `@@@CONTINUE:#list:name@@@` marker whose `name` has no matching `[]{#list:name}` anchor, or a `[]{#list:name}` anchor declared more than once
-- A malformed `@@@STEPS@@@`/`@@@END_STEPS@@@` pairing (unclosed or nested)
+- A malformed `@@@STEPS@@@`/`@@@END_STEPS@@@` pairing (unclosed or nested), a `@@@STEPS@@@` block with no `###` (Heading 3) above it, or a `###` subsection containing both a `####` (Heading 4) and a `@@@STEPS@@@` block
 - A `[](#fig:label)`, `[](#sec:label)`, or `[](#step:label)` reference with no matching `{#fig:label}`/`{#sec:label}`/`{#step:label}` anchor anywhere in the document, or such an anchor declared more than once
 
 ## Suggesting a resize pass
@@ -86,12 +88,32 @@ revisions:
   - number: "00"
     description: "Initial release"
     eco_number: "ECO-TBD"
-    eco_date: "2026-01-01"
+    eco_date: "01-01-2026"
   - number: "01"
     description: "Updated section 2"
     eco_number: "ECO-1234"
-    eco_date: "2026-03-01"
+    eco_date: "03-01-2026"
 ---
 ```
 
 Major section headings in the body must be H2 (`##`) for correct table-of-contents generation.
+
+## Compiling a form/traveler (no signature page, no TOC)
+
+Set `include_front_matter: false` in the front matter to compile a header/footer-only form/traveler instead of a full narrative document - no signature-approval page, no revision table, no table of contents. This is what `dilon-document-form-compiler` used to do as a separate skill; that skill has been retired in favor of this one flag on this compiler.
+
+Every `@@@FORM_FIELD:...@@@` marker (`FillLine`, `FieldGrid`, `Form_Section_Header` - syntax documented in `dilon-document-form-writer`) must be wrapped in `@@@FORM_SECTION@@@`/`@@@END_FORM_SECTION@@@`, regardless of `include_front_matter`. A pure form document wraps its entire body in one `@@@FORM_SECTION@@@` pair; a narrative document (`include_front_matter: true`) can embed one or more form sections inside otherwise-normal content - the section's own heading (e.g. `## Test Report`) stays ordinary markdown, outside/above the `@@@FORM_SECTION@@@` tag, so it's numbered and gets a TOC entry like any other section:
+
+```markdown
+## Test Report
+
+@@@FORM_SECTION@@@
+
+@@@FORM_FIELD:FieldGrid@@@
+Tested By: | Date:
+@@@END_FORM_FIELD@@@
+
+@@@END_FORM_SECTION@@@
+```
+
+A `@@@FORM_FIELD:...@@@` marker found outside any `@@@FORM_SECTION@@@` range, or a malformed range (unclosed, unmatched `@@@END_FORM_SECTION@@@`, or nested `@@@FORM_SECTION@@@`), halts compilation with a clear error rather than silently passing the marker through as literal text.

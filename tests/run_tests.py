@@ -119,7 +119,7 @@ def generate_stub(output_path, **overrides):
         "department_head": overrides.get("department_head", "--"),
         "revision_description": overrides.get("revision_description", "Initial release"),
         "eco_number": overrides.get("eco_number", "ECO-TBD"),
-        "eco_date": overrides.get("eco_date", "YYYY-MM-DD"),
+        "eco_date": overrides.get("eco_date", "MM-DD-YYYY"),
     }
 
     content = template
@@ -606,13 +606,62 @@ def test_compile_header_signature_revision_widths():
 
     revision_table = next(t for t in doc.tables if header_row(t)[0] == "REVISION HISTORY")
     rev_widths = grid_dxa(revision_table)
-    check(rev_widths[0] == 805 and rev_widths[2] == 1620 and rev_widths[3] == 1535,
+    check(rev_widths[0] == 1150 and rev_widths[2] == 1620 and rev_widths[3] == 1535,
           f"revision table REV#/ECO#/DATE columns match the reference document's widths (got {rev_widths})")
     check(sum(rev_widths) == available_width_twips,
           f"revision table fills the full page content width (got {sum(rev_widths)}, expected {available_width_twips})")
     check(cell_dxa(revision_table, 2) == rev_widths,
           f"revision table's actual per-cell widths match the tblGrid definition, not just the grid (got {cell_dxa(revision_table, 2)})")
     check(is_fixed_layout(revision_table), "revision table uses a fixed layout, so Word can't AutoFit its columns away")
+
+
+def test_compile_extended_prototype_revision_number():
+    """Regression test: prototype revision numbers like "02-A" (major
+    number + alphabetic prototype suffix) must round-trip intact through
+    the revision table, running header, and running footer - none of them
+    truncate or reformat the value."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_prototype_revision.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_prototype_revision.docx"
+    prototype_markdown = SAMPLE_MARKDOWN.replace(
+        'current_revision: "00"', 'current_revision: "02-A"'
+    ).replace(
+        '  - number: "00"', '  - number: "02-A"'
+    )
+    input_md.write_text(prototype_markdown, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for an extended prototype revision number")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+
+    def header_row(table):
+        return [c.text for c in table.rows[0].cells]
+
+    revision_table = next(t for t in doc.tables if header_row(t)[0] == "REVISION HISTORY")
+    rev_number_cell = revision_table.rows[2].cells[0].text
+    check(rev_number_cell == "02-A", f"revision table REV # cell holds the full prototype revision (got {rev_number_cell!r})")
+
+    header_rev_text = doc.sections[0].header.tables[0].rows[0].cells[2].text
+    check("Rev 02-A" in header_rev_text, f"running header shows the full prototype revision (got {header_rev_text!r})")
+
+    footer_id_text = doc.sections[0].footer.tables[0].rows[0].cells[0].text
+    check("Rev 02-A" in footer_id_text, f"running footer shows the full prototype revision (got {footer_id_text!r})")
 
 
 def test_compile_footer_table_layout():
@@ -1020,6 +1069,125 @@ def test_compile_with_default_templates():
         print(result.stdout)
         print(result.stderr)
     check(output_docx.exists(), "compile_test_defaults.docx created via default template lookup")
+
+
+def test_default_output_filename_uses_doc_number_and_revision():
+    metadata = {"doc_number": "DD_TST_77777", "current_revision": "01"}
+    check(
+        dilon_docx_common.default_output_filename(metadata) == "DD_TST_77777 Rev 01.docx",
+        "default_output_filename() builds '<doc_number> Rev <current_revision>.docx'",
+    )
+
+
+def test_default_output_filename_requires_doc_number_and_revision():
+    raised = False
+    try:
+        dilon_docx_common.default_output_filename({"doc_number": "DD_TST_77777"})
+    except ValueError:
+        raised = True
+    check(raised, "default_output_filename() raises ValueError when current_revision is missing")
+
+
+def test_compile_default_output_filename_end_to_end():
+    """Invoking with only <input.md> (no output, no template arg) should
+    name the compiled file '<doc_number> Rev <current_revision>.docx' next
+    to the input, using SAMPLE_MARKDOWN's doc_number/current_revision."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_default_name.md"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+    expected_output = TEST_OUTPUT_DIR / "DD_TST_99999 Rev 00.docx"
+    if expected_output.exists():
+        expected_output.unlink()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 with only the input arg (default output filename)")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(expected_output.exists(), f"'{expected_output.name}' created via default output filename")
+
+
+def test_compile_output_arg_as_directory_uses_default_filename():
+    """Passing an existing directory as the output arg (instead of a full
+    file path) should compile into '<doc_number> Rev <current_revision>.docx'
+    inside that directory - lets a task/script target a fixed output folder
+    without hardcoding a filename that changes on every revision bump."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_output_dir.md"
+    input_md.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+    output_dir = TEST_OUTPUT_DIR / "compile_test_output_dir_target"
+    output_dir.mkdir(exist_ok=True)
+    expected_output = output_dir / "DD_TST_99999 Rev 00.docx"
+    if expected_output.exists():
+        expected_output.unlink()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_dir),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 when given a directory as the output arg")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(expected_output.exists(), f"'{expected_output.name}' created inside the given output directory")
+
+
+MISSING_DOC_NUMBER_MARKDOWN = (
+    '---\n'
+    'title: "Missing Doc Number Test"\n'
+    'author: "Test Suite"\n'
+    'department: "Engineering"\n'
+    'department_head: "Test Head"\n'
+    'signature_fields: []\n'
+    'revisions: []\n'
+    '---\n'
+    '\n'
+    '## 1. Purpose and Scope\n'
+    '\n'
+    '### 1.1 Purpose\n'
+    'This document has no doc_number/current_revision.\n'
+    '\n'
+    '### 1.2 Scope\n'
+    'Comprehensive integration testing.\n'
+)
+
+
+def test_compile_default_output_filename_missing_doc_number_fails_clearly():
+    """With no output arg and no doc_number/current_revision in front
+    matter, the compiler can't compute a default filename - it should
+    halt with a clear error rather than minting ' Rev .docx'."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_missing_doc_number.md"
+    input_md.write_text(MISSING_DOC_NUMBER_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode != 0, "compiler reports a non-zero exit code when doc_number/current_revision are missing and no output path is given")
+    check("doc_number" in result.stderr + result.stdout, "error message mentions the missing doc_number/current_revision")
 
 
 HEADING_NUMBERING_MARKDOWN = (
@@ -1561,6 +1729,35 @@ def test_resolve_reference_markers_duplicate_anchor_raises():
         check("dup" in str(exc), f"the error names the duplicated label (got: {exc})")
 
 
+def test_resolve_reference_markers_preserves_other_formatting_in_same_paragraph():
+    """Reproduces a real ECO-000262/FTP-00001 bug: a paragraph like
+    "**Acceptance Criteria**: ... XREF:fig:x ..." lost its bold entirely
+    once the XREF resolved, because the old implementation deleted every
+    run in the paragraph and rebuilt it via plain para.add_run() calls -
+    discarding formatting on every run, not just the one touching the
+    sentinel."""
+    md = (
+        "## Section One {#sec:intro}\n\n"
+        "**Acceptance Criteria**: this text refers to XREF:sec:intro inline.\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "xref_preserves_bold_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    dilon_docx_common.narrow_section_bookmarks(docx_path)
+
+    dilon_docx_common.resolve_reference_markers(docx_path, {
+        'sec': dilon_docx_common.resolve_sec_reference,
+    })
+
+    doc = Document(docx_path)
+    target = next(p for p in doc.paragraphs if p.text.startswith("Acceptance Criteria"))
+    bold_run = next((r for r in target.runs if r.text == "Acceptance Criteria"), None)
+    check(
+        bold_run is not None and bold_run.bold is True,
+        "bold text earlier in a paragraph survives resolving an XREF later in the same paragraph "
+        f"(runs: {[(r.text, r.bold) for r in target.runs]})"
+    )
+
+
 def test_heading_auto_numbering():
     """Render test: headings written WITHOUT manual numbers (per the
     updated MARKDOWN_STYLING_GUIDE.md convention) must come out of Pandoc
@@ -1753,7 +1950,7 @@ def test_ensure_blank_line_around_steps_markers_idempotent():
     check(result == md, "already-blank-line case is left unchanged")
 
 
-def test_apply_field_based_step_numbering_single_step():
+def test_apply_step_list_numbering_single_step():
     md = (
         "## Major Section\n\n### Subsection Title\n\n"
         "@@@STEPS@@@\n\n"
@@ -1766,7 +1963,7 @@ def test_apply_field_based_step_numbering_single_step():
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    count = step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    count = step_numbering.apply_step_list_numbering(docx_path, clarification_id)
     check(count == 3, f"both steps and the one clarification get numbered (got {count})")
 
     doc = Document(docx_path)
@@ -1779,30 +1976,36 @@ def test_apply_field_based_step_numbering_single_step():
     clarification_paras = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Clarification List']
     check(len(clarification_paras) == 1, f"the nested item carries 'Dilon Step Clarification List' (got {len(clarification_paras)})")
 
+    for p in step_paras:
+        num_id, _ = dilon_docx_common._paragraph_num_id_and_ilvl(p._p)
+        check(num_id is None,
+              "a step carries no paragraph-level numPr before the merge "
+              "(link_steps_to_heading_numbering() adds it post-merge)")
+
     with zipfile.ZipFile(docx_path) as z:
         xml = z.read('word/document.xml').decode('utf-8')
-    instrs = re.findall(r'w:instr="([^"]*)"', xml)
-    styleref_count = sum(1 for i in instrs if i.strip() == 'STYLEREF 3 \\s')
-    seq_count = sum(1 for i in instrs if i.strip() == 'SEQ DilonStep \\* ARABIC \\s 3')
-    check(styleref_count == 2, f"both steps get a 'STYLEREF 3 \\\\s' field (got {styleref_count})")
-    check(seq_count == 2, f"both steps get a 'SEQ DilonStep \\\\* ARABIC \\\\s 3' field (got {seq_count})")
+    check('STYLEREF 3' not in xml and 'SEQ DilonStep' not in xml,
+          "no STYLEREF/SEQ step-number fields are generated anymore")
 
 
-def test_apply_field_based_step_numbering_number_precedes_step_text():
+def test_apply_step_list_numbering_step_text_is_untouched():
+    """With native list numbering the number is Word's list label, not
+    text in the paragraph - so the paragraph's text is exactly the
+    author's step text, with no number or tab run prepended."""
     md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. Wear clean gloves.\n\n@@@END_STEPS@@@\n"
-    docx_path = TEST_OUTPUT_DIR / "step_numbering_field_order_test.docx"
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_step_text_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
     step_para = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading'][0]
-    check(step_para.text.strip().endswith('Wear clean gloves.'),
-          f"the field's cached placeholder text comes before the author's step text (got {step_para.text!r})")
+    check(step_para.text == 'Wear clean gloves.',
+          f"step paragraph text is exactly the authored text (got {step_para.text!r})")
 
 
-def test_apply_field_based_step_numbering_clarifications_restart_per_step():
+def test_apply_step_list_numbering_clarifications_restart_per_step():
     md = (
         "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n"
         "#. First.\n"
@@ -1816,7 +2019,7 @@ def test_apply_field_based_step_numbering_clarifications_restart_per_step():
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
     clarification_paras = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Clarification List']
@@ -1827,7 +2030,7 @@ def test_apply_field_based_step_numbering_clarifications_restart_per_step():
           "every clarification sits at ilvl 0 of its own fresh list, not nested under the step")
 
 
-def test_apply_field_based_step_numbering_bullets_left_alone():
+def test_apply_step_list_numbering_bullets_left_alone():
     md = (
         "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n"
         "#. First.\n"
@@ -1838,7 +2041,7 @@ def test_apply_field_based_step_numbering_bullets_left_alone():
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
     bullet_para = [p for p in doc.paragraphs if 'unordered clarification' in p.text][0]
@@ -1846,7 +2049,7 @@ def test_apply_field_based_step_numbering_bullets_left_alone():
           "the bullet item is left with its own style, not reassigned to the clarification list style")
 
 
-def test_apply_field_based_step_numbering_bullets_ilvl_decremented():
+def test_apply_step_list_numbering_bullets_ilvl_decremented():
     """A bullet's ilvl inside @@@STEPS@@@ is Pandoc's original markdown-
     nesting depth, which still counts the step itself as a real list
     level even though the step is stripped of its own numPr. Left
@@ -1867,7 +2070,7 @@ def test_apply_field_based_step_numbering_bullets_ilvl_decremented():
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
     direct_bullet = [p for p in doc.paragraphs if 'Directly under the step' in p.text][0]
@@ -1879,20 +2082,20 @@ def test_apply_field_based_step_numbering_bullets_ilvl_decremented():
     check(nested_ilvl == '1', f"a bullet under an ordered clarification is decremented to ilvl 1 (got {nested_ilvl!r})")
 
 
-def test_apply_field_based_step_numbering_unclosed_block_raises():
-    md = "@@@STEPS@@@\n\n#. First\n"
+def test_apply_step_list_numbering_unclosed_block_raises():
+    md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. First\n"
     docx_path = TEST_OUTPUT_DIR / "step_numbering_unclosed_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
     try:
-        step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+        step_numbering.apply_step_list_numbering(docx_path, clarification_id)
         check(False, "an @@@STEPS@@@ with no matching @@@END_STEPS@@@ raises StepBlockError")
     except step_numbering.StepBlockError as exc:
         check("END_STEPS" in str(exc), f"the error mentions the missing closing marker (got: {exc})")
 
 
-def test_apply_field_based_step_numbering_open_block_across_heading3_boundary_raises():
+def test_apply_step_list_numbering_open_block_across_heading3_boundary_raises():
     md = (
         "### Subsection One\n\n@@@STEPS@@@\n\n#. First\n#. Second\n\n"
         "### Subsection Two\n\n#. Third\n\n@@@END_STEPS@@@\n"
@@ -1902,17 +2105,17 @@ def test_apply_field_based_step_numbering_open_block_across_heading3_boundary_ra
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
     try:
-        step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+        step_numbering.apply_step_list_numbering(docx_path, clarification_id)
         check(False, "an @@@STEPS@@@ left open across a ### (Heading 3) boundary raises StepBlockError")
     except step_numbering.StepBlockError as exc:
         check("section heading" in str(exc), f"the error mentions the section boundary (got: {exc})")
 
 
-def test_apply_field_based_step_numbering_skips_gracefully_without_clarification_style():
+def test_apply_step_list_numbering_skips_gracefully_without_clarification_style():
     md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. First\n    #. Clarification\n\n@@@END_STEPS@@@\n"
     docx_path = TEST_OUTPUT_DIR / "step_numbering_no_clarification_id_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, None)  # should not raise
+    step_numbering.apply_step_list_numbering(docx_path, None)  # should not raise
 
     doc = Document(docx_path)
     check(all('@@@STEPS' not in p.text and '@@@END_STEPS' not in p.text for p in doc.paragraphs),
@@ -1921,13 +2124,13 @@ def test_apply_field_based_step_numbering_skips_gracefully_without_clarification
           "the top-level step is still converted even when clarification numbering is skipped")
 
 
-def test_apply_field_based_step_numbering_preserves_inline_formatting():
+def test_apply_step_list_numbering_preserves_inline_formatting():
     md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. Use **IPA** and a lint-free cloth.\n\n@@@END_STEPS@@@\n"
     docx_path = TEST_OUTPUT_DIR / "step_numbering_formatting_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
 
     doc = Document(docx_path)
     step_para = [p for p in doc.paragraphs if 'IPA' in p.text][0]
@@ -1935,31 +2138,137 @@ def test_apply_field_based_step_numbering_preserves_inline_formatting():
     check(len(bold_runs) == 1 and bold_runs[0].text == 'IPA', "bold formatting on 'IPA' survives")
 
 
-def test_resolve_step_reference_builds_composite_field():
+def _expect_step_block_error(md, docx_name, expected_fragments, description):
+    """Compiles md to Part D, runs apply_step_list_numbering(), and checks
+    it raises StepBlockError whose message contains every fragment."""
+    docx_path = TEST_OUTPUT_DIR / docx_name
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    try:
+        step_numbering.apply_step_list_numbering(docx_path, clarification_id)
+        check(False, f"{description} raises StepBlockError")
+    except step_numbering.StepBlockError as exc:
+        message = str(exc)
+        check(all(f in message for f in expected_fragments),
+              f"{description}: error names {expected_fragments} (got: {message})")
+
+
+def test_apply_step_list_numbering_heading4_before_steps_raises():
+    _expect_step_block_error(
+        "## Major Section\n\n### Assembly\n\n#### Tools\n\nA torque driver.\n\n"
+        "@@@STEPS@@@\n\n#. First.\n\n@@@END_STEPS@@@\n",
+        "step_numbering_h4_before_test.docx",
+        ['Assembly', 'Heading 4'],
+        "a Heading 4 followed by @@@STEPS@@@ under one Heading 3",
+    )
+
+
+def test_apply_step_list_numbering_heading4_after_steps_raises():
+    _expect_step_block_error(
+        "## Major Section\n\n### Assembly\n\n@@@STEPS@@@\n\n#. First.\n\n@@@END_STEPS@@@\n\n"
+        "#### Notes\n\nSome notes.\n",
+        "step_numbering_h4_after_test.docx",
+        ['Assembly', 'Heading 4'],
+        "@@@STEPS@@@ followed by a Heading 4 under one Heading 3",
+    )
+
+
+def test_apply_step_list_numbering_heading4_inside_open_block_raises():
+    _expect_step_block_error(
+        "## Major Section\n\n### Assembly\n\n@@@STEPS@@@\n\n#. First.\n\n"
+        "#### Stray Sub-heading\n\n#. Second.\n\n@@@END_STEPS@@@\n",
+        "step_numbering_h4_inside_test.docx",
+        ['Assembly', 'Heading 4'],
+        "a Heading 4 inside an open @@@STEPS@@@ block",
+    )
+
+
+def test_apply_step_list_numbering_steps_without_heading3_raises():
+    _expect_step_block_error(
+        "## Major Section\n\n@@@STEPS@@@\n\n#. First.\n\n@@@END_STEPS@@@\n",
+        "step_numbering_no_h3_test.docx",
+        ['Heading 3', '@@@STEPS@@@'],
+        "a @@@STEPS@@@ block with no Heading 3 above it",
+    )
+
+
+def test_apply_step_list_numbering_heading1_resets_heading3_scope():
+    """A # (Heading 1) is off the heading list, so Word would NOT restart
+    step counters there - steps after it with no new ### would silently
+    continue the previous Heading 3's count and prefix. It must reset the
+    Heading 3 scope like a ## does, so the no-Heading-3 error fires."""
+    _expect_step_block_error(
+        "## Procedure\n\n### Sub\n\nSome text.\n\n# Appendix\n\n"
+        "@@@STEPS@@@\n\n#. First.\n\n@@@END_STEPS@@@\n",
+        "step_numbering_h1_reset_test.docx",
+        ['Heading 3', '@@@STEPS@@@'],
+        "a @@@STEPS@@@ block after a Heading 1 with no new Heading 3",
+    )
+
+
+def test_apply_step_list_numbering_heading4_in_different_heading3_allowed():
+    """The ban is per Heading 3: a Heading 4 under one Heading 3 and steps
+    under a different Heading 3 (even in the same Heading 2) are fine."""
+    md = (
+        "## Major Section\n\n### Background\n\n#### Tools\n\nA torque driver.\n\n"
+        "### Procedure\n\n@@@STEPS@@@\n\n#. First.\n\n@@@END_STEPS@@@\n"
+    )
+    docx_path = TEST_OUTPUT_DIR / "step_numbering_h4_other_h3_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    try:
+        count = step_numbering.apply_step_list_numbering(docx_path, clarification_id)
+        check(count == 1, f"the step under the other Heading 3 is converted (got {count})")
+    except step_numbering.StepBlockError as exc:
+        check(False, f"a Heading 4 in a different Heading 3 must not raise (got: {exc})")
+
+
+def test_resolve_step_reference_uses_paragraph_number_field():
     md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. Hold the board. []{#step:x}\n\n@@@END_STEPS@@@\n\nSee [](#step:x).\n"
     md = dilon_docx_common.preprocess_reference_markers(md)
     docx_path = TEST_OUTPUT_DIR / "step_resolver_callback_test.docx"
     compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
 
     clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
-    step_numbering.apply_field_based_step_numbering(docx_path, clarification_id)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
     dilon_docx_common.resolve_reference_markers(docx_path, {'step': step_numbering.resolve_step_reference})
 
     with zipfile.ZipFile(docx_path) as z:
         xml = z.read('word/document.xml').decode('utf-8')
-    check('REF step:x \\h' in xml, "the reference resolves via a plain REF \\h against the narrowed bookmark")
+    check('REF step:x \\w \\h' in xml,
+          "the reference is a full-context paragraph-number REF (\\w) - the step's number is its native list label")
     check('Step ' in xml, "the literal 'Step ' prefix is present at the reference site")
 
     doc = Document(docx_path)
-    els = list(doc.element.body.iter())
-    start_idx = next(i for i, el in enumerate(els) if el.tag == qn('w:bookmarkStart') and el.get(qn('w:name')) == 'step:x')
-    start_id = els[start_idx].get(qn('w:id'))
-    end_idx = next(i for i in range(start_idx + 1, len(els)) if els[i].tag == qn('w:bookmarkEnd') and els[i].get(qn('w:id')) == start_id)
-    check(end_idx > start_idx + 1,
-          "the narrowed bookmark wraps the step's number-field span, not an empty gap between "
-          "bookmarkStart and bookmarkEnd (regression: an anchor on a nested clarification, which "
-          "is never narrowed, produces exactly this empty-span shape and REF \\h then resolves to "
-          "nothing)")
+    step_para = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading'][0]
+    check(any(el.get(qn('w:name')) == 'step:x' for el in step_para._p.iter(qn('w:bookmarkStart'))),
+          "the step:x bookmark sits inside the step's own paragraph, which is all REF \\w needs")
+
+
+def _heading3_list_position(doc):
+    """(numId, ilvl) as strings that a step should carry: the Heading 3
+    style's own numId, one level below Heading 3's ilvl."""
+    h3_num_pr = doc.styles['Heading 3'].element.pPr.numPr
+    h3_ilvl = h3_num_pr.ilvl.val if h3_num_pr.ilvl is not None else 0
+    return str(h3_num_pr.numId.val), str(h3_ilvl + 1)
+
+
+def test_link_steps_to_heading_numbering_uses_heading3_list():
+    md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. First.\n#. Second.\n\n@@@END_STEPS@@@\n"
+    docx_path = TEST_OUTPUT_DIR / "step_link_unit_test.docx"
+    compiler.markdown_to_docx(md, docx_path, reference_doc=SIGNATURE_TEMPLATE)
+    clarification_id = step_numbering.get_step_clarification_abstract_num_id(SIGNATURE_TEMPLATE)
+    step_numbering.apply_step_list_numbering(docx_path, clarification_id)
+
+    linked = step_numbering.link_steps_to_heading_numbering(docx_path)
+    check(linked == 2, f"both steps are linked (got {linked})")
+
+    doc = Document(docx_path)
+    expected = _heading3_list_position(doc)
+    steps = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading']
+    positions = {dilon_docx_common._paragraph_num_id_and_ilvl(p._p) for p in steps}
+    check(positions == {expected},
+          f"every step sits on Heading 3's list, one level below it (expected {expected}, got {positions})")
 
 
 STEP_REDESIGN_MARKDOWN = (
@@ -1967,32 +2276,39 @@ STEP_REDESIGN_MARKDOWN = (
     '### Cleaning Procedure\n\n'
     '@@@STEPS@@@\n\n'
     '#. Wear clean gloves.\n'
-    '#. Hold the board by the edges. []{#step:hold-board-by-edges}\n'
+    '#. Hold the board by the edges.\n'
     '    #. Simple dirt such as lint or light dust can be blown away before wiping.\n\n'
     '@@@END_STEPS@@@\n\n'
     'NOTE: Clean the entire crystal but give special attention to the polished end.\n\n'
     '@@@STEPS@@@\n\n'
-    '#. Visually inspect both the crystal and the photomultiplier for defects.\n'
+    '#. Visually inspect both the crystal and the photomultiplier for defects. []{#step:inspect-crystal}\n'
     '#. Set the cleaned crystals aside on a clean lint free cloth.\n\n'
     '@@@END_STEPS@@@\n\n'
-    'As described in [](#step:hold-board-by-edges), always support the board by its edges.\n'
+    '### Inspection Procedure\n\n'
+    '@@@STEPS@@@\n\n'
+    '#. Check the board under magnification.\n\n'
+    '@@@END_STEPS@@@\n\n'
+    'As described in [](#step:inspect-crystal), inspect before setting aside.\n'
 )
 
 
-def test_compile_field_based_step_numbering_end_to_end():
-    """Integration test: two @@@STEPS@@@ blocks in one Heading 3
-    subsection (interrupted by a NOTE), a nested ordered clarification,
-    and a cross-reference, compiled through the real pipeline."""
+def test_compile_step_list_numbering_end_to_end():
+    """Integration test through the real pipeline, including the
+    docxcompose merge: two @@@STEPS@@@ blocks in one Heading 3 (split by a
+    NOTE), a third block under a second Heading 3, a clarification, and a
+    cross-reference. Every step in the FINAL document must sit on the
+    Heading 3 style's own list (not a docxcompose-remapped copy), one level
+    below Heading 3."""
     markdown = SAMPLE_MARKDOWN + STEP_REDESIGN_MARKDOWN
-    input_md = TEST_OUTPUT_DIR / "compile_test_field_step_numbering.md"
-    output_docx = TEST_OUTPUT_DIR / "compile_test_field_step_numbering.docx"
+    input_md = TEST_OUTPUT_DIR / "compile_test_step_list_numbering.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_step_list_numbering.docx"
     input_md.write_text(markdown, encoding="utf-8")
 
     result = subprocess.run(
         [sys.executable, str(COMPILER_SCRIPT), str(input_md), str(output_docx), str(SIGNATURE_TEMPLATE)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
-    check(result.returncode == 0, "compiler exits 0 for a document with field-based @@@STEPS@@@ blocks")
+    check(result.returncode == 0, "compiler exits 0 for a document with @@@STEPS@@@ blocks")
     if result.returncode != 0:
         print(result.stdout)
         print(result.stderr)
@@ -2002,15 +2318,22 @@ def test_compile_field_based_step_numbering_end_to_end():
     check(all('@@@STEPS' not in p.text and '@@@END_STEPS' not in p.text for p in doc.paragraphs),
           "no wrapper marker text remains anywhere")
     step_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading']
-    check(len(step_paragraphs) == 4, f"all 4 top-level steps across both blocks get 'Dilon Step Heading' (got {len(step_paragraphs)})")
+    check(len(step_paragraphs) == 5, f"all 5 top-level steps across three blocks get 'Dilon Step Heading' (got {len(step_paragraphs)})")
     clarification_paragraphs = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Clarification List']
     check(len(clarification_paragraphs) == 1, f"the one nested clarification gets 'Dilon Step Clarification List' (got {len(clarification_paragraphs)})")
 
+    expected = _heading3_list_position(doc)
+    positions = {dilon_docx_common._paragraph_num_id_and_ilvl(p._p) for p in step_paragraphs}
+    check(positions == {expected},
+          f"every step in the merged document is on Heading 3's own list, one level down "
+          f"(expected {expected}, got {positions})")
+
     with zipfile.ZipFile(output_docx) as z:
         xml = z.read('word/document.xml').decode('utf-8')
-    check('w:name="step:hold-board-by-edges"' in xml, "the step's anchor survives as a real bookmark")
-    check('REF step:hold-board-by-edges \\h' in xml, "the cross-reference resolves to a live REF field")
-    check('STYLEREF 3 \\s' in xml, "steps carry a live Heading-3-scoped number field")
+    check('STYLEREF 3' not in xml and 'SEQ DilonStep' not in xml, "no field-based step numbers remain")
+    check('w:name="step:inspect-crystal"' in xml, "the step's anchor survives as a real bookmark")
+    check('REF step:inspect-crystal \\w \\h' in xml,
+          "a reference to a step in the second block of a Heading 3 resolves to a live REF \\w field")
 
 
 def test_compile_steps_with_bullets_end_to_end():
@@ -2066,6 +2389,7 @@ def test_compile_duplicate_step_anchor_fails_clearly():
 FULL_XREF_MARKDOWN = (
     '\n## Assembly Section {#sec:assembly}\n\n'
     '![A widget.](diagrams/example.png){#fig:widget}\n\n'
+    '### Installation\n\n'
     '@@@STEPS@@@\n\n'
     '#. Install the widget. []{#step:install-widget}\n\n'
     '@@@END_STEPS@@@\n\n'
@@ -2100,7 +2424,7 @@ def test_compile_full_cross_reference_set_end_to_end():
         xml = z.read('word/document.xml').decode('utf-8')
     check('REF fig:widget \\h' in xml, "the figure reference resolved")
     check('REF sec:assembly \\r \\h' in xml, "the section reference resolved")
-    check('REF step:install-widget \\h' in xml, "the step reference resolved")
+    check('REF step:install-widget \\w \\h' in xml, "the step reference resolved")
     check('XREF' not in xml, "no sentinel remains")
 
 
@@ -2539,6 +2863,172 @@ def test_compile_four_level_nested_list_fails_clearly():
           "the failure message mentions nesting, not a raw traceback only")
 
 
+MIXED_DOC_FORM_SECTION_MARKDOWN = SAMPLE_MARKDOWN + (
+    '\n## Test Report\n'
+    '\n'
+    '@@@FORM_SECTION@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FieldGrid@@@\n'
+    'Tested By: | Date:\n'
+    '@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Notes:@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@END_FORM_SECTION@@@\n'
+)
+
+
+def test_compile_mixed_document_with_form_section():
+    """A narrative document (include_front_matter defaults to true) can
+    embed a form section - its heading behaves like any other section (a
+    normal, numbered Heading 2), and its @@@FORM_SECTION@@@-wrapped
+    content renders as real FieldGrid/FillLine fields."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_mixed_form_section.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_mixed_form_section.docx"
+    input_md.write_text(MIXED_DOC_FORM_SECTION_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "compiler exits 0 for a mixed document with a form section")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    doc = Document(output_docx)
+
+    heading_paragraphs = [
+        p for p in doc.paragraphs
+        if p.style and p.style.name == "Heading 2" and p.text.strip() == "Test Report"
+    ]
+    check(len(heading_paragraphs) == 1, f"'Test Report' renders as a normal Heading 2 paragraph, found {len(heading_paragraphs)}")
+
+    grid_tables = [t for t in doc.tables if t.style is not None and t.style.name == "Table Grid"]
+    field_grid_table = next((t for t in grid_tables if t.rows[0].cells[0].paragraphs[0].text == "Tested By:"), None)
+    check(field_grid_table is not None, "the form section's FieldGrid rendered as a real bordered table")
+
+    fillline_paragraphs = [p for p in doc.paragraphs if p.text.startswith("Notes:")]
+    check(len(fillline_paragraphs) == 1, "the form section's FillLine rendered as a label+blank paragraph")
+    if fillline_paragraphs:
+        check(len(fillline_paragraphs[0].paragraph_format.tab_stops) == 1, "FillLine paragraph carries its right-aligned tab stop")
+
+    all_text = "\n".join(p.text for p in doc.paragraphs)
+    check("@@@" not in all_text, "no leftover FORM_SECTION/FORM_FIELD marker text in the compiled document")
+
+
+UNWRAPPED_FORM_FIELD_IN_DOC_MARKDOWN = SAMPLE_MARKDOWN + (
+    '\n## Test Report\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Notes:@@@END_FORM_FIELD@@@\n'
+)
+
+
+def test_compile_form_field_outside_form_section_fails_clearly():
+    """A @@@FORM_FIELD:...@@@ marker with no enclosing @@@FORM_SECTION@@@
+    must halt compilation with a clear error, not silently pass the
+    marker text through as literal body content."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_unwrapped_form_field.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_unwrapped_form_field.docx"
+    input_md.write_text(UNWRAPPED_FORM_FIELD_IN_DOC_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode != 0, "compiler reports a non-zero exit code for a @@@FORM_FIELD@@@ marker with no enclosing @@@FORM_SECTION@@@")
+    check("FORM_SECTION" in result.stderr + result.stdout, "error message mentions the missing @@@FORM_SECTION@@@")
+
+
+MALFORMED_FORM_SECTION_MARKDOWN = SAMPLE_MARKDOWN + (
+    '\n## Test Report\n'
+    '\n'
+    '@@@FORM_SECTION@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Notes:@@@END_FORM_FIELD@@@\n'
+)
+
+
+def test_compile_unclosed_form_section_fails_clearly():
+    """An @@@FORM_SECTION@@@ left open at end-of-document must halt
+    compilation with a clear error."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_unclosed_form_section.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_unclosed_form_section.docx"
+    input_md.write_text(MALFORMED_FORM_SECTION_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode != 0, "compiler reports a non-zero exit code for an unclosed @@@FORM_SECTION@@@")
+    check("FORM_SECTION" in result.stderr + result.stdout, "error message mentions the unclosed @@@FORM_SECTION@@@")
+
+
+NESTED_FORM_SECTION_MARKDOWN = SAMPLE_MARKDOWN + (
+    '\n## Test Report\n'
+    '\n'
+    '@@@FORM_SECTION@@@\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Notes:@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@FORM_SECTION@@@\n'
+)
+
+
+def test_compile_nested_form_section_fails_clearly():
+    """A second @@@FORM_SECTION@@@ opened before a preceding one was
+    closed with @@@END_FORM_SECTION@@@ must halt compilation with a clear
+    error, end-to-end through the full compiler pipeline (not just at the
+    _form_section_ranges() unit level)."""
+    input_md = TEST_OUTPUT_DIR / "compile_test_nested_form_section.md"
+    output_docx = TEST_OUTPUT_DIR / "compile_test_nested_form_section.docx"
+    input_md.write_text(NESTED_FORM_SECTION_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(SIGNATURE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode != 0, "compiler reports a non-zero exit code for a nested @@@FORM_SECTION@@@")
+    check("FORM_SECTION" in result.stderr + result.stdout, "error message mentions the nested @@@FORM_SECTION@@@")
+
+
 def test_no_shebang_in_python_scripts():
     def has_shebang(path):
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -2593,12 +3083,18 @@ def main():
     test_compile_has_no_leading_blank_paragraph()
     test_compile_has_no_title_page()
     test_compile_header_signature_revision_widths()
+    test_compile_extended_prototype_revision_number()
     test_compile_footer_table_layout()
     test_compile_bom_front_matter()
     test_compile_table_marker_no_blank_line()
     test_compile_adjacent_tables_no_merge()
     test_compile_table_column_widths()
     test_compile_with_default_templates()
+    test_default_output_filename_uses_doc_number_and_revision()
+    test_default_output_filename_requires_doc_number_and_revision()
+    test_compile_default_output_filename_end_to_end()
+    test_compile_output_arg_as_directory_uses_default_filename()
+    test_compile_default_output_filename_missing_doc_number_fails_clearly()
     test_compile_resolves_relative_image_paths()
     test_lock_image_aspect_ratios_adds_frame_lock_when_missing()
     test_lock_image_aspect_ratios_idempotent_when_already_locked()
@@ -2620,6 +3116,7 @@ def main():
     test_resolve_reference_markers_dispatches_by_type()
     test_resolve_reference_markers_missing_anchor_raises()
     test_resolve_reference_markers_duplicate_anchor_raises()
+    test_resolve_reference_markers_preserves_other_formatting_in_same_paragraph()
     test_heading2_has_no_automatic_page_break()
     test_compile_toc_forces_page_break_after_toc()
     test_get_step_clarification_abstract_num_id_found()
@@ -2629,17 +3126,24 @@ def main():
     test_create_num_instance_writes_start_override()
     test_ensure_blank_line_around_steps_markers_inserts_both_sides()
     test_ensure_blank_line_around_steps_markers_idempotent()
-    test_apply_field_based_step_numbering_single_step()
-    test_apply_field_based_step_numbering_number_precedes_step_text()
-    test_apply_field_based_step_numbering_clarifications_restart_per_step()
-    test_apply_field_based_step_numbering_bullets_left_alone()
-    test_apply_field_based_step_numbering_bullets_ilvl_decremented()
-    test_apply_field_based_step_numbering_unclosed_block_raises()
-    test_apply_field_based_step_numbering_open_block_across_heading3_boundary_raises()
-    test_apply_field_based_step_numbering_skips_gracefully_without_clarification_style()
-    test_apply_field_based_step_numbering_preserves_inline_formatting()
-    test_resolve_step_reference_builds_composite_field()
-    test_compile_field_based_step_numbering_end_to_end()
+    test_apply_step_list_numbering_single_step()
+    test_apply_step_list_numbering_step_text_is_untouched()
+    test_apply_step_list_numbering_clarifications_restart_per_step()
+    test_apply_step_list_numbering_bullets_left_alone()
+    test_apply_step_list_numbering_bullets_ilvl_decremented()
+    test_apply_step_list_numbering_unclosed_block_raises()
+    test_apply_step_list_numbering_open_block_across_heading3_boundary_raises()
+    test_apply_step_list_numbering_skips_gracefully_without_clarification_style()
+    test_apply_step_list_numbering_preserves_inline_formatting()
+    test_apply_step_list_numbering_heading4_before_steps_raises()
+    test_apply_step_list_numbering_heading4_after_steps_raises()
+    test_apply_step_list_numbering_heading4_inside_open_block_raises()
+    test_apply_step_list_numbering_steps_without_heading3_raises()
+    test_apply_step_list_numbering_heading1_resets_heading3_scope()
+    test_apply_step_list_numbering_heading4_in_different_heading3_allowed()
+    test_link_steps_to_heading_numbering_uses_heading3_list()
+    test_resolve_step_reference_uses_paragraph_number_field()
+    test_compile_step_list_numbering_end_to_end()
     test_compile_steps_with_bullets_end_to_end()
     test_compile_duplicate_step_anchor_fails_clearly()
     test_compile_full_cross_reference_set_end_to_end()
@@ -2661,6 +3165,10 @@ def main():
     test_resolve_list_continuations_duplicate_anchor_raises()
     test_compile_ordered_list_and_continuation_end_to_end()
     test_compile_four_level_nested_list_fails_clearly()
+    test_compile_mixed_document_with_form_section()
+    test_compile_form_field_outside_form_section_fails_clearly()
+    test_compile_unclosed_form_section_fails_clearly()
+    test_compile_nested_form_section_fails_clearly()
     test_no_shebang_in_python_scripts()
 
     print(f"\n{passed} passed, {failed} failed (direct-invocation checks)")

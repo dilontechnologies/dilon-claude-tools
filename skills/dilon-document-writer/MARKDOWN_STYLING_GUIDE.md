@@ -46,6 +46,9 @@ revisions:
 - `signature_fields`: Array of additional approvers, each a `department`/`name` pair (may be empty) - lets each document declare its own set of signators (e.g. Regulatory, Quality) instead of a fixed pair of roles
 - `revisions`: Array of revision history entries
 
+**Optional Fields:**
+- `include_front_matter`: Boolean, defaults to `true`. Set to `false` to compile a header/footer-only form/traveler instead - no signature page, no revision table, no table of contents. See section 13.7 for the `@@@FORM_SECTION@@@` marker this requires around any form-field content.
+
 **Referencing Front Matter in the Document Body:**
 
 The document body may reference any front-matter field with `{{field_name}}` (e.g. `{{doc_number}}`, `{{title}}`, `{{current_revision}}`), so a value doesn't have to be hand-duplicated between the YAML front matter and the prose. This is resolved by Jinja2 against the same metadata dict that drives the header, footer, signature table, and title page, before Pandoc ever sees the text. To write a literal `{{` or `}}` (e.g. to document this syntax itself), wrap it in `{% raw %}...{% endraw %}`.
@@ -68,7 +71,7 @@ If you see gray highlighted blocks in the generated Word document, it's a legacy
 - number: "1.1"
   description: "Updated Section 3.5 with new calibration data"
   eco_number: "ECO-2025-042"
-  eco_date: "2025-10-15"
+  eco_date: "10-15-2025"
 ```
 
 ---
@@ -436,6 +439,10 @@ this instead of a plain `#.` list.
 **Rules:**
 - `@@@STEPS@@@` takes no attributes - just the bare marker, opening and closing (`@@@END_STEPS@@@`) around `#.` list content, same tab-nesting convention as any ordered list (Section 5.2).
 - A step's number is scoped to the nearest preceding `###` (Heading 3) - a new `###` always starts a fresh count at 1. Every `@@@STEPS@@@` block within the *same* Heading 3 subsection shares one continuous count automatically - no marker needed to "continue" a procedure interrupted by prose, a photo, or a `NOTE:`.
+- Every `@@@STEPS@@@` block must sit under a `###` (Heading 3). A block directly under a `##` fails compilation with an error.
+- A `###` subsection that contains `@@@STEPS@@@` cannot also contain a `####` (Heading 4), before or after the steps - steps use Heading 4's numbering level, so the two would share one counter. Compilation fails with an error naming the subsection; move the `####` content under its own `###`, or make it plain text.
+- In the compiled Word document, steps are real Word numbered-list items: pressing Enter after a step adds the next numbered step, and inserting or deleting steps renumbers the rest automatically.
+- **Don't press Tab or Shift+Tab on a step in Word.** Steps share the heading list, so Tab turns the step into a Heading 5 (numbered e.g. `2.3.1.1`, and listed in the navigation pane) and Shift+Tab turns it into a Heading 3. For a sub-step, write a nested `#.` clarification in the markdown instead. If a document with a Tab-demoted step is later re-extracted, `dilon-document-extractor` keeps it in the procedure as a nested sub-step and flags it for review.
 - **In the procedure itself**, a step shows its live `<H2 number>.<H3 number>.<step number>` (e.g. `2.3.1`) - no "Step " word in place.
 - A nested `#.` item under a step is a **clarification**: it's relettered `a.`, `b.`, `c.` and restarts at "a." for every step (it does not continue the previous step's lettering). A nested `-` (bulleted) item is left as a plain bullet.
 - **When referenced elsewhere** (see below), a step resolves to `Step <n>.<m>.<p>` (e.g. `Step 2.3.1`) - the "Step " word only ever appears in a cross-reference, never in the procedure's own in-place numbering.
@@ -449,7 +456,7 @@ Give the step an anchor with a bracketed-span id - `[]{#step:label}`, not a bare
 #. Hold the board by the edges of the board when cleaning. []{#step:hold-board-by-edges}
 ```
 
-The anchor must sit on a **top-level step**, not on a nested clarification - only a top-level step's number is field-based and cross-reference-ready; a clarification keeps its own native list lettering and isn't currently a valid reference target.
+The anchor must sit on a **top-level step**, not on a nested clarification - a clarification keeps its own lettering (`a.`, `b.`) and isn't currently a valid reference target.
 
 Every `{#step:label}` anchor must be unique across the whole document - a duplicate fails compilation with an error.
 
@@ -811,7 +818,7 @@ This sentence needs a footnote.[^1]
 
 For content that requires specific formatting beyond Pandoc's automatic styling, you can apply custom paragraph styles using `@@@STYLE@@@` markers.
 
-**Form-only marker:** Documents compiled with the `dilon-document-form-compiler` skill (forms/travelers meant to be printed and filled out by hand) support one additional marker on top of everything in this guide: `@@@FORM_FIELD:FillLine@@@Label@@@END_FORM_FIELD@@@`, which becomes a label followed by a right-aligned, underscore-leadered fill-in blank. See that skill's `SKILL.md` for details - it does not apply to documents compiled with `dilon-document-compiler`.
+**Form markers:** Any document compiled with `dilon-document-compiler` can also use the form-only markers (`FillLine`, `FieldGrid`, `Form_Section_Header`) documented in the `dilon-document-form-writer` skill, as long as every one is wrapped in a `@@@FORM_SECTION@@@`/`@@@END_FORM_SECTION@@@` range - see section 13.7 below. A document compiled with `include_front_matter: false` wraps its entire body in one such range; a narrative document (`include_front_matter: true`, the default) can embed one or more form sections alongside ordinary content.
 
 ### 13.1 Syntax
 
@@ -964,6 +971,29 @@ Use `@@@STYLE:StyleName@@@` to start styling and `@@@END_STYLE@@@` to end it.
 ```
 
 The markers will be preserved in backticks and displayed to the user as documentation examples.
+
+### 13.7 Form Sections (`@@@FORM_SECTION@@@`)
+
+Every `@@@FORM_FIELD:...@@@` marker (`FillLine`, `FieldGrid`, `Form_Section_Header`) must be enclosed in a `@@@FORM_SECTION@@@`/`@@@END_FORM_SECTION@@@` pair, on their own lines, each separated from adjacent content by a blank line (like any other block-level marker in this guide):
+
+```markdown
+## Test Report
+
+@@@FORM_SECTION@@@
+
+@@@FORM_FIELD:FieldGrid@@@
+Tested By: | Date:
+@@@END_FORM_FIELD@@@
+
+@@@END_FORM_SECTION@@@
+```
+
+- The section heading (if any) stays outside/above the `@@@FORM_SECTION@@@` tag as ordinary content - it's numbered and gets a table-of-contents entry exactly like any other heading.
+- A pure form document (`include_front_matter: false`) wraps its entire body in one `@@@FORM_SECTION@@@` pair.
+- Sections don't nest, and can't overlap. Multiple, non-overlapping sections in one document are fine.
+- A `@@@FORM_FIELD:...@@@` marker found outside any declared section, or a malformed section (unclosed, an `@@@END_FORM_SECTION@@@` with no matching open section, or a nested `@@@FORM_SECTION@@@`), halts compilation with a clear error - this is a hard failure, not a warn-and-degrade marker like the others in this section.
+- `@@@FORM_SECTION@@@`/`@@@END_FORM_SECTION@@@` are body-level only - unlike a `@@@FORM_FIELD:...@@@` marker found outside a section, placing one inside a markdown table cell is not detected and does not error: it's simply never recognized as a sentinel, so it's left as inert literal text in the compiled table cell. Keep `@@@FORM_SECTION@@@` markers at the top level of the document body.
+- `FillLine`/`FieldGrid`/`Form_Section_Header` syntax itself is documented in the `dilon-document-form-writer` skill, not here.
 
 ---
 

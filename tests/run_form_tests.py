@@ -16,25 +16,26 @@ from docx import Document
 from docx.shared import Inches
 
 REPO_ROOT = Path(__file__).parent.parent
-FORM_COMPILER_DIR = REPO_ROOT / "skills" / "dilon-document-form-compiler"
-SCRIPTS_DIR = FORM_COMPILER_DIR / "scripts"
+# dilon-document-form-compiler was retired - dilon-document-compiler's
+# generate_dilon_doc.py now compiles forms too, via include_front_matter:
+# false in the front matter.
+COMPILER_DIR = REPO_ROOT / "skills" / "dilon-document-compiler"
+SCRIPTS_DIR = COMPILER_DIR / "scripts"
 FORM_WRITER_DIR = REPO_ROOT / "skills" / "dilon-document-form-writer"
 FORM_TEMPLATE_PATH = FORM_WRITER_DIR / "TEMPLATE_Form.md"
-# Shared with dilon-document-compiler - both skills use the same
-# header/footer/styles-only base template, no form-specific copy.
 BASE_TEMPLATE = REPO_ROOT / "templates" / "TEMPLATE_Word_Base.docx"
 CHECK_DEPS_SCRIPT = SCRIPTS_DIR / "check_deps.py"
-FORM_COMPILER_SCRIPT = SCRIPTS_DIR / "generate_dilon_form.py"
+FORM_COMPILER_SCRIPT = SCRIPTS_DIR / "generate_dilon_doc.py"
 TEST_OUTPUT_DIR = Path(__file__).parent / "form-test-output"
 
 SHEBANG_GUARDED_SCRIPTS = [
     CHECK_DEPS_SCRIPT,
     FORM_COMPILER_SCRIPT,
-    SCRIPTS_DIR / "form_fields.py",
     Path(__file__),
 ]
 
 sys.path.insert(0, str(SCRIPTS_DIR))
+sys.path.insert(0, str(REPO_ROOT / "lib"))
 
 passed = 0
 failed = 0
@@ -57,6 +58,7 @@ SAMPLE_FORM_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "FO-99999"\n'
     'current_revision: "00"\n'
+    'include_front_matter: false\n'
     'department_head: "Test Head"\n'
     'signature_fields:\n'
     '  - department: "Regulatory"\n'
@@ -84,6 +86,7 @@ FIELD_GRID_PERMUTATIONS_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "FO-88888"\n'
     'current_revision: "00"\n'
+    'include_front_matter: false\n'
     'department_head: "Test Head"\n'
     'signature_fields:\n'
     '  - department: "Regulatory"\n'
@@ -96,6 +99,8 @@ FIELD_GRID_PERMUTATIONS_MARKDOWN = (
     '    eco_number: "ECO-000"\n'
     '    eco_date: "2025-01-01"\n'
     '---\n'
+    '\n'
+    '@@@FORM_SECTION@@@\n'
     '\n'
     '@@@FORM_FIELD:FieldGrid@@@\n'
     'Default Pair A: | Default Pair B:\n'
@@ -126,6 +131,8 @@ FIELD_GRID_PERMUTATIONS_MARKDOWN = (
     '| Field | Value |\n'
     '|---|---|\n'
     '| Cell FillLine | @@@FORM_FIELD:FillLine@@@Cell Line:@@@END_FORM_FIELD@@@ |\n'
+    '\n'
+    '@@@END_FORM_SECTION@@@\n'
 )
 
 
@@ -306,6 +313,7 @@ FIELD_GRID_TITLE_ROW_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "FO-77778"\n'
     'current_revision: "00"\n'
+    'include_front_matter: false\n'
     'department_head: "Test Head"\n'
     'signature_fields:\n'
     '  - department: "Regulatory"\n'
@@ -319,11 +327,15 @@ FIELD_GRID_TITLE_ROW_MARKDOWN = (
     '    eco_date: "2025-01-01"\n'
     '---\n'
     '\n'
+    '@@@FORM_SECTION@@@\n'
+    '\n'
     '@@@FORM_FIELD:FieldGrid@@@\n'
     'Work Order: | Date:\n'
     'Assembly Prep {title=true}\n'
     'Technician: | Notes:\n'
     '@@@END_FORM_FIELD@@@\n'
+    '\n'
+    '@@@END_FORM_SECTION@@@\n'
 )
 
 
@@ -383,6 +395,7 @@ FO_00127_REPLICA_MARKDOWN = (
     'department: "Engineering"\n'
     'doc_number: "FO-00127"\n'
     'current_revision: "01"\n'
+    'include_front_matter: false\n'
     'department_head: "Test Head"\n'
     'signature_fields:\n'
     '  - department: "Regulatory"\n'
@@ -395,6 +408,8 @@ FO_00127_REPLICA_MARKDOWN = (
     '    eco_number: "ECO-000055"\n'
     '    eco_date: "2025-03-13"\n'
     '---\n'
+    '\n'
+    '@@@FORM_SECTION@@@\n'
     '\n'
     '@@@FORM_FIELD:FieldGrid@@@\n'
     'Work Order: | Date:\n'
@@ -415,6 +430,8 @@ FO_00127_REPLICA_MARKDOWN = (
     '|---|---|---|---|---|---|---|---|---|\n'
     '| 1 |  |  |  |  |  |  | WO# |  |\n'
     '| 2 |  |  |  |  |  |  | WO# |  |\n'
+    '\n'
+    '@@@END_FORM_SECTION@@@\n'
 )
 
 
@@ -490,6 +507,39 @@ def test_fo_00127_replica_compiles_with_expected_fields():
         check(len(qc_tables[0].columns) == 9, f"QC table has 9 columns, found {len(qc_tables[0].columns)}")
 
 
+UNWRAPPED_FORM_FIELD_MARKDOWN = (
+    '---\n'
+    'title: "Unwrapped Marker Test"\n'
+    'doc_number: "FO-66666"\n'
+    'current_revision: "00"\n'
+    '---\n'
+    '\n'
+    '@@@FORM_FIELD:FillLine@@@Work Order:@@@END_FORM_FIELD@@@\n'
+)
+
+
+def test_compile_form_field_outside_section_fails_clearly():
+    input_md = TEST_OUTPUT_DIR / "unwrapped_form_field.md"
+    output_docx = TEST_OUTPUT_DIR / "unwrapped_form_field.docx"
+    input_md.write_text(UNWRAPPED_FORM_FIELD_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(FORM_COMPILER_SCRIPT),
+            str(input_md),
+            str(output_docx),
+            str(BASE_TEMPLATE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode != 0, "compiler reports a non-zero exit code for an unwrapped @@@FORM_FIELD@@@ marker")
+    check("FORM_SECTION" in result.stderr + result.stdout, "error message mentions the missing @@@FORM_SECTION@@@")
+
+
 def test_generate_form_document():
     input_md = TEST_OUTPUT_DIR / "form_test.md"
     output_docx = TEST_OUTPUT_DIR / "form_test.docx"
@@ -543,8 +593,72 @@ def test_generate_form_document():
     )
 
 
+def test_compile_default_output_filename_end_to_end():
+    """Invoking with only <input.md> (no output, no template arg) should
+    name the compiled file '<doc_number> Rev <current_revision>.docx' next
+    to the input, using SAMPLE_FORM_MARKDOWN's doc_number/current_revision."""
+    input_md = TEST_OUTPUT_DIR / "form_test_default_name.md"
+    input_md.write_text(SAMPLE_FORM_MARKDOWN, encoding="utf-8")
+    expected_output = TEST_OUTPUT_DIR / "FO-99999 Rev 00.docx"
+    if expected_output.exists():
+        expected_output.unlink()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(FORM_COMPILER_SCRIPT),
+            str(input_md),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode == 0, "form compiler exits 0 with only the input arg (default output filename)")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+    check(expected_output.exists(), f"'{expected_output.name}' created via default output filename")
+
+
+MISSING_DOC_NUMBER_FORM_MARKDOWN = (
+    '---\n'
+    'title: "Missing Doc Number Form Test"\n'
+    'author: "Test Suite"\n'
+    'department: "Engineering"\n'
+    'department_head: "Test Head"\n'
+    'signature_fields: []\n'
+    'revisions: []\n'
+    '---\n'
+    '\n'
+    'This form has no doc_number/current_revision.\n'
+)
+
+
+def test_compile_default_output_filename_missing_doc_number_fails_clearly():
+    """With no output arg and no doc_number/current_revision in front
+    matter, the form compiler can't compute a default filename - it
+    should halt with a clear error rather than minting ' Rev .docx'."""
+    input_md = TEST_OUTPUT_DIR / "form_test_missing_doc_number.md"
+    input_md.write_text(MISSING_DOC_NUMBER_FORM_MARKDOWN, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(FORM_COMPILER_SCRIPT),
+            str(input_md),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    check(result.returncode != 0, "form compiler reports a non-zero exit code when doc_number/current_revision are missing and no output path is given")
+    check("doc_number" in result.stderr + result.stdout, "error message mentions the missing doc_number/current_revision")
+
+
 def test_underscore_until_end_of_line_body_paragraph():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     p = doc.add_paragraph("Work Order:")
     ff.underscore_until_end_of_line(p)
@@ -564,7 +678,7 @@ def test_underscore_until_end_of_line_body_paragraph():
 
 
 def test_underscore_until_end_of_line_in_table_cell():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     table = doc.add_table(rows=1, cols=1)
     table.columns[0].width = Inches(2.0)
@@ -584,9 +698,11 @@ def test_underscore_until_end_of_line_in_table_cell():
 
 
 def test_apply_form_fields_marker():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
     doc.add_paragraph("@@@FORM_FIELD:FillLine@@@Work Order:@@@END_FORM_FIELD@@@")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
     temp_path = TEST_OUTPUT_DIR / "form_fields_marker.docx"
     doc.save(temp_path)
 
@@ -599,13 +715,15 @@ def test_apply_form_fields_marker():
 
 
 def test_apply_form_fields_marker_in_table_cell():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
     table = doc.add_table(rows=1, cols=1)
     table.columns[0].width = Inches(2.0)
     cell = table.rows[0].cells[0]
     cell.width = Inches(2.0)
     cell.paragraphs[0].text = "@@@FORM_FIELD:FillLine@@@WO#@@@END_FORM_FIELD@@@"
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
     temp_path = TEST_OUTPUT_DIR / "form_fields_marker_in_cell.docx"
     doc.save(temp_path)
 
@@ -618,7 +736,7 @@ def test_apply_form_fields_marker_in_table_cell():
 
 
 def test_parse_bracket_annotations():
-    import form_fields as ff
+    import dilon_form_fields as ff
     check(ff.parse_bracket_annotations("Work Order:") == ("Work Order:", {}), "no bracket -> unchanged text, empty annotations")
     check(ff.parse_bracket_annotations("Cure Temp:[pair=60]") == ("Cure Temp:", {"pair": "60"}), "single annotation parsed")
     check(
@@ -629,7 +747,7 @@ def test_parse_bracket_annotations():
 
 
 def test_underscore_until_end_of_line_width_override():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     p = doc.add_paragraph("Work Order:")
     ff.underscore_until_end_of_line(p, width_override=3.0)
@@ -641,7 +759,7 @@ def test_underscore_until_end_of_line_width_override():
 
 
 def test_underscore_until_end_of_line_width_override_clamped():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     p = doc.add_paragraph("Work Order:")
     section = doc.sections[0]
@@ -657,7 +775,7 @@ def test_underscore_until_end_of_line_width_override_clamped():
 
 
 def test_underscore_until_end_of_line_multiple_lines():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     p = doc.add_paragraph("Notes:")
     ff.underscore_until_end_of_line(p, num_lines=3)
@@ -674,7 +792,7 @@ def test_underscore_until_end_of_line_multiple_lines():
 
 
 def test_underscore_until_end_of_line_multiple_lines_ignores_width():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     p = doc.add_paragraph("Notes:")
     section = doc.sections[0]
@@ -691,9 +809,11 @@ def test_underscore_until_end_of_line_multiple_lines_ignores_width():
 
 
 def test_apply_form_fields_fillline_width_annotation():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
     doc.add_paragraph("@@@FORM_FIELD:FillLine@@@Work Order:[width=3in]@@@END_FORM_FIELD@@@")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
     temp_path = TEST_OUTPUT_DIR / "form_fields_fillline_width.docx"
     doc.save(temp_path)
 
@@ -709,9 +829,11 @@ def test_apply_form_fields_fillline_width_annotation():
 
 
 def test_apply_form_fields_fillline_lines_annotation():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
     doc.add_paragraph("@@@FORM_FIELD:FillLine@@@Notes:[lines=3]@@@END_FORM_FIELD@@@")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
     temp_path = TEST_OUTPUT_DIR / "form_fields_fillline_lines.docx"
     doc.save(temp_path)
 
@@ -723,7 +845,7 @@ def test_apply_form_fields_fillline_lines_annotation():
 
 
 def test_form_field_re_optional_width_group():
-    import form_fields as ff
+    import dilon_form_fields as ff
     match = ff.FORM_FIELD_RE.search("@@@FORM_FIELD:FieldGrid:6.5in@@@Work Order:@@@END_FORM_FIELD@@@")
     check(match is not None, "marker with a block-level width suffix matches")
     if match:
@@ -739,13 +861,13 @@ def test_form_field_re_optional_width_group():
 
 
 def test_parse_row_annotation():
-    import form_fields as ff
+    import dilon_form_fields as ff
     check(ff.parse_row_annotation("Work Order: | Date:") == ("Work Order: | Date:", {}), "no row annotation -> unchanged, empty dict")
     check(ff.parse_row_annotation("Notes: {dir=v,rows=3}") == ("Notes:", {"dir": "v", "rows": "3"}), "row annotation parsed and stripped")
 
 
 def test_parse_field_grid_block_simple():
-    import form_fields as ff
+    import dilon_form_fields as ff
     block = "Work Order: | Date:\nCarrier Board Assy Lot:\n"
     rows = ff.parse_field_grid_block(block)
     check(len(rows) == 2, f"two declared rows produce two parsed rows, found {len(rows)}")
@@ -756,7 +878,7 @@ def test_parse_field_grid_block_simple():
 
 
 def test_parse_field_grid_block_annotations():
-    import form_fields as ff
+    import dilon_form_fields as ff
     block = "Cure Temp:[pair=60] | Start Time:[pair=40]\nNotes: {dir=v,rows=3}\n"
     rows = ff.parse_field_grid_block(block)
     check(len(rows) == 2, f"expected 2 rows, found {len(rows)}")
@@ -770,7 +892,7 @@ def test_parse_field_grid_block_annotations():
 
 
 def test_parse_field_grid_block_skips_blank_and_unparseable_lines():
-    import form_fields as ff
+    import dilon_form_fields as ff
     block = "Work Order:\n\n   \n|\nDate:\n"
     rows = ff.parse_field_grid_block(block)
     check(len(rows) == 2, f"blank lines and an unparseable row are skipped, found {len(rows)} rows")
@@ -780,7 +902,7 @@ def test_parse_field_grid_block_skips_blank_and_unparseable_lines():
 
 
 def test_resolve_row_settings_defaults_and_overrides():
-    import form_fields as ff
+    import dilon_form_fields as ff
     check(ff.resolve_row_settings({}) == ('h', 1), "defaults to horizontal, rows=1")
     check(ff.resolve_row_settings({'dir': 'v', 'rows': '3'}) == ('v', 3), "explicit dir/rows honored")
     check(ff.resolve_row_settings({'dir': 'sideways'}) == ('h', 1), "invalid dir falls back to 'h'")
@@ -789,14 +911,14 @@ def test_resolve_row_settings_defaults_and_overrides():
 
 
 def test_resolve_pair_rows():
-    import form_fields as ff
+    import dilon_form_fields as ff
     check(ff.resolve_pair_rows({}, 2) == 2, "falls back to the row default when absent")
     check(ff.resolve_pair_rows({'rows': '5'}, 2) == 5, "per-pair override takes precedence")
     check(ff.resolve_pair_rows({'rows': '0'}, 2) == 2, "invalid override falls back to the row default")
 
 
 def test_resolve_pair_widths_even_split():
-    import form_fields as ff
+    import dilon_form_fields as ff
     pairs = [("A:", {}), ("B:", {})]
     widths = ff.resolve_pair_widths(pairs, 6.0)
     check(widths == [3.0, 3.0], f"default even split across 2 pairs, got {widths}")
@@ -807,28 +929,28 @@ def test_resolve_pair_widths_even_split():
 
 
 def test_resolve_pair_widths_explicit_and_remainder():
-    import form_fields as ff
+    import dilon_form_fields as ff
     pairs = [("A:", {'pair': '60'}), ("B:", {})]
     widths = ff.resolve_pair_widths(pairs, 10.0)
     check(widths == [6.0, 4.0], f"explicit pair=60 with remainder auto-filled, got {widths}")
 
 
 def test_resolve_pair_widths_overshoot_falls_back():
-    import form_fields as ff
+    import dilon_form_fields as ff
     pairs = [("A:", {'pair': '60'}), ("B:", {'pair': '50'})]
     widths = ff.resolve_pair_widths(pairs, 10.0)
     check(widths == [5.0, 5.0], f"declared total > 100 falls back to an even split, got {widths}")
 
 
 def test_resolve_pair_widths_nonpositive_remainder_falls_back():
-    import form_fields as ff
+    import dilon_form_fields as ff
     pairs = [("A:", {'pair': '100'}), ("B:", {})]
     widths = ff.resolve_pair_widths(pairs, 10.0)
     check(widths == [5.0, 5.0], f"a fully-declared pair leaving no room for an undeclared one falls back to an even split, got {widths}")
 
 
 def test_resolve_label_width():
-    import form_fields as ff
+    import dilon_form_fields as ff
     check(ff.resolve_label_width({}, 10.0, 'h') == (5.0, 5.0), "default 50/50 split")
     check(ff.resolve_label_width({'label': '70'}, 10.0, 'h') == (7.0, 3.0), "explicit label= split")
     check(ff.resolve_label_width({'label': '70'}, 10.0, 'v') == (None, None), "dir=v ignores label=, returns (None, None)")
@@ -836,7 +958,7 @@ def test_resolve_label_width():
 
 
 def test_resolve_title_flag():
-    import form_fields as ff
+    import dilon_form_fields as ff
     check(ff.resolve_title_flag({}) is False, "absent title= is not a title row")
     check(ff.resolve_title_flag({'title': 'true'}) is True, "title=true is a title row")
     check(ff.resolve_title_flag({'title': 'True'}) is True, "title= truthy match is case-insensitive")
@@ -850,7 +972,7 @@ def test_resolve_title_flag():
 
 
 def test_build_field_grid_row_table_horizontal():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row = {'pairs': [("Work Order:", {}), ("Date:", {})], 'annotations': {}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
@@ -866,7 +988,7 @@ def test_build_field_grid_row_table_horizontal():
 
 
 def test_build_field_grid_row_table_vertical_with_rows():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row = {'pairs': [("Notes:", {})], 'annotations': {'dir': 'v', 'rows': '3'}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
@@ -880,7 +1002,7 @@ def test_build_field_grid_row_table_vertical_with_rows():
 
 
 def test_build_field_grid_row_table_is_centered():
-    import form_fields as ff
+    import dilon_form_fields as ff
     from docx.enum.table import WD_TABLE_ALIGNMENT
     doc = Document()
     row = {'pairs': [("A:", {})], 'annotations': {}}
@@ -889,7 +1011,7 @@ def test_build_field_grid_row_table_is_centered():
 
 
 def test_build_field_grid_row_table_title_row():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row = {'pairs': [("Assembly Prep", {})], 'annotations': {'title': 'true'}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
@@ -906,7 +1028,7 @@ def test_build_field_grid_row_table_title_row():
 
 
 def test_build_field_grid_row_table_title_row_ignores_pair_and_label_annotations():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row = {'pairs': [("Assembly Prep", {'pair': '60', 'label': '70'})], 'annotations': {'title': 'true'}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
@@ -918,7 +1040,7 @@ def test_build_field_grid_row_table_title_row_ignores_pair_and_label_annotations
 
 
 def test_build_field_grid_row_table_title_row_rows_override():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row = {'pairs': [("Assembly Prep", {})], 'annotations': {'title': 'true', 'rows': '3'}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
@@ -931,7 +1053,7 @@ def test_build_field_grid_row_table_title_row_rows_override():
 
 
 def test_build_field_grid_row_table_title_row_multiple_tokens_uses_first():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row = {'pairs': [("Assembly Prep", {}), ("Dropped:", {})], 'annotations': {'title': 'true'}}
     table = ff.build_field_grid_row_table(doc, row, 6.0)
@@ -942,7 +1064,7 @@ def test_build_field_grid_row_table_title_row_multiple_tokens_uses_first():
 
 
 def test_build_field_grid_row_table_title_row_dir_has_no_visible_effect():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
     row_h = {'pairs': [("Assembly Prep", {})], 'annotations': {'title': 'true', 'dir': 'h'}}
     table_h = ff.build_field_grid_row_table(doc, row_h, 6.0)
@@ -954,9 +1076,11 @@ def test_build_field_grid_row_table_title_row_dir_has_no_visible_effect():
 
 
 def test_insert_field_grid_replaces_marker_with_row_tables():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
     doc.add_paragraph("@@@FORM_FIELD:FieldGrid@@@\nWork Order: | Date:\nCarrier Board Assy Lot:\n@@@END_FORM_FIELD@@@")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
     temp_path = TEST_OUTPUT_DIR / "field_grid_marker.docx"
     doc.save(temp_path)
 
@@ -971,9 +1095,11 @@ def test_insert_field_grid_replaces_marker_with_row_tables():
 
 
 def test_insert_field_grid_max_width():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
     doc.add_paragraph("@@@FORM_FIELD:FieldGrid:3in@@@\nA: | B:\n@@@END_FORM_FIELD@@@")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
     temp_path = TEST_OUTPUT_DIR / "field_grid_max_width.docx"
     doc.save(temp_path)
 
@@ -986,13 +1112,15 @@ def test_insert_field_grid_max_width():
 
 
 def test_field_grid_marker_inside_table_cell_warns_and_skips():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
     table = doc.add_table(rows=1, cols=1)
     table.columns[0].width = Inches(2.0)
     cell = table.rows[0].cells[0]
     cell.width = Inches(2.0)
     cell.paragraphs[0].text = "@@@FORM_FIELD:FieldGrid@@@\nA: | B:\n@@@END_FORM_FIELD@@@"
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
     temp_path = TEST_OUTPUT_DIR / "field_grid_in_cell.docx"
     doc.save(temp_path)
 
@@ -1004,7 +1132,7 @@ def test_field_grid_marker_inside_table_cell_warns_and_skips():
 
 
 def test_protect_field_grid_line_breaks():
-    import form_fields as ff
+    import dilon_form_fields as ff
     source = (
         "@@@FORM_FIELD:FieldGrid@@@\n"
         "Work Order: | Date:\n"
@@ -1026,14 +1154,149 @@ def test_protect_field_grid_line_breaks():
     check(ff.protect_field_grid_line_breaks(unrelated) == unrelated, "text with no FieldGrid block is unchanged")
 
 
+def test_form_section_ranges_single_pair():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("Before - not in a section")
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    inside = doc.add_paragraph("Inside the section")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
+    doc.add_paragraph("After - not in a section")
+
+    in_section, mutated = ff._form_section_ranges(doc)
+
+    check(mutated is True, "a declared section mutates the document (sentinels removed)")
+    check(id(inside._p) in in_section, "the paragraph between BEGIN/END is recorded as in-section")
+    check(
+        not any(p.text.startswith("@@@FORM_SECTION") or p.text.startswith("@@@END_FORM_SECTION") for p in doc.paragraphs),
+        "sentinel paragraphs are removed from the document",
+    )
+    check(len(doc.paragraphs) == 3, f"3 paragraphs remain after the 2 sentinels are removed, found {len(doc.paragraphs)}")
+
+
+def test_form_section_ranges_content_outside_not_recorded():
+    import dilon_form_fields as ff
+    doc = Document()
+    before = doc.add_paragraph("Before")
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    doc.add_paragraph("Inside")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
+    after = doc.add_paragraph("After")
+
+    in_section, _ = ff._form_section_ranges(doc)
+
+    check(id(before._p) not in in_section, "content before the section is not recorded as in-section")
+    check(id(after._p) not in in_section, "content after the section is not recorded as in-section")
+
+
+def test_form_section_ranges_no_sections_present():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("Just a plain paragraph")
+
+    in_section, mutated = ff._form_section_ranges(doc)
+
+    check(in_section == set(), "no @@@FORM_SECTION@@@ markers -> empty in-section set")
+    check(mutated is False, "no @@@FORM_SECTION@@@ markers -> document not mutated")
+
+
+def test_form_section_ranges_unmatched_end_raises():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
+
+    raised = False
+    try:
+        ff._form_section_ranges(doc)
+    except ff.FormSectionError:
+        raised = True
+    check(raised, "@@@END_FORM_SECTION@@@ with no open section raises FormSectionError")
+
+
+def test_form_section_ranges_unclosed_begin_raises():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    doc.add_paragraph("Inside, never closed")
+
+    raised = False
+    try:
+        ff._form_section_ranges(doc)
+    except ff.FormSectionError:
+        raised = True
+    check(raised, "an unclosed @@@FORM_SECTION@@@ at end-of-document raises FormSectionError")
+
+
+def test_form_section_ranges_nested_begin_raises():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    doc.add_paragraph("Outer content")
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+
+    raised = False
+    try:
+        ff._form_section_ranges(doc)
+    except ff.FormSectionError:
+        raised = True
+    check(raised, "a nested @@@FORM_SECTION@@@ before the outer one closes raises FormSectionError")
+
+
+def test_form_section_ranges_multiple_nonoverlapping_pairs():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    first_inside = doc.add_paragraph("First section content")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
+    doc.add_paragraph("Between sections")
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    second_inside = doc.add_paragraph("Second section content")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
+
+    in_section, mutated = ff._form_section_ranges(doc)
+
+    check(mutated is True, "two declared sections mutate the document")
+    check(id(first_inside._p) in in_section, "first section's content recorded as in-section")
+    check(id(second_inside._p) in in_section, "second section's content recorded as in-section")
+
+
+def test_form_section_ranges_includes_tables():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
+    table = doc.add_table(rows=1, cols=1)
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
+
+    in_section, _ = ff._form_section_ranges(doc)
+
+    check(id(table._element) in in_section, "a table between BEGIN/END is recorded as in-section")
+
+
+def test_apply_form_fields_marker_outside_section_raises():
+    import dilon_form_fields as ff
+    doc = Document()
+    doc.add_paragraph("@@@FORM_FIELD:FillLine@@@Work Order:@@@END_FORM_FIELD@@@")
+    temp_path = TEST_OUTPUT_DIR / "form_fields_marker_no_section.docx"
+    doc.save(temp_path)
+
+    raised = False
+    try:
+        ff.apply_form_fields(temp_path)
+    except ff.FormSectionError:
+        raised = True
+    check(raised, "a @@@FORM_FIELD@@@ marker with no declared @@@FORM_SECTION@@@ raises FormSectionError")
+
+
 def test_apply_form_fields_form_section_header_numbers_sequentially():
-    import form_fields as ff
+    import dilon_form_fields as ff
     from docx.enum.style import WD_STYLE_TYPE
     doc = Document()
     doc.styles.add_style('Form Section Header', WD_STYLE_TYPE.PARAGRAPH)
+    doc.add_paragraph("@@@FORM_SECTION@@@")
     doc.add_paragraph("@@@FORM_FIELD:Form_Section_Header@@@Assembly Prep@@@END_FORM_FIELD@@@")
     doc.add_paragraph("some body content")
     doc.add_paragraph("@@@FORM_FIELD:Form_Section_Header@@@Final Inspection@@@END_FORM_FIELD@@@")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
     temp_path = TEST_OUTPUT_DIR / "form_section_header_sequential.docx"
     doc.save(temp_path)
 
@@ -1047,9 +1310,11 @@ def test_apply_form_fields_form_section_header_numbers_sequentially():
 
 
 def test_apply_form_fields_form_section_header_missing_style_degrades():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
     doc.add_paragraph("@@@FORM_FIELD:Form_Section_Header@@@Assembly Prep@@@END_FORM_FIELD@@@")
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
     temp_path = TEST_OUTPUT_DIR / "form_section_header_missing_style.docx"
     doc.save(temp_path)
 
@@ -1061,13 +1326,15 @@ def test_apply_form_fields_form_section_header_missing_style_degrades():
 
 
 def test_form_section_header_marker_inside_table_cell_warns_and_skips():
-    import form_fields as ff
+    import dilon_form_fields as ff
     doc = Document()
+    doc.add_paragraph("@@@FORM_SECTION@@@")
     table = doc.add_table(rows=1, cols=1)
     table.columns[0].width = Inches(2.0)
     cell = table.rows[0].cells[0]
     cell.width = Inches(2.0)
     cell.paragraphs[0].text = "@@@FORM_FIELD:Form_Section_Header@@@Assembly Prep@@@END_FORM_FIELD@@@"
+    doc.add_paragraph("@@@END_FORM_SECTION@@@")
     temp_path = TEST_OUTPUT_DIR / "form_section_header_in_cell.docx"
     doc.save(temp_path)
 
@@ -1086,13 +1353,18 @@ def test_form_section_header_compiles_through_full_pipeline():
         'title: "Section Header Test"\n'
         'doc_number: "FO-77777"\n'
         'current_revision: "00"\n'
+        'include_front_matter: false\n'
         '---\n'
+        '\n'
+        '@@@FORM_SECTION@@@\n'
         '\n'
         '@@@FORM_FIELD:Form_Section_Header@@@Assembly Prep@@@END_FORM_FIELD@@@\n'
         '\n'
         '@@@FORM_FIELD:FillLine@@@Work Order:@@@END_FORM_FIELD@@@\n'
         '\n'
-        '@@@FORM_FIELD:Form_Section_Header@@@Final Inspection@@@END_FORM_FIELD@@@\n',
+        '@@@FORM_FIELD:Form_Section_Header@@@Final Inspection@@@END_FORM_FIELD@@@\n'
+        '\n'
+        '@@@END_FORM_SECTION@@@\n',
         encoding="utf-8",
     )
 
@@ -1132,11 +1404,16 @@ def test_form_compile_has_no_leading_blank_paragraph():
         'title: "No Leading Blank Test"\n'
         'doc_number: "FO-55555"\n'
         'current_revision: "00"\n'
+        'include_front_matter: false\n'
         '---\n'
+        '\n'
+        '@@@FORM_SECTION@@@\n'
         '\n'
         '@@@FORM_FIELD:Form_Section_Header@@@First Section@@@END_FORM_FIELD@@@\n'
         '\n'
-        '@@@FORM_FIELD:FillLine@@@Work Order:@@@END_FORM_FIELD@@@\n',
+        '@@@FORM_FIELD:FillLine@@@Work Order:@@@END_FORM_FIELD@@@\n'
+        '\n'
+        '@@@END_FORM_SECTION@@@\n',
         encoding="utf-8",
     )
 
@@ -1192,7 +1469,7 @@ def generate_form_stub(output_path, **overrides):
         "department_head": overrides.get("department_head", "--"),
         "revision_description": overrides.get("revision_description", "Initial release"),
         "eco_number": overrides.get("eco_number", "ECO-TBD"),
-        "eco_date": overrides.get("eco_date", "YYYY-MM-DD"),
+        "eco_date": overrides.get("eco_date", "MM-DD-YYYY"),
     }
 
     content = template
@@ -1322,6 +1599,8 @@ def main():
     TEST_OUTPUT_DIR.mkdir(parents=True)
 
     test_generate_form_document()
+    test_compile_default_output_filename_end_to_end()
+    test_compile_default_output_filename_missing_doc_number_fails_clearly()
     test_underscore_until_end_of_line_body_paragraph()
     test_underscore_until_end_of_line_in_table_cell()
     test_apply_form_fields_marker()
@@ -1358,6 +1637,15 @@ def main():
     test_insert_field_grid_max_width()
     test_field_grid_marker_inside_table_cell_warns_and_skips()
     test_protect_field_grid_line_breaks()
+    test_form_section_ranges_single_pair()
+    test_form_section_ranges_content_outside_not_recorded()
+    test_form_section_ranges_no_sections_present()
+    test_form_section_ranges_unmatched_end_raises()
+    test_form_section_ranges_unclosed_begin_raises()
+    test_form_section_ranges_nested_begin_raises()
+    test_form_section_ranges_multiple_nonoverlapping_pairs()
+    test_form_section_ranges_includes_tables()
+    test_apply_form_fields_marker_outside_section_raises()
     test_field_grid_permutations_compile()
     test_field_grid_title_row_mixed_with_normal_rows_compiles()
     test_apply_form_fields_form_section_header_numbers_sequentially()
@@ -1373,6 +1661,7 @@ def main():
     test_no_shebang_in_form_compiler_scripts()
     test_check_deps_runs_and_reports()
     test_fo_00127_replica_compiles_with_expected_fields()
+    test_compile_form_field_outside_section_fails_clearly()
 
     print(f"\n{passed} passed, {failed} failed (dilon-document-form-compiler / dilon-document-form-writer)")
     if failed == 0:

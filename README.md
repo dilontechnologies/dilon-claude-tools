@@ -2,12 +2,11 @@
 
 **Claude Code plugin for Dilon Technologies document authoring tools**
 
-This repository is a [Claude Code plugin](https://code.claude.com/docs/en/plugins) that bundles five Skills for working with Dilon Technologies' regulatory-compliant technical documentation:
+This repository is a [Claude Code plugin](https://code.claude.com/docs/en/plugins) that bundles four Skills for working with Dilon Technologies' regulatory-compliant technical documentation:
 
 - **`dilon-document-writer`** - create a new Dilon document from the standard template, and apply Dilon markdown styling conventions while editing existing Dilon documents.
-- **`dilon-document-compiler`** - compile a Dilon-formatted markdown file into a regulatory-compliant Word document (signature page, revision history table, table of contents).
-- **`dilon-document-form-writer`** - create a new Dilon form/traveler document from its own template, and document the form-only markdown markers (`FillLine`, `FieldGrid`, `Form_Section_Header`).
-- **`dilon-document-form-compiler`** - compile a Dilon form/traveler markdown file into a Word document with a running header/footer only (no title page, signature page, or table of contents).
+- **`dilon-document-compiler`** - compile a Dilon-formatted markdown file into a Word document: a regulatory-compliant document (signature page, revision history table, table of contents) by default, or a header/footer-only form/traveler when the front matter sets `include_front_matter: false`.
+- **`dilon-document-form-writer`** - create a new Dilon form/traveler document from its own template, and document the form-only markdown markers (`FillLine`, `FieldGrid`, `Form_Section_Header`, and the `@@@FORM_SECTION@@@` wrapper they require).
 - **`dilon-document-extractor`** - bootstrap a Dilon markdown draft from an existing Word or PDF document.
 
 ## Prerequisites
@@ -108,11 +107,12 @@ dilon-claude-tools/
 │   └── scripts/
 │       └── main-guard.sh         # blocks Claude Code edits while checked out on master
 ├── templates/                    # shared Word reference templates
-│   ├── TEMPLATE_Word_Base.docx  # header/footer + styles only, shared by both compiler skills
+│   ├── TEMPLATE_Word_Base.docx  # header/footer + styles only, shared by the compiler and extractor
 │   └── assets/
 │       └── dilon_logo.png        # header logo
 ├── lib/
-│   └── dilon_docx_common.py      # Pandoc-conversion/styling helpers shared by both compiler skills
+│   ├── dilon_docx_common.py      # Pandoc-conversion/styling helpers
+│   └── dilon_form_fields.py      # @@@FORM_FIELD@@@/@@@FORM_SECTION@@@ markers
 ├── skills/
 │   ├── dilon-document-writer/
 │   │   ├── SKILL.md
@@ -127,12 +127,6 @@ dilon-claude-tools/
 │   ├── dilon-document-form-writer/
 │   │   ├── SKILL.md
 │   │   └── TEMPLATE_Form.md
-│   ├── dilon-document-form-compiler/
-│   │   ├── SKILL.md
-│   │   └── scripts/
-│   │       ├── generate_dilon_form.py
-│   │       ├── form_fields.py
-│   │       └── check_deps.py
 │   └── dilon-document-extractor/
 │       ├── SKILL.md
 │       └── scripts/

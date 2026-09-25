@@ -3,7 +3,7 @@ title: "Markdown Styling Test Document"
 author: "Dilon Engineering Team"
 department: "Engineering"
 doc_number: "DD_NAV3_TEST_001"
-current_revision: "1.1"
+current_revision: "02-A"
 department_head: "Josh Williams"
 signature_fields:
   - department: "Regulatory"
@@ -11,11 +11,11 @@ signature_fields:
   - department: "Quality"
     name: "Kevin Johnson"
 revisions:
-  - number: "1.0"
+  - number: "01"
     description: "Initial release"
     eco_number: "--"
     eco_date: "2025-10-01"
-  - number: "1.1"
+  - number: "02-A"
     description: "Updated Section 3.5 with new calibration data"
     eco_number: "ECO-2025-042"
     eco_date: "2025-10-15"
@@ -693,8 +693,8 @@ This document has undergone the following revisions:
 
 | Revision | Date | Description | ECO Number |
 |:--------:|:----:|-------------|:----------:|
-| 1.0 | 2025-10-01 | Initial release | -- |
-| 1.1 | 2025-10-15 | Updated Section 3.5 with new calibration data | ECO-2025-042 |
+| 01 | 2025-10-01 | Initial release | -- |
+| 02-A | 2025-10-15 | Updated Section 3.5 with new calibration data | ECO-2025-042 |
 
 ## Automatic Section Numbering Verification
 
@@ -797,6 +797,6 @@ Check the following in the generated Word document:
 
 ---
 
-**Document Version**: 1.1
+**Document Version**: 02-A
 **Generated**: 2025-10-10
 **Maintained By**: Dilon Engineering Team

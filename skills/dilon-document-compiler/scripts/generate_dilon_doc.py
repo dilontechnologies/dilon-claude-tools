@@ -1,28 +1,45 @@
 # -*- coding: utf-8 -*-
 """
-Generate Document from Markdown in Dilon formatting.
+Generate a Word document from Markdown in Dilon formatting.
+
+Compiles either a full narrative document or a header/footer-only
+form/traveler, selected by the front-matter boolean `include_front_matter`
+(default true):
+- true: signature page + revision table + content with TOC, the full
+  postprocessing chain (step numbering, cross-references, figure
+  captions).
+- false: header/footer only, no signature page, no TOC - what
+  dilon-document-form-compiler used to produce as a separate skill.
+
+In both modes, every @@@FORM_FIELD:...@@@ marker (FillLine/FieldGrid/
+Form_Section_Header) must be wrapped in a
+@@@FORM_SECTION@@@...@@@END_FORM_SECTION@@@ range - see
+docs/superpowers/specs/2026-09-04-unified-document-form-compiler-design.md.
 
 This script:
 1. Parses a Markdown file with YAML front matter
-2. Builds the signature page (header/footer/signature table), revision
-   table, and title page directly via python-docx from the front-matter
-   dict - no Jinja/docxtpl involved for any of these parts
+2. Builds the header/footer (and, if include_front_matter, the
+   signature-approval table and revision table) directly via python-docx
+   from the front-matter dict - no Jinja/docxtpl involved for any of
+   these parts
 3. Converts the Markdown body to Rich Text via Pandoc, with body-level
    Jinja2 {{field}} substitution against the same front-matter dict
 4. Composes all parts into the final Word document
 
 Usage:
-    python generate_dilon_doc.py <input.md> <output.docx>
+    python generate_dilon_doc.py <input.md> [output.docx] [base_template.docx]
 
 Example:
+    python generate_dilon_doc.py MAP-00001_Requirements.md
     python generate_dilon_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx
 
 The Pandoc-conversion, Word-styling, and header/footer-building helpers
 this script calls (apply_styles, apply_figure_captions, markdown_to_docx,
 extract_yaml_and_markdown, set_update_fields_on_open, compose_documents,
 populate_header, populate_footer) live in lib/dilon_docx_common.py (repo
-root) - shared with dilon-document-form-compiler. See
-docs/superpowers/specs/2026-08-17-document-extraction-and-form-tooling-design.md.
+root); the form-field markers (apply_form_fields,
+protect_field_grid_line_breaks, FormSectionError) live in
+lib/dilon_form_fields.py.
 """
 
 import sys
@@ -47,6 +64,7 @@ from dilon_docx_common import (  # noqa: E402
     insert_page_break_after_toc,
     convert_horizontal_rules_to_page_breaks,
     extract_yaml_and_markdown,
+    default_output_filename,
     set_update_fields_on_open,
     compose_documents,
     ensure_blank_line_after_table_markers,
@@ -75,9 +93,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from step_numbering import (  # noqa: E402
     ensure_blank_line_around_steps_markers,
     get_step_clarification_abstract_num_id,
-    apply_field_based_step_numbering,
+    apply_step_list_numbering,
+    link_steps_to_heading_numbering,
     resolve_step_reference,
     StepBlockError,
+)
+from dilon_form_fields import (  # noqa: E402
+    apply_form_fields,
+    protect_field_grid_line_breaks,
+    FormSectionError,
 )
 
 
@@ -106,9 +130,11 @@ def create_revision_table(revisions, available_width):
     table = temp_doc.add_table(rows=2 + len(revisions), cols=4)
     table.style = 'Table Grid'
 
-    # REV #/ECO #/DATE widths match an approved, hand-tuned Dilon Word
-    # document's own revision table; DESCRIPTION absorbs whatever width
-    # is left so the table always fills the page's full content width.
+    # ECO #/DATE widths match an approved, hand-tuned Dilon Word document's
+    # own revision table; REV # is widened past that reference (805 ->
+    # 1150 twips) to comfortably fit extended prototype-revision values
+    # like "02-A" without wrapping. DESCRIPTION absorbs whatever width is
+    # left so the table always fills the page's full content width.
     # apply_table_column_widths() (not a plain table.columns[idx].width=
     # assignment, which only sets the tblGrid definition, not per-cell
     # width or autofit=False - Word's AutoFit then silently recalculates
@@ -116,7 +142,7 @@ def create_revision_table(revisions, available_width):
     # the widths actually render as specified.
     apply_table_column_widths(
         table,
-        [Twips(805).inches, 'x', Twips(1620).inches, Twips(1535).inches],
+        [Twips(1150).inches, 'x', Twips(1620).inches, Twips(1535).inches],
         available_width.inches,
     )
 
@@ -329,13 +355,19 @@ def _insert_table_before_section_properties(document, table):
         body.append(separator)
 
 
-def generate_requirements_document(markdown_path, output_path, signature_template_path=None):
+def generate_requirements_document(markdown_path, output_path=None, signature_template_path=None):
     """
     Generate final requirements Word document.
 
     Args:
         markdown_path: Path to Markdown file with YAML front matter
-        output_path: Path to save final Word document
+        output_path: Path to save final Word document. If omitted, or if
+            given as an existing directory, the filename is computed as
+            "<doc_number> Rev <current_revision>.docx" (see
+            default_output_filename() in lib/dilon_docx_common.py) - next
+            to the input markdown file when omitted, or inside the given
+            directory when one is passed. Pass a full file path instead
+            to name/place the output explicitly.
         signature_template_path: Path to the base template (Part A) -
             header/footer/styles only; no Jinja fields, no docxtpl
             involved anymore. See populate_header()/populate_footer() in
@@ -358,15 +390,36 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
 
     # Extract YAML metadata and Markdown body
     metadata, markdown_body = extract_yaml_and_markdown(markdown_path)
+
+    if output_path is None:
+        try:
+            output_path = Path(markdown_path).resolve().parent / default_output_filename(metadata)
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+    else:
+        output_path = Path(output_path)
+        if output_path.is_dir():
+            try:
+                output_path = output_path / default_output_filename(metadata)
+            except ValueError as exc:
+                print(f"Error: {exc}")
+                sys.exit(1)
+
+    include_front_matter = metadata.get('include_front_matter', True)
+
     markdown_body = render_jinja(markdown_body, metadata)
-    markdown_body = preprocess_reference_markers(markdown_body)
-    markdown_body = ensure_blank_line_around_steps_markers(markdown_body)
+    if include_front_matter:
+        markdown_body = preprocess_reference_markers(markdown_body)
+        markdown_body = ensure_blank_line_around_steps_markers(markdown_body)
+    markdown_body = protect_field_grid_line_breaks(markdown_body)
     markdown_body = ensure_blank_line_after_list_continue_markers(markdown_body)
 
     print(f"Metadata extracted: {list(metadata.keys())}")
 
-    # Step 1: Build Part A (base template: header, footer, signature table)
-    print(f"Building signature page (Part A) from: {signature_template_path}")
+    # Step 1: Build Part A (base template: header, footer, signature table
+    # if include_front_matter)
+    print(f"Building header/footer{' and signature page' if include_front_matter else ''} (Part A) from: {signature_template_path}")
     doc_a = Document(signature_template_path)
     populate_header(doc_a, metadata)
     populate_footer(doc_a, metadata)
@@ -375,38 +428,42 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
     section = doc_a.sections[0]
     available_width = Emu(section.page_width - section.left_margin - section.right_margin)
 
-    # Build the signature-approval table programmatically (same pattern as
-    # Part B's revision table) and insert it into Part A itself.
-    signature_table = create_signature_table(metadata, available_width)
-    _insert_table_before_section_properties(doc_a, signature_table)
+    if include_front_matter:
+        # Build the signature-approval table programmatically (same
+        # pattern as Part B's revision table) and insert it into Part A
+        # itself.
+        signature_table = create_signature_table(metadata, available_width)
+        _insert_table_before_section_properties(doc_a, signature_table)
 
     temp_part_a = Path(output_path).parent / "_temp_part_a.docx"
     doc_a.save(temp_part_a)
     print(f"Part A built")
 
-    # Step 2: Generate Part B (Revision table)
-    temp_part_b = Path(output_path).parent / "_temp_part_b.docx"
-    if 'revisions' in metadata and metadata['revisions']:
-        print("Building revision history table (Part B)...")
-        revision_doc = Document()
+    # Step 2: Generate Part B (Revision table) - only when include_front_matter
+    temp_part_b = None
+    if include_front_matter:
+        temp_part_b = Path(output_path).parent / "_temp_part_b.docx"
+        if 'revisions' in metadata and metadata['revisions']:
+            print("Building revision history table (Part B)...")
+            revision_doc = Document()
 
-        # Create the table
-        table = create_revision_table(metadata['revisions'], available_width)
+            # Create the table
+            table = create_revision_table(metadata['revisions'], available_width)
 
-        # Center the table before adding to document
-        table.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            # Center the table before adding to document
+            table.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        # Add table to document
-        revision_doc._element.body.append(table._element)
+            # Add table to document
+            revision_doc._element.body.append(table._element)
 
-        revision_doc.save(temp_part_b)
-        print(f"Part B generated")
-    else:
-        # Create empty document if no revisions
-        revision_doc = Document()
-        revision_doc.add_paragraph("No revision history available")
-        revision_doc.save(temp_part_b)
-        print(f"No revisions found, created placeholder")
+            revision_doc.save(temp_part_b)
+            print(f"Part B generated")
+        else:
+            # Create empty document if no revisions
+            revision_doc = Document()
+            revision_doc.add_paragraph("No revision history available")
+            revision_doc.save(temp_part_b)
+            print(f"No revisions found, created placeholder")
 
     # Step 3: Convert Markdown body to Word (Part D) using signature template as style reference
     print("Converting Markdown content to Word (Part D)...")
@@ -417,58 +474,96 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
         markdown_body, temp_part_d,
         reference_doc=signature_template_path,
         resource_dir=Path(markdown_path).resolve().parent,
+        include_toc=include_front_matter,
     )
-    insert_page_break_after_toc(temp_part_d)
+    if include_front_matter:
+        insert_page_break_after_toc(temp_part_d)
     convert_horizontal_rules_to_page_breaks(temp_part_d)
 
     # Apply all styles (tables and paragraphs) - scans Word document for @@@ markers, applies styles, removes markers
     print("Applying custom styles...")
     apply_styles(temp_part_d)
 
-    print("Applying ordered-list styling...")
-    remap_ordered_lists_to_dilon_step_list(temp_part_d)
+    if include_front_matter:
+        print("Applying ordered-list styling...")
+        remap_ordered_lists_to_dilon_step_list(temp_part_d)
+        try:
+            resolve_list_continuations(temp_part_d)
+        except ListContinuationError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+        try:
+            validate_list_nesting_depth(temp_part_d)
+        except ListNestingError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+
+        # Convert Pandoc's implicit-figure captions into auto-numbered Word captions
+        print("Applying figure caption numbering...")
+        apply_figure_captions(temp_part_d)
+
+        print("Centering image paragraphs...")
+        center_image_paragraphs(temp_part_d)
+
+        print("Locking image aspect ratios...")
+        lock_image_aspect_ratios(temp_part_d)
+
+        try:
+            step_clarification_abstract_num_id = get_step_clarification_abstract_num_id(signature_template_path)
+            print("Converting @@@STEPS@@@ blocks...")
+            apply_step_list_numbering(temp_part_d, step_clarification_abstract_num_id)
+
+            narrow_section_bookmarks(temp_part_d)
+            resolve_reference_markers(temp_part_d, {
+                'fig': resolve_fig_reference,
+                'sec': resolve_sec_reference,
+                'step': resolve_step_reference,
+            })
+        except (StepBlockError, ReferenceResolutionError) as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+    else:
+        print("Locking image aspect ratios...")
+        lock_image_aspect_ratios(temp_part_d)
+
+        print("Applying ordered-list styling...")
+        remap_ordered_lists_to_dilon_step_list(temp_part_d)
+        try:
+            resolve_list_continuations(temp_part_d)
+        except ListContinuationError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+        try:
+            validate_list_nesting_depth(temp_part_d)
+        except ListNestingError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+
+    print("Applying form-specific field markers...")
     try:
-        resolve_list_continuations(temp_part_d)
-    except ListContinuationError as exc:
-        print(f"Error: {exc}")
-        sys.exit(1)
-    try:
-        validate_list_nesting_depth(temp_part_d)
-    except ListNestingError as exc:
-        print(f"Error: {exc}")
-        sys.exit(1)
-
-    # Convert Pandoc's implicit-figure captions into auto-numbered Word captions
-    print("Applying figure caption numbering...")
-    apply_figure_captions(temp_part_d)
-
-    print("Centering image paragraphs...")
-    center_image_paragraphs(temp_part_d)
-
-    print("Locking image aspect ratios...")
-    lock_image_aspect_ratios(temp_part_d)
-
-    try:
-        step_clarification_abstract_num_id = get_step_clarification_abstract_num_id(signature_template_path)
-        print("Applying step-heading numbering...")
-        apply_field_based_step_numbering(temp_part_d, step_clarification_abstract_num_id)
-
-        narrow_section_bookmarks(temp_part_d)
-        resolve_reference_markers(temp_part_d, {
-            'fig': resolve_fig_reference,
-            'sec': resolve_sec_reference,
-            'step': resolve_step_reference,
-        })
-    except (StepBlockError, ReferenceResolutionError) as exc:
+        apply_form_fields(temp_part_d)
+    except FormSectionError as exc:
         print(f"Error: {exc}")
         sys.exit(1)
 
     print(f"Part D converted")
 
-    # Step 4: Merge all parts in order: A -> B -> D
-    print("Merging all parts (A -> B -> D)...")
-    composer = compose_documents(temp_part_a, temp_part_b, temp_part_d)
+    # Step 4: Merge all parts in order: A -> [B ->] D
+    if include_front_matter:
+        print("Merging all parts (A -> B -> D)...")
+        composer = compose_documents(temp_part_a, temp_part_b, temp_part_d)
+    else:
+        print("Merging all parts (A -> D)...")
+        composer = compose_documents(temp_part_a, temp_part_d)
     composer.save(output_path)
+
+    # Steps are attached to the heading list only now, after the merge -
+    # docxcompose would otherwise remap their numId onto a separate copy
+    # of the list (see link_steps_to_heading_numbering()). Forms have no
+    # @@@STEPS@@@ processing, so this runs in document mode only.
+    if include_front_matter:
+        print("Linking steps to heading numbering...")
+        link_steps_to_heading_numbering(output_path)
 
     # Ensure figure numbers / TOC page numbers are correct the moment the
     # document is opened, rather than showing cached placeholder text
@@ -476,7 +571,8 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
 
     # Clean up temporary files
     temp_part_a.unlink()
-    temp_part_b.unlink()
+    if temp_part_b is not None:
+        temp_part_b.unlink()
     temp_part_d.unlink()
 
     print(f"\nDocument generated successfully!")
@@ -484,15 +580,17 @@ def generate_requirements_document(markdown_path, output_path, signature_templat
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: python generate_requirements_doc.py <input.md> <output.docx> [base_template.docx]")
+    if len(sys.argv) < 2:
+        print("Usage: python generate_requirements_doc.py <input.md> [output.docx|output_dir] [base_template.docx]")
         print("\nExample:")
+        print("  python generate_requirements_doc.py MAP-00001_Requirements.md")
         print("  python generate_requirements_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx")
+        print("  python generate_requirements_doc.py MAP-00001_Requirements.md output_folder/")
         print("  python generate_requirements_doc.py MAP-00001_Requirements.md MAP-00001_Requirements.docx custom_base.docx")
         sys.exit(1)
 
     markdown_path = Path(sys.argv[1])
-    output_path = Path(sys.argv[2])
+    output_path = Path(sys.argv[2]) if len(sys.argv) > 2 else None
     signature_template_path = Path(sys.argv[3]) if len(sys.argv) > 3 else None
 
     try:

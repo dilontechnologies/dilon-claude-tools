@@ -5,6 +5,22 @@ All notable changes to the Dilon Claude Tools MCP Server will be documented in t
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-09-25
+
+### Changed
+- **BREAKING:** `@@@STEPS@@@` steps are now native Word numbered-list items on the heading list instead of `STYLEREF`/`SEQ` fields - pressing Enter after a step in Word adds the next numbered step, and numbers never go stale. Step cross-references now use `REF \w`. A `@@@STEPS@@@` block must now sit under a `###` (Heading 3), and a Heading 3 containing steps cannot also contain a `####` (Heading 4); both fail compilation with an error. Documents authored with steps directly under a `##` need a `###` added. Don't press Tab/Shift+Tab on a step in Word - it turns the step into a heading (see `MARKDOWN_STYLING_GUIDE.md` Section 6)
+- **BREAKING:** every `@@@FORM_FIELD:...@@@` marker (`FillLine`, `FieldGrid`, `Form_Section_Header`) must be wrapped in `@@@FORM_SECTION@@@`/`@@@END_FORM_SECTION@@@`; a marker outside one, or a malformed section, fails compilation
+- **BREAKING:** the `dilon-document-form-compiler` skill is retired - `dilon-document-compiler` compiles forms/travelers too, selected by the front-matter flag `include_front_matter: false`
+- Revision `eco_date` convention is now `MM-DD-YYYY` in the templates and skills, and the compiler skill sets the current revision's `eco_date` to the compile date before compiling (the compiler itself treats the date as plain text, so existing documents are unaffected)
+
+### Added
+- `dilon-document-compiler`: `<output.docx>` is now optional - when omitted, or when an existing directory is given, the compiled file is named `<doc_number> Rev <current_revision>.docx`, derived from front matter
+
+### Fixed
+- `dilon-document-extractor` / `dilon-document-compiler`: revision numbers combining a major number with an alphabetic prototype suffix (e.g. `02-A`) now round-trip correctly through compile and re-extraction; the revision table's REV # column was widened to fit them
+- `dilon-document-compiler`: bold/italic elsewhere in a paragraph containing a `[](#fig/sec/step:...)` cross-reference is no longer dropped
+- `dilon-document-extractor`: many real-document gaps fixed - mid-body page breaks, ISO/`-` footer dates, header/footer vs. revision-table disagreements, previously compiled `Dilon Step Heading` steps, image display sizes, bold/italic runs, figure cross-reference fields, uneven table column widths, doc numbers with part-number suffixes (e.g. `PL-00004-01`), titles swallowing an embedded `Number:` line, steps demoted with Tab in Word, and a crash on step-like headings after a compiled steps run
+
 ## [2.0.2] - 2026-08-26
 
 ### Added
