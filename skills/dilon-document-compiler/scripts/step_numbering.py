@@ -254,8 +254,8 @@ def apply_step_list_numbering(docx_file, clarification_abstract_num_id):
     Raises StepBlockError (compilation-halting) for:
     - an @@@STEPS@@@ with no matching @@@END_STEPS@@@, an @@@END_STEPS@@@
       with no block open, or a block reopened before closing;
-    - a block left open across a Heading 2 or Heading 3;
-    - a block with no Heading 3 above it in its Heading 2;
+    - a block left open across a Heading 1, 2, or 3;
+    - a block with no Heading 3 above it since the last Heading 1 or 2;
     - a Heading 3 containing both a Heading 4 and a block, in either order.
 
     Returns the number of paragraphs converted (steps + clarifications).
@@ -287,7 +287,9 @@ def apply_step_list_numbering(docx_file, clarification_abstract_num_id):
         stripped = para.text.strip()
         style_name = para.style.name if para.style is not None and para.style.name else ''
 
-        if style_name.startswith('Heading 2') or style_name.startswith('Heading 3'):
+        # Heading 1 resets the scope too: it's off the heading list, so Word
+        # wouldn't restart step counters there on its own.
+        if style_name.startswith(('Heading 1', 'Heading 2', 'Heading 3')):
             if inside_steps:
                 raise StepBlockError("@@@STEPS@@@ has no matching @@@END_STEPS@@@ before the next section heading")
             current_heading3_text = stripped if style_name.startswith('Heading 3') else None

@@ -2192,6 +2192,20 @@ def test_apply_step_list_numbering_steps_without_heading3_raises():
     )
 
 
+def test_apply_step_list_numbering_heading1_resets_heading3_scope():
+    """A # (Heading 1) is off the heading list, so Word would NOT restart
+    step counters there - steps after it with no new ### would silently
+    continue the previous Heading 3's count and prefix. It must reset the
+    Heading 3 scope like a ## does, so the no-Heading-3 error fires."""
+    _expect_step_block_error(
+        "## Procedure\n\n### Sub\n\nSome text.\n\n# Appendix\n\n"
+        "@@@STEPS@@@\n\n#. First.\n\n@@@END_STEPS@@@\n",
+        "step_numbering_h1_reset_test.docx",
+        ['Heading 3', '@@@STEPS@@@'],
+        "a @@@STEPS@@@ block after a Heading 1 with no new Heading 3",
+    )
+
+
 def test_apply_step_list_numbering_heading4_in_different_heading3_allowed():
     """The ban is per Heading 3: a Heading 4 under one Heading 3 and steps
     under a different Heading 3 (even in the same Heading 2) are fine."""
@@ -3125,6 +3139,7 @@ def main():
     test_apply_step_list_numbering_heading4_after_steps_raises()
     test_apply_step_list_numbering_heading4_inside_open_block_raises()
     test_apply_step_list_numbering_steps_without_heading3_raises()
+    test_apply_step_list_numbering_heading1_resets_heading3_scope()
     test_apply_step_list_numbering_heading4_in_different_heading3_allowed()
     test_link_steps_to_heading_numbering_uses_heading3_list()
     test_resolve_step_reference_uses_paragraph_number_field()

@@ -1087,35 +1087,98 @@ def test_build_markdown_body_dilon_step_heading_warns_once_with_count():
     check("3" in step_warnings[0] if step_warnings else False, f"summary warning states the count, got {step_warnings}")
 
 
-def test_build_markdown_body_dilon_step_heading_with_native_numbering_any_level():
+def _add_numbered_paragraph(doc, text, style, ilvl):
+    """Adds a paragraph carrying direct list numbering (numId 1 at ilvl),
+    the shape the compiler's steps - and Word's own list edits - produce."""
+    from docx.oxml import OxmlElement
+    para = doc.add_paragraph(text, style=style)
+    num_pr = OxmlElement("w:numPr")
+    ilvl_el = OxmlElement("w:ilvl")
+    ilvl_el.set(qn("w:val"), ilvl)
+    num_id_el = OxmlElement("w:numId")
+    num_id_el.set(qn("w:val"), "1")
+    num_pr.append(ilvl_el)
+    num_pr.append(num_id_el)
+    para._p.get_or_add_pPr().append(num_pr)
+    return para
+
+
+def test_build_markdown_body_dilon_step_heading_with_native_numbering():
     """Steps compiled since 2026-09 are 'Dilon Step Heading' paragraphs
     carrying native list numbering (numPr) and no typed number - including
-    ones a user added in Word by pressing Enter, or demoted with Tab (a
-    deeper ilvl). All must extract as #. steps inside @@@STEPS@@@, never
-    as plain '-' list items and never dropped."""
+    ones a user added in Word by pressing Enter, which Word gives the same
+    style and numbering. All must extract as #. steps inside @@@STEPS@@@,
+    never as plain '-' list items."""
     import extract_docx as ex
-    from docx.oxml import OxmlElement
     doc = Document()
     doc.styles.add_style("Dilon Step Heading", WD_STYLE_TYPE.PARAGRAPH)
     doc.add_paragraph("Mixing Epoxy", style="Heading 3")
-    for text, ilvl in [("Blend the two components.", "2"), ("Added in Word with Enter.", "2"), ("Demoted with Tab.", "3")]:
-        para = doc.add_paragraph(text, style="Dilon Step Heading")
-        num_pr = OxmlElement("w:numPr")
-        ilvl_el = OxmlElement("w:ilvl")
-        ilvl_el.set(qn("w:val"), ilvl)
-        num_id_el = OxmlElement("w:numId")
-        num_id_el.set(qn("w:val"), "1")
-        num_pr.append(ilvl_el)
-        num_pr.append(num_id_el)
-        para._p.get_or_add_pPr().append(num_pr)
+    _add_numbered_paragraph(doc, "Blend the two components.", "Dilon Step Heading", "2")
+    _add_numbered_paragraph(doc, "Added in Word with Enter.", "Dilon Step Heading", "2")
 
     blocks = list(ex.iter_block_items(doc))
     body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, {"revisions": []})
 
     check(body.count("@@@STEPS@@@") == 1, "natively numbered steps form one @@@STEPS@@@ block")
-    for text in ["Blend the two components.", "Added in Word with Enter.", "Demoted with Tab."]:
+    for text in ["Blend the two components.", "Added in Word with Enter."]:
         check(f"#. {text}" in body, f"step {text!r} extracted as a #. item")
     check("- Blend" not in body, "a natively numbered step is not mistaken for a plain list item")
+
+
+def test_build_markdown_body_tab_demoted_step_stays_in_procedure():
+    """Pressing Tab on a compiled step in Word does NOT keep the step
+    style: the heading list's next level is linked to Heading 5, so Word
+    restyles the paragraph Heading 5 (numbered e.g. 2.3.1.1). Confirmed in
+    real Word via COM (ListFormat.ListIndent()). A heading deeper than
+    Heading 4 directly inside a 'Dilon Step Heading' run can only have come
+    from that - Heading 4 itself is banned alongside steps - so it must
+    extract as a nested sub-step with a review warning, not as a #####
+    heading that splits the procedure into two @@@STEPS@@@ blocks.
+
+    Two text shapes, because they hit different extractor paths: one ending
+    in '.' reads as a "suspicious" step-like heading (which used to crash
+    with a None comparison inside a 'Dilon Step Heading' run), one without
+    reads as an ordinary heading (which used to emit '#####' and split)."""
+    import extract_docx as ex
+    doc = Document()
+    doc.styles.add_style("Dilon Step Heading", WD_STYLE_TYPE.PARAGRAPH)
+    doc.add_paragraph("Mixing Epoxy", style="Heading 3")
+    _add_numbered_paragraph(doc, "Blend the two components.", "Dilon Step Heading", "2")
+    _add_numbered_paragraph(doc, "Demoted with Tab.", "Heading 5", "3")
+    _add_numbered_paragraph(doc, "Check the seal", "Heading 5", "3")
+    _add_numbered_paragraph(doc, "Pour the epoxy.", "Dilon Step Heading", "2")
+
+    blocks = list(ex.iter_block_items(doc))
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, {"revisions": []})
+
+    check(body.count("@@@STEPS@@@") == 1, "the Tab-demoted steps do not split the procedure into two blocks")
+    check("    #. Demoted with Tab." in body, f"a Tab-demoted step ending in '.' extracts as a nested #. sub-step (got {body!r})")
+    check("    #. Check the seal" in body, "a Tab-demoted step without a trailing '.' extracts as a nested #. sub-step")
+    check("#####" not in body, "the Tab-demoted step is not emitted as a ##### heading")
+    check("#. Pour the epoxy." in body, "the step after the demoted one stays in the same procedure")
+    check(any("Tab" in w and "Demoted with Tab." in w for w in warnings),
+          f"a review warning explains the Heading 5 came from Tab on a step (got {warnings})")
+
+
+def test_build_markdown_body_step_like_heading_after_dilon_step_run_does_not_crash():
+    """A step-like ("suspicious") Heading 3 right after a 'Dilon Step
+    Heading' run must close that run and open its own, not crash comparing
+    against the run's None base level - the extractor never hard-fails."""
+    import extract_docx as ex
+    doc = Document()
+    doc.styles.add_style("Dilon Step Heading", WD_STYLE_TYPE.PARAGRAPH)
+    doc.add_paragraph("Mixing Epoxy", style="Heading 3")
+    _add_numbered_paragraph(doc, "Blend the two components.", "Dilon Step Heading", "2")
+    doc.add_paragraph("Wipe the fixture with IPA before the next step.", style="Heading 3")
+
+    blocks = list(ex.iter_block_items(doc))
+    try:
+        body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, {"revisions": []})
+    except TypeError as exc:
+        check(False, f"a step-like heading after a 'Dilon Step Heading' run does not crash (got {exc})")
+        return
+    check(body.count("@@@STEPS@@@") == 2, "the step-like heading closes the compiled run and opens its own block")
+    check("#. Wipe the fixture with IPA before the next step." in body, "the step-like heading is kept as a step")
 
 
 def test_extract_round_trip_of_compiled_steps():
@@ -1683,7 +1746,9 @@ def main():
     test_strip_stale_step_number_handles_blank_cached_styleref()
     test_build_markdown_body_dilon_step_heading_run_closes_at_next_heading()
     test_build_markdown_body_dilon_step_heading_warns_once_with_count()
-    test_build_markdown_body_dilon_step_heading_with_native_numbering_any_level()
+    test_build_markdown_body_dilon_step_heading_with_native_numbering()
+    test_build_markdown_body_tab_demoted_step_stays_in_procedure()
+    test_build_markdown_body_step_like_heading_after_dilon_step_run_does_not_crash()
     test_extract_round_trip_of_compiled_steps()
     test_extract_flags_footer_revision_eco_mismatch()
     test_extract_no_warning_when_footer_matches_revision()

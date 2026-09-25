@@ -884,6 +884,24 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
             continue
 
         level = word_heading_level(style_name)
+        # A run opened by 'Dilon Step Heading' paragraphs has no heading base
+        # level (steps_base_level is None) - distinct from a run opened by
+        # step-like headings, which records the heading level it started at.
+        in_dilon_step_run = steps_open and steps_base_level is None
+        if level is not None and in_dilon_step_run and level > 4:
+            # Pressing Tab on a compiled step in Word restyles it Heading 5+
+            # (the heading list's next level is linked to Heading 5), so a
+            # heading deeper than Heading 4 directly inside a 'Dilon Step
+            # Heading' run is a demoted step - Heading 4 itself is banned
+            # alongside steps. Keep it in the procedure as a nested sub-step
+            # rather than a heading that would split the @@@STEPS@@@ block.
+            # Four-space indent: Pandoc only nests a list under '#. ' at 4.
+            warnings.append(
+                f"Heading {level}-styled paragraph inside a procedure is most likely a step "
+                f"demoted with Tab in Word, rendered as a nested sub-step: {text!r}"
+            )
+            lines.append(f"    #. {formatted_text}")
+            continue
         if level is not None:
             suspicious = is_suspicious_heading_text(text)
             empty_leaf = not suspicious and heading_is_empty_leaf(blocks, i, level)
@@ -893,7 +911,9 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
                     f"step, rendered as a @@@STEPS@@@ item: {text!r}"
                 )
                 flush_list()
-                if steps_open and level < steps_base_level:
+                # A compiled 'Dilon Step Heading' run can't be continued by
+                # heading-styled steps (different nesting model) - close it.
+                if in_dilon_step_run or (steps_open and level < steps_base_level):
                     flush_steps()
                 if not steps_open:
                     lines.append("@@@STEPS@@@")
