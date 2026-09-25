@@ -2209,7 +2209,7 @@ def test_apply_step_list_numbering_heading4_in_different_heading3_allowed():
         check(False, f"a Heading 4 in a different Heading 3 must not raise (got: {exc})")
 
 
-def test_resolve_step_reference_builds_composite_field():
+def test_resolve_step_reference_uses_paragraph_number_field():
     md = "## Major Section\n\n### Subsection Title\n\n@@@STEPS@@@\n\n#. Hold the board. []{#step:x}\n\n@@@END_STEPS@@@\n\nSee [](#step:x).\n"
     md = dilon_docx_common.preprocess_reference_markers(md)
     docx_path = TEST_OUTPUT_DIR / "step_resolver_callback_test.docx"
@@ -2221,19 +2221,14 @@ def test_resolve_step_reference_builds_composite_field():
 
     with zipfile.ZipFile(docx_path) as z:
         xml = z.read('word/document.xml').decode('utf-8')
-    check('REF step:x \\h' in xml, "the reference resolves via a plain REF \\h against the narrowed bookmark")
+    check('REF step:x \\w \\h' in xml,
+          "the reference is a full-context paragraph-number REF (\\w) - the step's number is its native list label")
     check('Step ' in xml, "the literal 'Step ' prefix is present at the reference site")
 
     doc = Document(docx_path)
-    els = list(doc.element.body.iter())
-    start_idx = next(i for i, el in enumerate(els) if el.tag == qn('w:bookmarkStart') and el.get(qn('w:name')) == 'step:x')
-    start_id = els[start_idx].get(qn('w:id'))
-    end_idx = next(i for i in range(start_idx + 1, len(els)) if els[i].tag == qn('w:bookmarkEnd') and els[i].get(qn('w:id')) == start_id)
-    check(end_idx > start_idx + 1,
-          "the narrowed bookmark wraps the step's number-field span, not an empty gap between "
-          "bookmarkStart and bookmarkEnd (regression: an anchor on a nested clarification, which "
-          "is never narrowed, produces exactly this empty-span shape and REF \\h then resolves to "
-          "nothing)")
+    step_para = [p for p in doc.paragraphs if p.style and p.style.name == 'Dilon Step Heading'][0]
+    check(any(el.get(qn('w:name')) == 'step:x' for el in step_para._p.iter(qn('w:bookmarkStart'))),
+          "the step:x bookmark sits inside the step's own paragraph, which is all REF \\w needs")
 
 
 def _heading3_list_position(doc):
@@ -2323,6 +2318,8 @@ def test_compile_step_list_numbering_end_to_end():
         xml = z.read('word/document.xml').decode('utf-8')
     check('STYLEREF 3' not in xml and 'SEQ DilonStep' not in xml, "no field-based step numbers remain")
     check('w:name="step:inspect-crystal"' in xml, "the step's anchor survives as a real bookmark")
+    check('REF step:inspect-crystal \\w \\h' in xml,
+          "a reference to a step in the second block of a Heading 3 resolves to a live REF \\w field")
 
 
 def test_compile_steps_with_bullets_end_to_end():
@@ -2378,6 +2375,7 @@ def test_compile_duplicate_step_anchor_fails_clearly():
 FULL_XREF_MARKDOWN = (
     '\n## Assembly Section {#sec:assembly}\n\n'
     '![A widget.](diagrams/example.png){#fig:widget}\n\n'
+    '### Installation\n\n'
     '@@@STEPS@@@\n\n'
     '#. Install the widget. []{#step:install-widget}\n\n'
     '@@@END_STEPS@@@\n\n'
@@ -2412,7 +2410,7 @@ def test_compile_full_cross_reference_set_end_to_end():
         xml = z.read('word/document.xml').decode('utf-8')
     check('REF fig:widget \\h' in xml, "the figure reference resolved")
     check('REF sec:assembly \\r \\h' in xml, "the section reference resolved")
-    check('REF step:install-widget \\h' in xml, "the step reference resolved")
+    check('REF step:install-widget \\w \\h' in xml, "the step reference resolved")
     check('XREF' not in xml, "no sentinel remains")
 
 
@@ -3129,7 +3127,7 @@ def main():
     test_apply_step_list_numbering_steps_without_heading3_raises()
     test_apply_step_list_numbering_heading4_in_different_heading3_allowed()
     test_link_steps_to_heading_numbering_uses_heading3_list()
-    test_resolve_step_reference_builds_composite_field()
+    test_resolve_step_reference_uses_paragraph_number_field()
     test_compile_step_list_numbering_end_to_end()
     test_compile_steps_with_bullets_end_to_end()
     test_compile_duplicate_step_anchor_fails_clearly()

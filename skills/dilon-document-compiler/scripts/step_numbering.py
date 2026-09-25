@@ -419,16 +419,15 @@ def link_steps_to_heading_numbering(docx_file):
 def resolve_step_reference(para, bookmark_name):
     """
     type_resolvers['step'] callback for
-    dilon_docx_common.resolve_reference_markers(): literal "Step " +
-    a plain REF against the step's own bookmark (Task 3's
-    apply_field_based_step_numbering() already narrowed that bookmark
-    down to wrap just the number-field span, so \\h alone reproduces
-    the live "2.3.1" text - no \\r needed, since there's no native list
-    marker to extract anymore). The in-place number itself carries no
-    "Step " word (matches the reviewer's reference-document
-    convention), so it's added here, at the reference site, instead.
+    dilon_docx_common.resolve_reference_markers(): literal "Step " + a
+    REF field with \\w (the bookmarked paragraph's list number in full
+    context, e.g. "2.3.1") and \\h (hyperlink). A step's number is its
+    native list label (see link_steps_to_heading_numbering()), so the
+    bookmark only has to sit somewhere inside the step's paragraph - no
+    narrowing needed. The in-place number carries no "Step " word, so it's
+    added here, at the reference site.
     """
     para.add_run('Step ')
-    add_complex_field(para, f'REF {bookmark_name} \\h', '1')
+    add_complex_field(para, f'REF {bookmark_name} \\w \\h', '1')
 
 

@@ -687,10 +687,8 @@ def resolve_list_continuations(docx_file):
     counting from the {#list:name}-tagged paragraph's own list, by
     rewriting every paragraph currently sharing the *new* block's numId
     onto the *tagged* block's numId - native Word numbering then
-    continues correctly because both blocks share one numId (same
-    mechanism step_numbering.py's apply_step_numbering() already uses
-    for its own 'continue' support, keyed here by a bookmark instead of
-    a sentinel manifest).
+    continues correctly because both blocks share one numId, keyed by
+    a bookmark.
 
     {#list:name} is the same bracketed-span-with-id syntax already used
     for {#fig:x}/{#step:x} - Pandoc turns it into a real bookmark on
@@ -885,22 +883,16 @@ def resolve_reference_markers(docx_file, type_resolvers):
     resolved = 0
 
     for para in doc.paragraphs:
-        # A step heading's STYLEREF/SEQ number fields (<w:fldSimple>,
-        # from step_numbering.py's _prepend_step_number_fields()) sit
-        # ahead of the paragraph's authored text - along with the
-        # literal "." run interleaved between the two fields, and any
-        # bookmarkStart/End narrowed around them. para.text/para.runs
-        # (python-docx) only see plain <w:r> children and silently
-        # skip <w:fldSimple>, so treating "every run in para.runs" as
-        # the paragraph's whole content - as this loop used to -
-        # scooped that interleaved "." run into the remove-and-rebuild
-        # below while leaving the two fldSimple elements untouched and
-        # now adjacent, then re-appended the "." (merged into the
-        # rebuilt body text) after both fields instead of between them
-        # - corrupting numbers like "6.5.7" into "6.57.". Treating
-        # everything up to and including the last <w:fldSimple> (plus
-        # any trailing bookmark markers) as an untouchable header
-        # keeps that span exactly as step_numbering.py built it.
+        # A paragraph can open with <w:fldSimple> number fields - today a
+        # figure caption's "Figure " + STYLEREF + "." + SEQ span (from
+        # apply_figure_captions()); before 2026-09 also every @@@STEPS@@@
+        # step. python-docx's para.text/para.runs only see plain <w:r>
+        # children and silently skip <w:fldSimple>, so including the
+        # literal runs interleaved between those fields in the rebuild
+        # below once corrupted numbers like "6.5.7" into "6.57.".
+        # Treating everything up to and including the last <w:fldSimple>
+        # (plus any trailing bookmark markers) as an untouchable header
+        # keeps that span exactly as it was built.
         header_end = 0
         for i, child in enumerate(para._p):
             if child.tag == qn('w:fldSimple'):
