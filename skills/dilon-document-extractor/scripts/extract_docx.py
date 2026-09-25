@@ -64,23 +64,20 @@ def is_suspicious_heading_text(text):
 
 DILON_STEP_HEADING_STYLE = "Dilon Step Heading"
 # 'Dilon Step Heading' is this compiler's own paragraph style for
-# @@@STEPS@@@ items (see build_step_number_field()/add_field_simple_run()
-# in dilon-document-compiler's step_numbering.py) - a real source document
-# using it (e.g. WI-00077/WI-00088) was therefore compiled by this same
-# pipeline at some point in its history. Each step's visible number is a
-# live 'STYLEREF 3 \\s' + '.' + 'SEQ DilonStep \\* ARABIC \\s 3' field
-# pair, not typed text - python-docx's .text reads a field's last-cached
-# *display* result, not a recalculated value, so if that cache was never
-# refreshed (e.g. the .docx was archived without Word ever reopening and
-# recalculating it), every step reads back whatever its field showed at
-# insertion time. Real WI-00077 confirms this exactly: all 77 steps cache
-# "1.1", regardless of their actual position. Either side of the "." can
-# also cache as empty rather than a digit (real WI-00088's STYLEREF-3
-# cached blank, so its 77 steps all read bare "." instead of "1.1") - the
-# pattern below accepts digits/dots/nothing before the tab so both shapes
-# strip cleanly. This stale text must be stripped rather than kept, so it
-# doesn't collide with the fresh live numbering the compiler regenerates
-# on the next compile.
+# @@@STEPS@@@ items, so a source document using it was compiled by this
+# same pipeline at some point. Two generations exist:
+#
+# - Since 2026-09 (step_numbering.py's link_steps_to_heading_numbering()):
+#   the step is a native Word list item on the heading list. Its number is
+#   Word's list label, not paragraph text, so .text is just the step text.
+#   Steps a user added in Word (Enter) or demoted (Tab) look the same.
+# - Before 2026-09: the number was a live 'STYLEREF 3 \\s' + '.' +
+#   'SEQ DilonStep \\* ARABIC \\s 3' field pair ahead of the text.
+#   python-docx's .text reads a field's last-cached display result, which
+#   can be stale: real WI-00077 caches "1.1" on all 77 steps, and real
+#   WI-00088's STYLEREF cached blank, so its steps read bare ".". The
+#   pattern below accepts digits/dots/nothing before the tab so both
+#   shapes strip cleanly; it is a no-op on the newer generation.
 STALE_STEP_NUMBER_RE = re.compile(r'^[\d.]*\t+')
 
 
@@ -972,8 +969,8 @@ def build_markdown_body(doc, blocks, shift, images_dir, front_matter):
         # something a human actually needs to check.
         warnings.append(
             f"{dilon_step_heading_count} '{DILON_STEP_HEADING_STYLE}'-styled paragraph(s) "
-            "converted to @@@STEPS@@@ items (stale leading step-numbers stripped) - "
-            "spot-check a sample for correctness"
+            "converted to @@@STEPS@@@ items (stale field-based step numbers from pre-2026-09 "
+            "compiles stripped, if present) - spot-check a sample for correctness"
         )
     return "\n".join(lines).strip() + "\n", warnings
 

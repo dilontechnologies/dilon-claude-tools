@@ -1087,6 +1087,72 @@ def test_build_markdown_body_dilon_step_heading_warns_once_with_count():
     check("3" in step_warnings[0] if step_warnings else False, f"summary warning states the count, got {step_warnings}")
 
 
+def test_build_markdown_body_dilon_step_heading_with_native_numbering_any_level():
+    """Steps compiled since 2026-09 are 'Dilon Step Heading' paragraphs
+    carrying native list numbering (numPr) and no typed number - including
+    ones a user added in Word by pressing Enter, or demoted with Tab (a
+    deeper ilvl). All must extract as #. steps inside @@@STEPS@@@, never
+    as plain '-' list items and never dropped."""
+    import extract_docx as ex
+    from docx.oxml import OxmlElement
+    doc = Document()
+    doc.styles.add_style("Dilon Step Heading", WD_STYLE_TYPE.PARAGRAPH)
+    doc.add_paragraph("Mixing Epoxy", style="Heading 3")
+    for text, ilvl in [("Blend the two components.", "2"), ("Added in Word with Enter.", "2"), ("Demoted with Tab.", "3")]:
+        para = doc.add_paragraph(text, style="Dilon Step Heading")
+        num_pr = OxmlElement("w:numPr")
+        ilvl_el = OxmlElement("w:ilvl")
+        ilvl_el.set(qn("w:val"), ilvl)
+        num_id_el = OxmlElement("w:numId")
+        num_id_el.set(qn("w:val"), "1")
+        num_pr.append(ilvl_el)
+        num_pr.append(num_id_el)
+        para._p.get_or_add_pPr().append(num_pr)
+
+    blocks = list(ex.iter_block_items(doc))
+    body, warnings = ex.build_markdown_body(doc, blocks, 1, TEST_OUTPUT_DIR, {"revisions": []})
+
+    check(body.count("@@@STEPS@@@") == 1, "natively numbered steps form one @@@STEPS@@@ block")
+    for text in ["Blend the two components.", "Added in Word with Enter.", "Demoted with Tab."]:
+        check(f"#. {text}" in body, f"step {text!r} extracted as a #. item")
+    check("- Blend" not in body, "a natively numbered step is not mistaken for a plain list item")
+
+
+def test_extract_round_trip_of_compiled_steps():
+    """Compile a steps document with the real compiler, then extract it:
+    the steps come back as a @@@STEPS@@@ block with clean text."""
+    import extract_docx as ex
+    compiler_script = REPO_ROOT / "skills" / "dilon-document-compiler" / "scripts" / "generate_dilon_doc.py"
+    base_template = REPO_ROOT / "templates" / "TEMPLATE_Word_Base.docx"
+    TEST_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    source_md = TEST_OUTPUT_DIR / "round_trip_steps.md"
+    compiled = TEST_OUTPUT_DIR / "round_trip_steps.docx"
+    source_md.write_text(
+        '---\ntitle: "Round Trip"\nauthor: "Test"\ndepartment: "Eng"\ndoc_number: "WI-99999"\n'
+        'current_revision: "00"\ndepartment_head: "Head"\n'
+        'signature_fields:\n  - department: "Quality"\n    name: "Test QA"\n'
+        'revisions:\n  - number: "00"\n    description: "Initial"\n    eco_number: "ECO-0"\n    eco_date: "01-01-2026"\n'
+        '---\n\n## Assembly\n\n### Cleaning Procedure\n\n@@@STEPS@@@\n\n'
+        '#. Wear clean gloves.\n#. Hold the board by the edges.\n\n@@@END_STEPS@@@\n',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(compiler_script), str(source_md), str(compiled), str(base_template)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    check(result.returncode == 0, "round-trip source compiles")
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        return
+
+    out = ex.extract(compiled, TEST_OUTPUT_DIR / "round_trip_steps_extracted")
+    body = Path(out["markdown_path"]).read_text(encoding="utf-8")
+    check("@@@STEPS@@@" in body and "@@@END_STEPS@@@" in body, "compiled steps re-extract inside a @@@STEPS@@@ block")
+    check("#. Wear clean gloves." in body and "#. Hold the board by the edges." in body,
+          "each step re-extracts as a clean #. item with no stray number text")
+
+
 def test_slugify_dedup():
     import extract_docx as ex
     seen = set()
@@ -1617,6 +1683,8 @@ def main():
     test_strip_stale_step_number_handles_blank_cached_styleref()
     test_build_markdown_body_dilon_step_heading_run_closes_at_next_heading()
     test_build_markdown_body_dilon_step_heading_warns_once_with_count()
+    test_build_markdown_body_dilon_step_heading_with_native_numbering_any_level()
+    test_extract_round_trip_of_compiled_steps()
     test_extract_flags_footer_revision_eco_mismatch()
     test_extract_no_warning_when_footer_matches_revision()
     test_extract_current_revision_corrected_from_stale_header_suffix()
