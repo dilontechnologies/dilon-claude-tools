@@ -16,7 +16,7 @@ step when a user presses Enter after one. Two passes:
   paragraph-level numIds into a copied, separate list.
 
 Design: docs/superpowers/specs/2026-09-25-steps-native-list-numbering-design.md
-(gitignored; see git history of this file for the rationale if absent).
+(deleted from the tree once executed - recover it from git history).
 """
 
 import sys

@@ -30,8 +30,5 @@ __pycache__/
 # Local configuration files
 *.local.*
 
-# Brainstorming specs (not committed)
-docs/superpowers/
-
 # Git worktrees
 .worktrees/
